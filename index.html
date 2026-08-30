@@ -238,14 +238,15 @@
       .pb-safe {
         padding-bottom: var(--safe-bottom);
       }
-      /* NoxHome 页签切换过渡：淡入 + 轻微上移。旧 animate-in/fade-in 类来自未安装的 tailwindcss-animate
-         插件，从未生效；这里换成自写 keyframe，页签内容用 key 重挂载触发。 */
+      /* NoxHome 页签切换过渡（2026-08-31 换成原版方案）：只动 opacity，不做 translate——
+         translate 会把整棵页面树（背景图/玻璃卡/头像全在里面）拖着重绘，手机上很卡。
+         与 PhoneShell 的 appEnterFade 同款：200ms ease-out both，key 重挂载触发。 */
       @keyframes noxhome-tab-in {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
+        from { opacity: 0; }
+        to { opacity: 1; }
       }
       .noxhome-tab-in {
-        animation: noxhome-tab-in 0.26s ease-out;
+        animation: noxhome-tab-in 200ms ease-out both;
       }
       /* 软键盘弹出时（iosStandalone 在 body 上挂 .ios-keyboard-open），收掉底部给 home 条留的 safe 间隙，
          让聊天输入栏直接贴住键盘：① 外壳容器不再把底边钉在 safe 上方，铺到可视区底；② 输入栏收掉自己的 pb-safe 白条。

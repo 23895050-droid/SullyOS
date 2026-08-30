@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   __resetAssistantForTest, __reloadAssistantForTest, getAssistant, appendAssistantMessages,
   ensureAssistantSession, newAssistantSession, switchAssistantSession, deleteAssistantSession,
-  clearAssistantMessages, type AssistantMsg,
+  clearAssistantMessages, addAssistantFavorite, renameAssistantFavorite, updateAssistantFavoriteCss,
+  deleteAssistantFavorite, buildFavoritesExportText, type AssistantMsg,
 } from './beautyAssistantStore';
 
 const msg = (id: string, role: 'user' | 'assistant', content: string): AssistantMsg =>
@@ -93,5 +94,36 @@ describe('任务存档', () => {
     const s = getAssistant();
     expect(s.messages.map((m) => m.id)).toEqual(['u1']); // 任务二的没了
     expect(s.sessions).toHaveLength(2); // 任务本身都还在
+  });
+});
+
+// ── 收藏夹自由编辑（2026-08-31 她要求：点开单独看代码、自由输入保存）──
+describe('收藏夹', () => {
+  it('新增返回完整对象，id 唯一，可立刻拿到并展开', () => {
+    const a = addAssistantFavorite('片段 1', '.a { color: red; }');
+    const b = addAssistantFavorite('片段 2', '');
+    expect(a.id).not.toBe(b.id);
+    expect(getAssistant().favorites).toHaveLength(2);
+    expect(getAssistant().favorites[0]).toEqual({ ...a, at: expect.any(String) });
+  });
+
+  it('代码区自由编辑保存：updateAssistantFavoriteCss 只改内容不改别的', () => {
+    const a = addAssistantFavorite('片段 1', '.a { color: red; }');
+    updateAssistantFavoriteCss(a.id, '.a { color: blue; }\n.b { margin: 0; }');
+    const f = getAssistant().favorites[0];
+    expect(f.css).toBe('.a { color: blue; }\n.b { margin: 0; }');
+    expect(f.name).toBe('片段 1');
+    expect(f.at).toBe(a.at);
+  });
+
+  it('重命名空串保留原名；删除后导出不含它', () => {
+    const a = addAssistantFavorite('片段 1', '.a{}');
+    addAssistantFavorite('片段 2', '.b{}');
+    renameAssistantFavorite(a.id, '   ');
+    expect(getAssistant().favorites[0].name).toBe('片段 1');
+    deleteAssistantFavorite(a.id);
+    const text = buildFavoritesExportText();
+    expect(text).not.toContain('.a{}');
+    expect(text).toContain('.b{}');
   });
 });

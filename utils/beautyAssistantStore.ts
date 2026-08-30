@@ -301,18 +301,25 @@ export const resetAssistantTheme = () =>
 export const saveAssistantCssSelf = (css: string) =>
   patch((s) => ({ ...s, cssSelf: css, updatedAt: isoNow() }));
 
-/** 收藏夹（CSS 片段）：id 缺省自动生成 */
-export const addAssistantFavorite = (name: string, css: string) =>
-  patch((s) => ({
-    ...s,
-    favorites: [...s.favorites, { id: `fav-${Date.now()}`, name: name.trim() || `片段 ${s.favorites.length + 1}`, css, at: isoNow() }],
-    updatedAt: isoNow(),
-  }));
+/** 收藏夹（CSS 片段）：id 自动生成；返回新建对象方便 UI 直接展开它 */
+export const addAssistantFavorite = (name: string, css: string): AssistantFavorite => {
+  const fav: AssistantFavorite = { id: `fav-${uidLocal()}`, name: name.trim() || `片段 ${state.favorites.length + 1}`, css, at: isoNow() };
+  patch((s) => ({ ...s, favorites: [...s.favorites, fav], updatedAt: isoNow() }));
+  return fav;
+};
 
 export const renameAssistantFavorite = (id: string, name: string) =>
   patch((s) => ({
     ...s,
     favorites: s.favorites.map((f) => (f.id === id ? { ...f, name: name.trim() || f.name } : f)),
+    updatedAt: isoNow(),
+  }));
+
+/** 收藏夹内容自由编辑保存（2026-08-31 她要求）：代码区可自由输入 */
+export const updateAssistantFavoriteCss = (id: string, css: string) =>
+  patch((s) => ({
+    ...s,
+    favorites: s.favorites.map((f) => (f.id === id ? { ...f, css } : f)),
     updatedAt: isoNow(),
   }));
 

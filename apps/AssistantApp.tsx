@@ -9,7 +9,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, GearSix, PaperPlaneTilt, Copy, PaintBrush, Trash, Plus, PencilSimple,
-  ImageSquare, BookmarkSimple, DownloadSimple, X, CaretDown, CheckSquare, FolderSimple,
+  ImageSquare, BookmarkSimple, DownloadSimple, X, CaretDown, CheckSquare, FolderSimple, Stop,
 } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
 import { getPrompt, savePrompt, resetPrompt, isPromptOverridden, getPromptEntries } from '../utils/promptRegistry';
@@ -21,7 +21,7 @@ import {
   useAssistant, getAssistant, appendAssistantMessages, editAssistantMessage, deleteAssistantMessage,
   deleteAssistantMessages, clearAssistantMessages, saveAssistantApi, saveAssistantProfile,
   saveAssistantTheme, resetAssistantTheme, saveAssistantCssSelf,
-  addAssistantFavorite, renameAssistantFavorite, deleteAssistantFavorite, buildFavoritesExportText,
+  addAssistantFavorite, renameAssistantFavorite, updateAssistantFavoriteCss, deleteAssistantFavorite, buildFavoritesExportText,
   ensureAssistantSession, newAssistantSession, switchAssistantSession, deleteAssistantSession,
   type AssistantMsg,
 } from '../utils/beautyAssistantStore';
@@ -151,6 +151,9 @@ const AssistantApp: React.FC = () => {
   const [cssDraft, setCssDraft] = useState('');
   const [favNameDraft, setFavNameDraft] = useState('');
   const [favTarget, setFavTarget] = useState<string | null>(null); // 待收藏的 css
+  // 收藏夹展开编辑（2026-08-31 她要求）：点开单独看代码，自由输入保存
+  const [favOpenId, setFavOpenId] = useState<string | null>(null);
+  const [favDraft, setFavDraft] = useState({ name: '', css: '' });
   const [profileForm, setProfileForm] = useState({ name: store.name, persona: store.persona });
   const [apiForm, setApiForm] = useState({ baseUrl: store.api?.baseUrl ?? '', apiKey: store.api?.apiKey ?? '', model: store.api?.model ?? '' });
   const [apiPresetId, setApiPresetId] = useState<string | null>(null);
@@ -226,10 +229,24 @@ const AssistantApp: React.FC = () => {
 
   const copyText = async (t: string) => {
     try {
-      await navigator.clipboard.writeText(t);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(t);
+      } else {
+        // 手机局域网 http 预览不是 secure context，clipboard API 不可用 → 老式 execCommand 兜底
+        const ta = document.createElement('textarea');
+        ta.value = t;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (!ok) throw new Error('execCommand failed');
+      }
       addToast('已复制', 'info');
     } catch {
-      addToast('复制失败', 'error');
+      addToast('复制失败，请长按文字手动复制', 'error');
     }
   };
 
@@ -267,7 +284,8 @@ const AssistantApp: React.FC = () => {
     return [
       `你是${store.name}，${userName}的私人小助手。\n${store.persona}`,
       `【当前工作】${moduleInfo.label} · ${pageInfo.label}（${pageInfo.desc}）\n${focus}`,
-      '【交付规矩】回复 = 一两句说明 + 一个完整可直接应用的 ```css 代码块；不要只给思路不给代码；代码里不要省略号、不要「其它样式不变」这类注释占位；最后一行用注释简述这次改了哪里（如 /* 改：气泡圆角 16px，主色换暖棕 */）。',
+      '【交付规矩】回复 = 一两句说明 + 一个完整可直接应用的 ```css 代码块；不要只给思路不给代码；代码里不要省略号、不要「其它样式不变」这类注释占位；最后一行用注释简述这次改了哪里（如 /* 改：气泡圆角 16px，主色换暖棕 */）。\n' +
+      '【CSS 铁律】不要写 position:fixed / position:sticky；不要写 z-index（会把设置、收藏夹等弹窗卡片盖住）；只改已有元素的外观，不新增覆盖层或浮层。改顶栏时只调整已有元素（返回钮、头像、名字、状态 chip、齿轮）的间距/颜色/字号，保持一行排齐，不重排位置。',
       `【这份工作的知识与工具】\n${pagePrompt}${cssState}`,
     ].join('\n\n');
   };
@@ -317,6 +335,9 @@ const AssistantApp: React.FC = () => {
     abortRef.current = abort;
 
     void (async () => {
+      // buffer/fullContent 在 try 外面声明：手动停止（AbortError）时 catch 要拿 fullContent 落半截消息
+      let buffer = '';
+      let fullContent = '';
       try {
         const baseUrl = String(api.baseUrl).replace(/\/+$/, '');
         const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -333,8 +354,6 @@ const AssistantApp: React.FC = () => {
         const reader = res.body?.getReader();
         if (!reader) throw new Error('No response body');
         const decoder = new TextDecoder();
-        let buffer = '';
-        let fullContent = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -359,7 +378,14 @@ const AssistantApp: React.FC = () => {
         const assistantMsg: AssistantMsg = { id: `as-${Date.now()}-a`, role: 'assistant', content: fullContent.trim(), at: new Date().toISOString() };
         appendAssistantMessages([assistantMsg]);
       } catch (e: any) {
-        if (e?.name !== 'AbortError') {
+        if (e?.name === 'AbortError') {
+          // 手动停止：已经流出来的内容别白写，保留成一条消息
+          if (fullContent.trim()) {
+            const partialMsg: AssistantMsg = { id: `as-${Date.now()}-a`, role: 'assistant', content: fullContent.trim(), at: new Date().toISOString() };
+            appendAssistantMessages([partialMsg]);
+          }
+          addToast('已停止', 'info');
+        } else {
           addToast(`小助手出错了：${e?.message || '网络错误'}`, 'error');
         }
       } finally {
@@ -481,6 +507,11 @@ const AssistantApp: React.FC = () => {
   return (
     <div className="as-app absolute inset-0 flex flex-col overflow-hidden"
       style={{ background: `linear-gradient(180deg, #ffffff 0%, ${colors.bg} 45%, ${colors.bgDeep} 100%)` }}>
+
+      {/* 页面主体整体隔离（2026-08-31 修「顶框挡弹窗」）：isolation 造独立堆叠上下文——
+          他写的 CSS 不管给顶栏/气泡加多高的 z-index 或 fixed，都被关在这层里，
+          盖不到外面作为兄弟节点的设置/收藏等弹窗卡片（z-40）。 */}
+      <div className="min-h-0 flex-1 flex flex-col" style={{ isolation: 'isolate' }}>
 
       {/* Header（安全区自理：--chrome-top 覆盖状态栏，见 utils/safeAreaApps.ts 名单） */}
       <div className="as-header shrink-0 relative z-20"
@@ -697,14 +728,15 @@ const AssistantApp: React.FC = () => {
               style={{ color: colors.text, background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(201,106,142,0.18)' }}
             />
             <button
-              onClick={() => send()}
-              disabled={busy}
-              className="as-send-btn w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50"
-              style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`, color: '#fff', boxShadow: '0 3px 12px rgba(201,106,142,0.3)' }}
-              aria-label="发送"
+              onClick={() => { if (busy) { abortRef.current?.abort(); } else { send(); } }}
+              className="as-send-btn w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90"
+              style={busy
+                ? { background: 'rgba(255,255,255,0.85)', color: '#e05b6e', border: '1.5px solid rgba(224,91,110,0.5)' }
+                : { background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`, color: '#fff', boxShadow: '0 3px 12px rgba(201,106,142,0.3)' }}
+              aria-label={busy ? '停止' : '发送'}
             >
               {busy ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <Stop size={16} weight="fill" />
               ) : (
                 <PaperPlaneTilt size={16} weight="fill" />
               )}
@@ -715,6 +747,8 @@ const AssistantApp: React.FC = () => {
           </div>
         </div>
       )}
+
+      </div>{/* 页面主体隔离层结束——下面的弹窗是它的兄弟节点，永远盖在页面上方 */}
 
       {/* 白框 CSS 编辑弹层（2026-08-30：对标主聊天「白框自定义」——底部白卡，边写边生效） */}
       {showCssEditor && (
@@ -762,43 +796,119 @@ const AssistantApp: React.FC = () => {
         </div>
       )}
 
-      {/* 收藏夹弹层：重命名 / 删除 / 导出 txt */}
+      {/* 收藏夹弹层（2026-08-31 她要求改）：点开单独看代码，代码区自由输入保存 */}
       {showFavs && (
         <div className="absolute inset-0 z-40 flex items-center justify-center px-6" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowFavs(false)}>
-          <div className="w-full max-w-[320px] rounded-2xl p-4 space-y-2 max-h-[70%] flex flex-col"
+          <div className="w-full max-w-[340px] rounded-2xl p-4 space-y-2 max-h-[75%] flex flex-col"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <div className="text-[12px] font-semibold" style={{ color: colors.text }}>收藏夹</div>
-              <button
-                onClick={exportFavorites}
-                className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-semibold text-white border-0 cursor-pointer"
-                style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
-              >
-                <DownloadSimple size={10} /> 导出 txt
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    const added = addAssistantFavorite(`片段 ${store.favorites.length + 1}`, '');
+                    setFavOpenId(added.id);
+                    setFavDraft({ name: added.name, css: '' });
+                    addToast('新片段已建，写点内容吧', 'info');
+                  }}
+                  className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-semibold border-0 cursor-pointer"
+                  style={{ color: colors.primary, border: '1px solid rgba(201,106,142,0.25)' }}
+                >
+                  <Plus size={10} weight="bold" /> 新增
+                </button>
+                <button
+                  onClick={exportFavorites}
+                  className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-semibold text-white border-0 cursor-pointer"
+                  style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
+                >
+                  <DownloadSimple size={10} /> 导出 txt
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto space-y-1.5">
               {store.favorites.length === 0 ? (
-                <div className="py-6 text-center text-[10px] italic" style={{ color: colors.faint }}>还没有收藏的片段</div>
+                <div className="py-6 text-center text-[10px] italic" style={{ color: colors.faint }}>
+                  还没有收藏的片段<br />点右上角「新增」写一个，或在回复的代码块上点「收藏」
+                </div>
               ) : (
-                store.favorites.map((f) => (
-                  <div key={f.id} className="rounded-xl px-3 py-2 flex items-center gap-2"
-                    style={{ background: 'rgba(201,106,142,0.05)', border: '1px solid rgba(201,106,142,0.12)' }}>
-                    <input
-                      value={f.name}
-                      onChange={(e) => renameAssistantFavorite(f.id, e.target.value)}
-                      className="flex-1 min-w-0 bg-transparent outline-none text-[11px] font-medium"
-                      style={{ color: colors.text }}
-                    />
-                    <button onClick={() => void copyText(f.css)} className="p-1 rounded-full transition-all active:scale-90" style={{ color: colors.primary }} aria-label="复制">
-                      <Copy size={13} />
-                    </button>
-                    <button onClick={() => deleteAssistantFavorite(f.id)} className="p-1 rounded-full transition-all active:scale-90" style={{ color: '#e05b6e' }} aria-label="删除">
-                      <Trash size={13} />
-                    </button>
-                  </div>
-                ))
+                store.favorites.map((f) => {
+                  const open = favOpenId === f.id;
+                  const preview = f.css.trim() ? f.css.trim().split('\n')[0].slice(0, 40) : '';
+                  return (
+                    <div key={f.id} className="rounded-xl overflow-hidden"
+                      style={{ background: 'rgba(201,106,142,0.05)', border: `1px solid ${open ? 'rgba(201,106,142,0.32)' : 'rgba(201,106,142,0.12)'}` }}>
+                      {/* 收起行：点一下展开看代码 */}
+                      <div
+                        className="px-3 py-2 flex items-center gap-2 cursor-pointer"
+                        onClick={() => {
+                          if (open) { setFavOpenId(null); } else { setFavOpenId(f.id); setFavDraft({ name: f.name, css: f.css }); }
+                        }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-semibold truncate" style={{ color: colors.text }}>{f.name}</div>
+                          <div className="text-[9px] truncate" style={{ color: colors.faint }}>
+                            {preview || '（空片段，点开写内容）'}
+                          </div>
+                        </div>
+                        <CaretDown
+                          size={12}
+                          style={{ color: colors.muted, transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s ease' }}
+                        />
+                      </div>
+                      {/* 展开：自由编辑 + 保存 / 复制 / 删除 */}
+                      {open && (
+                        <div className="px-3 pb-2.5 space-y-1.5">
+                          <input
+                            value={favDraft.name}
+                            onChange={(e) => setFavDraft((d) => ({ ...d, name: e.target.value }))}
+                            placeholder="片段名"
+                            className="w-full rounded-lg px-2.5 py-1.5 outline-none text-[11px] font-medium"
+                            style={{ color: colors.text, background: 'rgba(255,255,255,0.8)', border: '1px solid rgba(201,106,142,0.18)' }}
+                          />
+                          <textarea
+                            value={favDraft.css}
+                            onChange={(e) => setFavDraft((d) => ({ ...d, css: e.target.value }))}
+                            rows={7}
+                            placeholder="在这里自由写 / 粘贴 CSS"
+                            className="w-full rounded-lg px-2.5 py-2 outline-none text-[10px] leading-relaxed"
+                            style={{
+                              fontFamily: "'SF Mono','Cascadia Code',Consolas,monospace", color: colors.text,
+                              background: 'rgba(255,255,255,0.8)', border: '1px solid rgba(201,106,142,0.18)', resize: 'vertical',
+                            }}
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                renameAssistantFavorite(f.id, favDraft.name);
+                                updateAssistantFavoriteCss(f.id, favDraft.css);
+                                addToast('已保存', 'success');
+                              }}
+                              className="flex-1 py-1.5 rounded-full text-[10px] font-semibold text-white border-0 cursor-pointer"
+                              style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
+                            >
+                              保存
+                            </button>
+                            <button
+                              onClick={() => void copyText(favDraft.css)}
+                              className="flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[10px] border-0 cursor-pointer"
+                              style={{ color: colors.primary, border: '1px solid rgba(201,106,142,0.25)' }}
+                            >
+                              <Copy size={11} /> 复制
+                            </button>
+                            <button
+                              onClick={() => { deleteAssistantFavorite(f.id); setFavOpenId(null); }}
+                              className="flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[10px] border-0 cursor-pointer"
+                              style={{ color: '#e05b6e', border: '1px solid rgba(224,91,110,0.35)' }}
+                            >
+                              <Trash size={11} /> 删除
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
             <button onClick={() => setShowFavs(false)} className="w-full py-1.5 text-[10px] border-0 cursor-pointer" style={{ color: colors.faint }}>
