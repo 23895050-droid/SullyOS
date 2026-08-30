@@ -27,6 +27,7 @@ import ActiveMsgGlobalSettingsModal from '../components/settings/ActiveMsgGlobal
 import { syncAmsgLlmCredentials, syncAmsgToolConfig, syncAmsgToolConfigAndPrompts } from '../utils/amsgStateSync';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import VersionInfo from '../components/settings/VersionInfo';
+import ImageGenSettings from '../components/settings/ImageGenSettings';
 import { LoyalUserRecruitmentController } from '../components/LoyalUserRecruitmentEvent';
 import { isPushVapidReady } from '../utils/pushVapid';
 import ApiCallLogModal from '../components/settings/ApiCallLogModal';
@@ -3028,7 +3029,8 @@ const Settings: React.FC = () => {
         </SettingsSection>
         )}
 
-        <VersionInfo />
+        <ImageGenSettings />
+      <VersionInfo />
 
         {/* QQ 小群入口不主动曝光：接近水印，仅在 hover / 键盘聚焦 / 按住时略微显现。 */}
         <button

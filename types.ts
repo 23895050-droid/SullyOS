@@ -38,6 +38,56 @@ export enum AppID {
   VRWorld = 'vrworld', // 彼方 — 角色自主登入的虚拟世界（定时驱动，房间里看小说/听歌/留言，产出活动卡注入聊天+记忆）
   CharCreatorDev = 'char_creator_dev', // 捏脸系统开发模式 — 仅开发模式可见，向捏人器指定类目追加自定义部件
   WorldHome = 'world_home', // 家园 — 同世界观多角色共同生活的大世界（观测驱动演绎，每角色独立 LLM 调用 + NPC 世界引擎）
+  ImageGen = 'image_gen', // 生图相机 — AI 图片生成
+  ImageReceipts = 'image_receipts', // 近期接收 — 独立原图备份站
+  Album = 'album', // 我的相册 — 留档卡片 + 原图备份 + 角色相册
+  NoxHome = 'nox_home', // Nox 的单间 — 我的家主页（Angelica 设计，底图蒙版 + 玻璃卡片）
+  Assistant = 'assistant', // 小助手 — 工作向小 AI（专属 API 槽，大 max_tokens；当前工作是美化预设，以后可能做别的活）
+}
+
+// ── Image Generation ──
+
+export type ImageGenReferenceMode = 'none' | 'face_lock' | 'style_ref' | 'image_pad';
+
+export interface ImageGenPreset {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
+export interface ImageGenerationSettings {
+  enabled: boolean;
+  requestMode: 'direct';  // 浏览器直连（以后可扩展 Worker 代理）
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  size: string;
+  quality: string;
+  /** 日常分享（非自拍）默认尺寸，空=跟随全局 size。常用：1792x1024（16:9） */
+  landscapeSize: string;
+  /** 自拍/锁脸默认尺寸，空=跟随全局 size。常用：1024x1024（1:1） */
+  selfieSize: string;
+  presets: ImageGenPreset[];
+  defaultPresetId: string | null;
+  /** [photo:selfie:...] 自拍时默认使用的前缀预设 id，空=使用 defaultPresetId */
+  defaultSelfiePresetId: string | null;
+  // 相机活动同步到聊天上下文
+  syncCameraToChat: boolean;
+  // 提示词生成（a4）用的小模型配置
+  promptGenApiKey: string;
+  promptGenBaseUrl: string;
+  promptGenModel: string;
+}
+
+/** 近期接收 — 独立原图备份站。生图成功时自动写入，与聊天消息解耦，各删各的。 */
+export interface ImageReceipt {
+  id: string;           // 同 blobRef 的 id（img_xxx）
+  blobRef: string;      // blobref:xxx 令牌
+  charId: string;
+  description: string;  // 生图描述
+  timestamp: number;
+  mimeType: string;
+  isSelfie: boolean;
 }
 
 export interface SystemLog {
@@ -89,6 +139,20 @@ export interface ScheduleCardAppearance {
   customCss?: string;
 }
 
+export type JournalAppearancePresetId =
+  | 'original'
+  | 'letterpress'
+  | 'sakura'
+  | 'forest'
+  | 'midnight';
+
+/** 交换日记纸张皮肤。 */
+export interface JournalAppearance {
+  preset?: JournalAppearancePresetId;
+  /** 仅允许 .sully-journal-* 作用域，避免样式影响其它 App。 */
+  customCss?: string;
+}
+
 export interface OSTheme {
   hue: number;
   saturation: number;
@@ -118,6 +182,8 @@ export interface OSTheme {
   nowPlayingWidgetLight?: boolean;
   /** 日程卡片统一皮肤：桌面、全屏、房间与聊天内同步。 */
   scheduleCardAppearance?: ScheduleCardAppearance;
+  /** 交换日记纸张皮肤。 */
+  journalAppearance?: JournalAppearance;
   desktopDecorations?: DesktopDecoration[];
   customFont?: string;
   /** 顶部时间栏布局：安全显示（安全区下方）/ 紧凑显示（嵌入安全区）/ 完全隐藏。 */
@@ -2649,6 +2715,8 @@ export interface CharacterProfile {
    */
   htmlModeEnabled?: boolean;
   htmlModeCustomPrompt?: string;
+  /** 可选：在日常 ChatApp 注入任务优先的协同工作规则。提示词较长，默认关闭。 */
+  chatCollaborationEnabled?: boolean;
   /** 该角色专属的聊天「白框」自定义 CSS（叠加在全局 osTheme.chatChromeCustomCss 之上）。 */
   chromeCustomCss?: string;
   /** 白框「提示音」：仅当 ta 新发的消息成为会话最后一条时播放一次。src 可为内置音效 key / 音频直链 / 上传后内联的 data:audio。
@@ -2704,6 +2772,11 @@ export interface CharacterProfile {
    * 独立于 proactiveConfig（主动发消息），互不挤占触发。
    */
   vrState?: VRWorldCharState;
+
+  /** 角色外貌描述：生图时拼入 prompt 用于锁脸（如"黑色短发，单眼皮，高鼻梁…"） */
+  appearanceDescription?: string;
+  /** 角色参考图：blobref 令牌，指向 blob_assets 中存储的图片 Blob。生图锁脸模式时作为 reference_image 传给 edits endpoint */
+  referenceImageAssetId?: string;
 }
 
 /**
@@ -3379,7 +3452,7 @@ export interface GameSession {
     lastPlayedAt: number;
 }
 
-export type MessageType = 'text' | 'image' | 'emoji' | 'voice' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
+export type MessageType = 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'music_invite' | 'music_accept' | 'music_summary' | 'music_chat_summary' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
 
 export interface Message {
     id: number;
@@ -3584,6 +3657,21 @@ export interface FullBackupData {
     hotNewsSnapshots?: HotNewsSnapshot[];
     dreamCollection?: Record<string, { firstAt: number; count: number }>;  // 梦境盲盒收藏册（os_dream_collection，账号级 localStorage）
     gotchiAccentHue?: string;  // 桌面电子宠物主题主色调偏好（tama_accent_hue，账号级 localStorage）
+
+    // 独立协同工作数据库。二进制文件放在 ZIP 的 collaboration/assets/，JSON 只存索引。
+    collaborationBackupVersion?: 1;
+    collaborationBackupMode?: 'text_only' | 'media_only' | 'full';
+    collaborationSessions?: any[];
+    collaborationMessages?: any[];
+    collaborationCategories?: any[];
+    collaborationSettings?: any;
+    collaborationAssetIndex?: {
+        id: string;
+        path: string;
+        mimeType: string;
+        size: number;
+        createdAt: number;
+    }[];
 }
 
 // --- CLOUD BACKUP TYPES ---

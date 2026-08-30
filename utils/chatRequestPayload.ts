@@ -27,9 +27,13 @@ import type { MusicCfg, Song, LyricLine, MusicPlaybackSnapshot, RecentTrackChang
 import { isPromptBuildSkipped, isSystemMessageMergeEnabled } from './devDebug';
 import { mergeSystemMessages } from './systemMessageMerge';
 import { injectWorldbookDepthEntries, resolveWorldbookEntries } from './worldbook';
+import { mergedMountedWorldbooks } from './noxhomeMount';
 import { normalizeTranslationLangLabel } from './translationLang';
 import { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
 import { materializeVisionDescriptions } from './visionApi';
+import { buildUserListeningContext } from './musicContextBlock';
+import { getMusicStore } from '../apps/couple/musicStore';
+import { loadCollaborationFileCabinetBlock } from '../features/collaboration/chatLibrary';
 
 export { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
 
@@ -38,6 +42,10 @@ export interface UserListeningContext {
     artists: string;
     lyricWindow: string[];
     activeIdx: number;
+    /** 全量歌词（有轴=全部行；纯文本=原文），开关关掉时为 undefined */
+    fullLyric?: string;
+    /** 彻底没歌词时的热评（2-3 条） */
+    hotComments?: string[];
 }
 
 export interface BuildChatPayloadInput {
@@ -121,37 +129,17 @@ export interface BuildChatPayloadResult {
 }
 
 /**
- * 用 MusicPlaybackSnapshot 算 user 共听上下文 —— 与 useChatAI.ts:636–666 行为一致。
+ * 用 MusicPlaybackSnapshot 算 user 共听上下文 —— 与 useChatAI.ts 行为一致。
+ * 组装逻辑在 utils/musicContextBlock.ts 的 buildUserListeningContext（两处共用），
+ * 窗口半径/全量开关现读调音台（couple_music_v1.lyricInject），改设置下一条消息生效。
  */
 function deriveListeningFromSnapshot(
     snap: MusicPlaybackSnapshot | null | undefined,
     charId: string,
 ): { userListeningContext: UserListeningContext | null; isListeningTogether: boolean; musicCfg?: MusicCfg } {
     if (!snap) return { userListeningContext: null, isListeningTogether: false };
-    const { current, playing, lyric, activeLyricIdx, listeningTogetherWith, cfg } = snap;
-    let userListeningContext: UserListeningContext | null = null;
-    if (current && playing && lyric.length > 0) {
-        const idx = activeLyricIdx;
-        if (idx >= 0) {
-            const from = Math.max(0, idx - 2);
-            const to = Math.min(lyric.length, idx + 2 + 1);
-            const window = lyric.slice(from, to).map((l: LyricLine) => l.text);
-            const activeIdx = idx - from;
-            userListeningContext = {
-                songName: current.name,
-                artists: current.artists,
-                lyricWindow: window,
-                activeIdx,
-            };
-        }
-    } else if (current && playing) {
-        userListeningContext = {
-            songName: current.name,
-            artists: current.artists,
-            lyricWindow: [],
-            activeIdx: -1,
-        };
-    }
+    const { listeningTogetherWith, cfg } = snap;
+    const userListeningContext = buildUserListeningContext(snap, getMusicStore().lyricInject);
     const isListeningTogether = !!(userListeningContext && listeningTogetherWith.includes(charId));
     return { userListeningContext, isListeningTogether, musicCfg: cfg };
 }
@@ -354,14 +342,21 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // ── 8. 剥离历史里旧的双语标签（stripImages 时先压平 image_url → 纯文本占位） ──
     const cleanedApiMessages = cleanApiMessages(input.stripImages ? flattenImageContentParts(apiMessages) : apiMessages);
     const resolvedWorldbookEntries = resolveWorldbookEntries(
-        char.mountedWorldbooks || [],
+        mergedMountedWorldbooks(char),
         cleanedApiMessages,
         char.name,
         userProfile.name,
     );
+    // 歌词窗口块（winPos=4）：照原版世界书位置 4 的语义插进聊天记录指定深度
+    // （depth 默认 4 = 插在倒数第 4 条消息前），与真正的世界书条目走同一通道
     const messagesWithWorldbookDepth = injectWorldbookDepthEntries(
         cleanedApiMessages,
-        resolvedWorldbookEntries.filter(entry => entry.position === 4),
+        [
+            ...resolvedWorldbookEntries.filter(entry => entry.position === 4),
+            ...(parts.lyricWindow
+                ? [{ content: parts.lyricWindow.content, book: { depth: parts.lyricWindow.depth, role: 0 } }]
+                : []),
+        ],
     );
 
     // ── 9. 麦当劳小程序上下文（购物车/菜单实时快照 → 易变尾段） ──
@@ -406,17 +401,28 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     }
 
     // ── 10. recency 钢印归位 + 组装 fullMessages ─────────
+    // 协同工作开启时，把本会话文件柜里可交付的文件标题注入易变尾段（上游同款）。
+    if (char.chatCollaborationEnabled) {
+        volatileTail += await loadCollaborationFileCabinetBlock(
+            char.id,
+            historyMsgsForPrompt,
+            userProfile?.name || '用户',
+        );
+    }
+
     // 「关于对方的表达」+「回到你自己」必须是易变尾段的最后内容：修复旧版把双语/HTML/
     // 思考链/点单块拼在钢印之后、模型开口前最后读到的是格式说明书的问题。
     volatileTail += parts.recencyTail;
 
-    // 结构：[稳定 system] + [历史消息] + [易变状态 system] (+ 末尾 reminder)。
+    // 结构：[稳定 system] (+ [全量歌词 system]) + [历史消息（含世界书位置4条目+歌词窗口块按 depth 插入）] + [易变状态 system] (+ 末尾 reminder)。
     // 稳定前缀不再包含分钟级时间戳等易变内容 → 支持前缀缓存的中转能跨轮命中；
-    // 易变状态贴着生成点注入，时间/情绪/日程反而拿到最强 recency 注意力。
+    // 全量歌词是「角色定义之后」的低注意力参照块，换歌才变，单放一条 system 在历史之前——
+    // 不碰稳定前缀的缓存，也离生成点最远；易变状态贴着生成点注入（时间/宫殿/日程等）。
     // 注意：instant push 的 worker 端情绪评估把 messages[0] 当 system、messages[1..]
     // 展平为对话历史 —— 易变尾段会以「[系统]: …」行出现在历史末尾，信息不丢。
     const fullMessages: Array<{ role: string; content: any }> = [
         { role: 'system', content: systemPrompt },
+        ...(parts.afterChar ? [{ role: 'system' as const, content: parts.afterChar }] : []),
         ...messagesWithWorldbookDepth,
         { role: 'system', content: volatileTail },
     ];

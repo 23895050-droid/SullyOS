@@ -1295,8 +1295,7 @@ const ThemeMaker: React.FC = () => {
                                 </div>
                             </div>
 
-                            {activeTab !== 'css' && (
-                                <div className={`rounded-xl border p-3 ${showLowContrastWarning ? 'border-amber-200 bg-amber-50/80' : 'border-emerald-200 bg-emerald-50/70'}`}>
+                            <div className={`rounded-xl border p-3 ${showLowContrastWarning ? 'border-amber-200 bg-amber-50/80' : 'border-emerald-200 bg-emerald-50/70'}`}>
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div>
                                             <div className="text-[11px] font-semibold text-slate-700">实时可读性评分：{activeContrastScore.grade}（{activeContrastScore.ratio.toFixed(2)}:1）</div>
@@ -1316,7 +1315,6 @@ const ThemeMaker: React.FC = () => {
                                         </div>
                                     )}
                                 </div>
-                            )}
 
                             {/* Colors & Opacity */}
                             <div className="grid grid-cols-2 gap-4">

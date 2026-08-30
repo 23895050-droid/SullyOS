@@ -38,6 +38,8 @@ import ChromeCssEditor from '../components/chat/ChromeCssEditor';
 import ChatInputArea from '../components/chat/ChatInputArea';
 import MemoryRepairPortal from '../components/chat/MemoryRepairPortal';
 import ChatModals from '../components/chat/ChatModals';
+import ImageLightbox from '../components/chat/ImageLightbox';
+import { downloadChatImage } from '../utils/imageDownload';
 import Modal from '../components/os/Modal';
 import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
@@ -47,9 +49,11 @@ import { cleanTextForTts, parseVoiceOutput } from '../utils/minimaxTts';
 import { collectVoiceBatchSubtitle, isPoisonedVoiceSubtitle } from '../utils/voiceSubtitle';
 import { synthesizeSpeechDetailed, characterHasVoice } from '../utils/ttsRouter';
 import { shouldAutoGenerateVoice, shouldAutoPlayGeneratedVoice } from '../utils/voicePlayback';
+import { voiceLanguageAnalyticsValue, voiceLanguagePromptLabel } from '../utils/voiceLanguage';
 import { fetchBlobForShare, shareOrDownloadBlob } from '../utils/shareExport';
 import { resolveMiniMaxApiKey } from '../utils/minimaxApiKey';
 import { resolveFishAudioApiKey, stripFishMarkupForDisplay, cleanTextForTtsFish } from '../utils/fishAudioTts';
+import { CollaborationStore } from '../features/collaboration/store';
 import { resolveTtsProvider } from '../utils/ttsProvider';
 import { isInstantConfigReady, loadInstantConfig } from '../utils/instantPushClient';
 import { resolveActiveSound, playWhiteboxSound, unlockWhiteboxAudio, parseWhiteboxSound, upsertWhiteboxSound, stripWhiteboxSoundDirective, WhiteboxSound } from '../utils/whiteboxSound';
@@ -69,8 +73,34 @@ import {
     resolveContextRangeMode,
     type ContextRangeMode,
 } from '../utils/chatContextRange';
+import {
+    createChatHistoryWindow,
+    expandChatHistoryWindow,
+    type ChatHistoryWindowRange,
+} from '../utils/chatHistoryWindow';
+import type { CollaborationTransferMessage } from '../features/collaboration/types';
+import type { CollaborationInstallableArtifact } from '../features/collaboration/types';
+import {
+    installableToCharacterPatch,
+    installableToChatTheme,
+    installableToThemePatch,
+    installableToWorldbooks,
+    validateInstallableArtifact,
+} from '../features/collaboration/makers';
+import { upsertMountedWorldbooks } from '../utils/worldbook';
 
-const VOICE_LANG_LABELS: Record<string, string> = { en: 'English', ja: '日本語', ko: '한국어', fr: 'Français', es: 'Español' };
+const CollaborationWindow = React.lazy(() => import('../features/collaboration/CollaborationWindow'));
+
+const HISTORY_WINDOW_RADIUS = 25;
+const HISTORY_WINDOW_BATCH_SIZE = 30;
+
+const isVisibleChatMessage = (message: Message, hideSystemLogs = false) => (
+    message.metadata?.source !== 'date'
+    && message.metadata?.source !== 'call'
+    && message.metadata?.source !== 'story_theater_memory'
+    && !message.metadata?.proactiveHint
+    && !(hideSystemLogs && message.role === 'system' && message.type !== 'score_card')
+);
 /** 即时对话那一轮回复「推送陆续到齐」的宽限时间，也就是自动合成的补扫窗口有多长（见下面的 auto-TTS effect）。 */
 const INSTANT_VOICE_SCAN_WINDOW_MS = 30_000;
 type InstantToolUiStatus = {
@@ -82,7 +112,7 @@ type InstantToolUiStatus = {
 };
 
 const Chat: React.FC = () => {
-    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, apiPresets, addApiPreset, closeApp, customThemes, removeCustomTheme, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: osTheme, proactiveComposingChars, openDateWithChar } = useOS();
+    const { characters, activeCharacterId, setActiveCharacterId, addCharacter, updateCharacter, apiConfig, apiPresets, availableModels, addApiPreset, closeApp, customThemes, addCustomTheme, removeCustomTheme, addWorldbook, updateTheme, saveAppearancePreset, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, updateMemoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: osTheme, proactiveComposingChars, openDateWithChar } = useOS();
     const isProactiveComposing = !!(activeCharacterId && proactiveComposingChars[activeCharacterId]);
     const localDateKey = useLocalDateKey();
 
@@ -112,6 +142,8 @@ const Chat: React.FC = () => {
     const WINDOW_RADIUS = 25;
     const [input, setInput] = useState('');
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
+    const [collaborationOpen, setCollaborationOpen] = useState(false);
+    const [collaborationPreviewAssetId, setCollaborationPreviewAssetId] = useState<string | null>(null);
     const [memoryRepairOpen, setMemoryRepairOpen] = useState(false);
     
     // Emoji State
@@ -561,7 +593,7 @@ const Chat: React.FC = () => {
                         spokenText = originalText;
                     }
                     if (voiceLang) {
-                        const langLabel = VOICE_LANG_LABELS[voiceLang] || voiceLang;
+                        const langLabel = voiceLanguagePromptLabel(voiceLang);
                         const translated = await llmTranslate(`Translate the following text to ${langLabel}. Output ONLY the translation, nothing else.`, originalText);
                         if (translated) spokenText = translated;
                     }
@@ -623,6 +655,30 @@ const Chat: React.FC = () => {
             addToast('语音下载失败', 'error');
         }
     };
+
+    // 图片下载（照抄语音下载模式）
+    const handleDownloadImage = useCallback((msg: Message) => {
+        const charName = characters.find(c => c.id === msg.charId)?.name || char?.name;
+        void downloadChatImage(msg, { charName, notify: addToast });
+    }, [characters, char, addToast]);
+
+    // 图片大图预览
+    const [previewMsg, setPreviewMsg] = useState<Message | null>(null);
+    const handlePreviewImage = useCallback((msg: Message) => setPreviewMsg(msg), []);
+
+    // 重roll前编辑提示词
+    const [rerollEditMsg, setRerollEditMsg] = useState<Message | null>(null);
+    const [rerollEditDesc, setRerollEditDesc] = useState('');
+    const openRerollEdit = useCallback((msg: Message) => {
+        setRerollEditMsg(msg);
+        setRerollEditDesc((msg.metadata?.imageGenDescription as string) || '');
+    }, []);
+    const confirmRerollEdit = useCallback(() => {
+        if (rerollEditMsg) {
+            handleRerollImage(rerollEditDesc);
+            setRerollEditMsg(null);
+        }
+    }, [rerollEditMsg, rerollEditDesc]);
 
     // --- Auto-TTS: when chatVoiceEnabled, auto-generate voice when AI uses <语音> tag ---
     // Scans ALL recent assistant messages (not just the last one) because chunkText
@@ -905,9 +961,19 @@ const Chat: React.FC = () => {
         };
         window.addEventListener('instant-tool-status', handler);
         window.addEventListener('active-msg-received', receivedHandler);
+        // 生图标签完成 → 刷新消息列表让生成的图片上屏
+        const photoGenHandler = (e: Event) => {
+            const detail = (e as CustomEvent<{ charId?: string }>).detail;
+            if (detail?.charId && detail.charId !== activeCharIdRef.current) return;
+            DB.getRecentMessagesByCharId(activeCharIdRef.current || '', 200).then(setMessages).catch(() => {});
+        };
+        window.addEventListener('photo-tag-generated', photoGenHandler);
+        window.addEventListener('photo-tag-failed', photoGenHandler);
         return () => {
             window.removeEventListener('instant-tool-status', handler);
             window.removeEventListener('active-msg-received', receivedHandler);
+            window.removeEventListener('photo-tag-generated', photoGenHandler);
+            window.removeEventListener('photo-tag-failed', photoGenHandler);
             if (clearTimer) clearTimeout(clearTimer);
         };
     }, []);
@@ -1371,6 +1437,85 @@ const Chat: React.FC = () => {
         triggerAI(newHistory, undefined, undefined, { skipEmotionInjection: true });
     };
 
+    const handleRerollImage = async (editedDesc?: string) => {
+        if (!selectedMessage || selectedMessage.type !== 'image') return;
+        const originalDesc = selectedMessage.metadata?.imageGenDescription as string | undefined;
+        const desc = editedDesc?.trim() || originalDesc;
+        if (!desc) {
+            addToast('该图片没有可用的生图描述', 'error');
+            return;
+        }
+        const isSelfie = selectedMessage.metadata?.imageGenIsSelfie as boolean | undefined;
+        try {
+            // 先标 pending → UI 显示骨架
+            await DB.updateMessageMetadata(selectedMessage.id, (prev: any) => ({
+                ...prev,
+                imageGenStatus: 'pending',
+                imageGenError: undefined,
+                ...(editedDesc ? { imageGenDescription: editedDesc.trim() } : {}),
+            }));
+            setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+            addToast('正在重新生图…', 'info');
+            // 让出渲染帧，确保 pending 骨架先画出来再开始生图
+            await new Promise(r => requestAnimationFrame(r));
+            const { generateImage } = await import('../utils/imageGenService');
+            const { loadImageGenSettings } = await import('../utils/imageGenStorage');
+            const genSettings = loadImageGenSettings();
+            const presetId = isSelfie
+                ? (genSettings.defaultSelfiePresetId || genSettings.defaultPresetId)
+                : genSettings.defaultPresetId;
+            const presetPrompt = presetId
+                ? (genSettings.presets.find(p => p.id === presetId)?.prompt?.trim() || undefined)
+                : undefined;
+            const sizeOverride = isSelfie
+                ? (genSettings.selfieSize || undefined)
+                : (genSettings.landscapeSize || undefined);
+            const result = await generateImage(desc, {
+                referenceImageAssetId: isSelfie ? char?.referenceImageAssetId : undefined,
+                appearanceDescription: isSelfie ? char?.appearanceDescription : undefined,
+                presetPrompt,
+                settings: sizeOverride ? { ...genSettings, size: sizeOverride } : genSettings,
+            });
+            await DB.updateMessage(selectedMessage.id, result.dataUrl);
+            await DB.updateMessageMetadata(selectedMessage.id, (prev: any) => ({
+                ...prev,
+                imageGenStatus: 'generated',
+                imageGenPrompt: result.prompt,
+                imageGenRevisedPrompt: result.revisedPrompt,
+                imageGenBlobRef: result.blobRef,
+                imageGenMimeType: result.mimeType,
+                imageGenDescription: desc,
+                imageGenUsedReference: result.usedReference,
+                imageGenError: undefined,
+            }));
+            // 写入近期接收（独立备份站）
+            if (result.blobRef) {
+                try {
+                    await DB.saveImageReceipt({
+                        id: result.blobRef.replace('blobref:', ''),
+                        blobRef: result.blobRef,
+                        charId: char.id,
+                        description: desc,
+                        timestamp: Date.now(),
+                        mimeType: result.mimeType || 'image/png',
+                        isSelfie: isSelfie || false,
+                    });
+                } catch { /* 近期接收写入失败不影响主流程 */ }
+            }
+            setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+            addToast('图片已重新生成 ✨', 'success');
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            await DB.updateMessageMetadata(selectedMessage.id, (prev: any) => ({
+                ...prev,
+                imageGenStatus: 'failed',
+                imageGenError: msg,
+            }));
+            setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+            addToast(`重生成失败：${msg}`, 'error');
+        }
+    };
+
     const handleImageSelect = async (file: File) => {
         try {
             const base64 = await processImage(file, { maxWidth: 600, quality: 0.6, forceJpeg: true });
@@ -1387,7 +1532,7 @@ const Chat: React.FC = () => {
         if ([
             'transfer', 'archive', 'settings', 'chrome-css', 'chrome-sound', 'fine-tune',
             'meetup', 'proactive', 'active-msg-2', 'schedule', 'mcd-request', 'luckin-request',
-            'html-mode-toggle', 'html-mode-settings', 'thinking-settings',
+            'html-mode-toggle', 'html-mode-settings', 'thinking-settings', 'favorites', 'collaboration',
             // 独立小功能：点一下就是用了一次，跟「打开某个面板」同一性质。
             // send-emoji / select-category 这些是「挑哪一个」，不进名单。
             'poke', 'emoji-import', 'add-category', 'mcd-end', 'luckin-end',
@@ -1395,6 +1540,7 @@ const Chat: React.FC = () => {
             trackEvent('打开聊天功能面板项', { action: type });
         }
         switch (type) {
+            case 'collaboration': setShowPanel('none'); setCollaborationOpen(true); break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
             case 'transfer': setModalType('transfer'); break;
             case 'poke': handleSendText('[戳一戳]', 'interaction'); break;
@@ -2025,6 +2171,9 @@ const Chat: React.FC = () => {
 
     const restoreAdaptiveContext = () => {
         if (!char.autoArchiveEnabled && !char.contextFollowsMemoryPalaceHwm) return;
+        trackEvent('恢复自适应上下文', {
+            来源: char.autoArchiveEnabled ? '全自动记忆' : '记忆水位线',
+        });
         setSettingsContextRangeMode('adaptive');
         setSettingsContextLimit(500);
         updateCharacter(char.id, {
@@ -2723,6 +2872,215 @@ const Chat: React.FC = () => {
         setSelectedMsgIds(new Set());
     };
 
+    const handleOpenCollaborationFile = useCallback(async (msg: Message) => {
+        const assetId = String(msg.metadata?.collaborationAssetId || '');
+        const fileName = String(msg.metadata?.fileName || '协同文件');
+        if (!assetId) {
+            addToast('这条文件消息缺少原始文件引用', 'error');
+            return;
+        }
+        const isInstallable = msg.metadata?.collaborationAttachmentKind === 'installable'
+            || String(msg.metadata?.mimeType || '').includes('vnd.sullyos.installable');
+        if (isInstallable) {
+            setCollaborationPreviewAssetId(assetId);
+            setCollaborationOpen(true);
+            return;
+        }
+        try {
+            const blob = await CollaborationStore.getAsset(assetId);
+            if (!blob) {
+                addToast('原始文件已不存在，无法打开', 'error');
+                return;
+            }
+            const result = await shareOrDownloadBlob({
+                blob,
+                fileName,
+                shareTitle: `${char?.name || '角色'}发来的文件`,
+                preferDownloadOnWeb: true,
+            });
+            if (result === 'cancelled') return;
+            addToast(result === 'shared' ? '已打开系统保存/分享' : '文件已开始下载', 'success');
+        } catch (error: any) {
+            addToast(error?.message || '文件打开失败', 'error');
+        }
+    }, [addToast, char?.name]);
+
+    const handleCollaborationPreviewHandled = useCallback(() => {
+        setCollaborationPreviewAssetId(null);
+    }, []);
+
+    // 协同工作是独立 sidecar：只有用户点「发送给 ChatApp」时才通过这个窄桥写入主消息表。
+    // 其它协同会话、提示词、API 与文件都留在独立数据库，不进入主聊天 pipeline。
+    const handleCollaborationTransfer = useCallback(async (
+        sessionTitle: string,
+        transferredMessages: CollaborationTransferMessage[],
+    ) => {
+        if (!char || transferredMessages.length === 0) return;
+        const preview = transferredMessages.slice(0, 4).map(message => {
+            const sender = message.role === 'user' ? userProfile.name : char.name;
+            return `${sender}: ${message.content.replace(/\s+/g, ' ').slice(0, 36)}`;
+        });
+        if (transferredMessages.length > 4) preview.push(`… 共 ${transferredMessages.length} 条消息`);
+        const forwardData = {
+            fromUserName: userProfile.name,
+            fromCharName: `${char.name} · 协同工作`,
+            count: transferredMessages.length,
+            preview,
+            messages: transferredMessages,
+            collaborationTitle: sessionTitle,
+        };
+        await DB.saveMessage({
+            charId: char.id,
+            role: 'user',
+            type: 'chat_forward' as MessageType,
+            content: JSON.stringify(forwardData),
+            metadata: {
+                source: 'collaboration_transfer',
+                collaborationTitle: sessionTitle,
+            },
+        });
+        markAmsgStateDirty({ char, userProfile, groups, realtimeConfig });
+        await reloadMessages(visibleCountRef.current);
+    }, [char, userProfile, groups, realtimeConfig, reloadMessages]);
+
+    const handleCollaborationNotify = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+        addToast(message, type);
+    }, [addToast]);
+
+    const handleCollaborationArchiveToMemory = useCallback(async (
+        summary: string,
+        occurredAt: number,
+        sourceId: string,
+    ): Promise<string> => {
+        if (!char) throw new Error('当前角色不存在');
+        const occurred = new Date(occurredAt);
+        const date = `${occurred.getFullYear()}-${String(occurred.getMonth() + 1).padStart(2, '0')}-${String(occurred.getDate()).padStart(2, '0')}`;
+        const fragmentId = `collab_archive_${sourceId}`;
+
+        if (char.memoryPalaceEnabled) {
+            const embedding = memoryPalaceConfig.embedding;
+            const lightLLM = memoryPalaceConfig.lightLLM;
+            if (!embedding?.baseUrl || !embedding?.apiKey || !embedding?.model || !lightLLM?.baseUrl || !lightLLM?.model) {
+                throw new Error('角色已开启记忆宫殿，但宫殿的向量 API 或副 LLM 还没有配置完整');
+            }
+            const { importExternalMemoryText, mergePalaceFragmentsIntoMemories } = await import('../utils/memoryPalace/pipeline');
+            const imported = await importExternalMemoryText(
+                summary,
+                char.id,
+                char.name,
+                embedding,
+                lightLLM,
+                userProfile.name,
+            );
+            if (imported.error && imported.error !== 'no_memories') {
+                throw new Error(`记忆宫殿没有存好：${imported.error}`);
+            }
+            if (imported.stored === 0 && imported.skipped === 0) {
+                throw new Error('记忆宫殿没有提取出可保存的经历');
+            }
+            const palaceFragment: { id: string; date: string; summary: string; mood: string } = {
+                id: fragmentId,
+                date,
+                summary: `- ${summary}`,
+                mood: 'palace',
+            };
+            await updateCharacter(char.id, current => ({
+                memories: (current.memories || []).some(memory => memory.id === fragmentId)
+                    ? current.memories
+                    : mergePalaceFragmentsIntoMemories(current.memories || [], [palaceFragment]),
+            }));
+            return `已把这次协作的一条总结同时存入 ${char.name} 的记忆宫殿和神经链接`;
+        }
+
+        const archiveFragment: MemoryFragment = {
+            id: fragmentId,
+            date,
+            summary,
+            mood: 'collaboration',
+        };
+        await updateCharacter(char.id, current => ({
+            memories: (current.memories || []).some(memory => memory.id === fragmentId)
+                ? current.memories
+                : [...(current.memories || []), archiveFragment],
+        }));
+        return `已把这次协作的一条总结存入 ${char.name} 的神经链接`;
+    }, [char, memoryPalaceConfig.embedding, memoryPalaceConfig.lightLLM, updateCharacter, userProfile.name]);
+
+    const handleCollaborationInstall = useCallback(async (
+        artifact: CollaborationInstallableArtifact,
+        targetCharacterId?: string,
+    ): Promise<string> => {
+        const errors = validateInstallableArtifact(artifact);
+        if (errors.length > 0) throw new Error(errors[0]);
+
+        if (artifact.kind === 'bubble-theme') {
+            const nextTheme = installableToChatTheme(artifact);
+            await addCustomTheme(nextTheme);
+            if (targetCharacterId) await updateCharacter(targetCharacterId, { bubbleStyle: nextTheme.id });
+            const target = characters.find(item => item.id === targetCharacterId);
+            return target ? `气泡主题已保存，并给 ${target.name} 穿上` : '气泡主题已保存到气泡工坊';
+        }
+
+        if (artifact.kind === 'whitebox-css') {
+            const css = String(artifact.payload.css || '');
+            const stored = await DB.getAssetRaw('chrome_css_presets').catch(() => null);
+            const presets = Array.isArray(stored) ? stored.filter(item => item && typeof item === 'object') : [];
+            const nextPreset = { name: artifact.title.slice(0, 50), code: css, swatch: '#e2e8f0' };
+            await DB.saveAssetRaw('chrome_css_presets', [nextPreset, ...presets.filter((item: any) => item.name !== nextPreset.name)].slice(0, 60));
+            if (targetCharacterId) await updateCharacter(targetCharacterId, { chromeCustomCss: css });
+            const target = characters.find(item => item.id === targetCharacterId);
+            return target ? `白框已存入预设，并应用给 ${target.name}` : '白框已保存到预设';
+        }
+
+        if (artifact.kind === 'journal-css') {
+            await updateTheme({ journalAppearance: { preset: 'original', customCss: String(artifact.payload.css || '') } });
+            return '交换日记美化已保存并启用';
+        }
+
+        if (artifact.kind === 'schedule-css') {
+            await updateTheme({
+                scheduleCardAppearance: {
+                    ...(osTheme.scheduleCardAppearance || {}),
+                    customCss: String(artifact.payload.css || ''),
+                },
+            });
+            return '日程卡美化已保存并启用';
+        }
+
+        if (artifact.kind === 'psyche-css') {
+            if (!targetCharacterId) throw new Error('请选择使用心象卡美化的角色');
+            await updateCharacter(targetCharacterId, { thinkingChainCustomCss: String(artifact.payload.css || '') });
+            const target = characters.find(item => item.id === targetCharacterId);
+            return `心象卡美化已应用给 ${target?.name || '所选角色'}`;
+        }
+
+        if (artifact.kind === 'appearance-preset') {
+            const patch = installableToThemePatch(artifact);
+            const presetTheme = { ...osTheme, ...patch };
+            await saveAppearancePreset(artifact.title.slice(0, 50), presetTheme);
+            await updateTheme(patch);
+            return '整套界面已存入外观预设并启用';
+        }
+
+        if (artifact.kind === 'character-card') {
+            const created = await addCharacter();
+            await updateCharacter(created.id, installableToCharacterPatch(artifact));
+            return `角色「${String(artifact.payload.name || artifact.title)}」已创建`;
+        }
+
+        const books = installableToWorldbooks(artifact);
+        for (const book of books) await addWorldbook(book);
+        if (targetCharacterId) {
+            await updateCharacter(targetCharacterId, current => ({
+                mountedWorldbooks: upsertMountedWorldbooks(current.mountedWorldbooks || [], books),
+            }));
+        }
+        const target = characters.find(item => item.id === targetCharacterId);
+        return target
+            ? `世界书「${String(artifact.payload.category || artifact.title)}」的 ${books.length} 条内容已保存并挂载给 ${target.name}`
+            : `世界书已保存到世界书库，共 ${books.length} 条`;
+    }, [addCharacter, addCustomTheme, addWorldbook, characters, osTheme, saveAppearancePreset, updateCharacter, updateTheme]);
+
     // hideBeforeMessageId 不在视觉层过滤：用户依旧能往上翻到旧消息，只是 LLM 拉不到。
     // 真正想从聊天记录里抹掉，应该走"删除"。
     // windowed 模式：定位到旧消息时只渲染目标周围 51 条，避免 DOM 卡爆。
@@ -3136,11 +3494,17 @@ const Chat: React.FC = () => {
                 chatVoiceAutoPlay={!!char.chatVoiceAutoPlay}
                 onToggleChatVoiceAutoPlay={() => updateCharacter(char.id, { chatVoiceAutoPlay: !char.chatVoiceAutoPlay })}
                 chatVoiceLang={char.chatVoiceLang || ''}
-                onSetChatVoiceLang={(lang: string) => updateCharacter(char.id, { chatVoiceLang: lang })}
+                onSetChatVoiceLang={(lang: string) => {
+                    updateCharacter(char.id, { chatVoiceLang: lang });
+                    trackEvent('设置聊天语音语种', { 语种: voiceLanguageAnalyticsValue(lang) });
+                }}
                 voiceAvailable={characterHasVoice(char, apiConfig)}
                 onGenerateVoice={selectedMessage ? () => handleManualTts(selectedMessage) : undefined}
                 voiceDownloadable={!!(selectedMessage?.id && voiceDataMap[selectedMessage.id])}
                 onDownloadVoice={selectedMessage ? () => handleDownloadVoice(selectedMessage) : undefined}
+                onRerollImage={selectedMessage?.type === 'image' && selectedMessage?.metadata?.imageGenDescription ? () => openRerollEdit(selectedMessage) : undefined}
+                onDownloadImage={selectedMessage?.type === 'image' ? () => handleDownloadImage(selectedMessage) : undefined}
+                onPreviewImage={selectedMessage?.type === 'image' ? () => handlePreviewImage(selectedMessage) : undefined}
                 scheduleData={scheduleData}
                 isScheduleGenerating={isScheduleGenerating}
                 onScheduleEdit={handleScheduleEdit}
@@ -3176,6 +3540,35 @@ const Chat: React.FC = () => {
                     addToast('情绪状态已清除', 'info');
                 }}
              />
+
+             {/* 重roll前编辑提示词 */}
+             <Modal
+                 isOpen={!!rerollEditMsg}
+                 title="编辑生图描述"
+                 onClose={() => setRerollEditMsg(null)}
+                 footer={<>
+                     <button onClick={() => setRerollEditMsg(null)} className="flex-1 py-3 bg-slate-100 rounded-2xl font-medium text-slate-600">取消</button>
+                     <button onClick={confirmRerollEdit} disabled={!rerollEditDesc.trim()} className="flex-1 py-3 bg-violet-500 text-white font-bold rounded-2xl disabled:opacity-50">重新生成</button>
+                 </>}
+             >
+                 <textarea
+                     value={rerollEditDesc}
+                     onChange={e => setRerollEditDesc(e.target.value)}
+                     className="w-full h-28 bg-slate-100 rounded-2xl p-4 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-200"
+                     placeholder="输入生图描述…"
+                 />
+                 <p className="text-[10px] text-slate-400 mt-2">修改描述后重新生图，原图不会被替换直到新图生成成功。</p>
+             </Modal>
+
+             {/* 图片大图预览 Lightbox */}
+             {previewMsg && (
+                 <ImageLightbox
+                     msg={previewMsg}
+                     charName={previewMsg ? characters.find(c => c.id === previewMsg.charId)?.name : undefined}
+                     onClose={() => setPreviewMsg(null)}
+                     onDownload={handleDownloadImage}
+                 />
+             )}
 
              {/* 小剧场播放器：窥视某个日程时段的角色行为演出 */}
              {theaterSlotIdx !== null && scheduleData && createPortal(
@@ -3437,7 +3830,10 @@ const Chat: React.FC = () => {
                             onMcdCandidate={handleMcdCandidate}
                             onResolveTransfer={handleResolveTransfer}
                             onResolveLifeRecord={handleResolveLifeRecord}
+                            onOpenCollaborationFile={handleOpenCollaborationFile}
                             thinkingChainOptions={thinkingChainOptions}
+                            onPreviewImage={handlePreviewImage}
+                            onDownloadImage={handleDownloadImage}
                         />
                         {showToolTrace && (
                             <div className={`px-3 mb-4 ${breaksWithNext ? toolTracePullClass : ''}`}>
@@ -3928,6 +4324,35 @@ const Chat: React.FC = () => {
                 />
             )}
 
+            {char && (
+                <React.Suspense fallback={collaborationOpen ? <div className="absolute inset-0 z-[120] grid place-items-center bg-slate-50 text-xs text-slate-400">正在打开协同工作…</div> : null}>
+                    <CollaborationWindow
+                        open={collaborationOpen}
+                        character={char}
+                        user={userProfile}
+                        theme={activeTheme}
+                        backgroundUrl={char.chatBackground}
+                        chatApi={apiConfig}
+                        apiPresets={apiPresets}
+                        availableModels={availableModels}
+                        characters={characters}
+                        groups={groups}
+                        emojis={emojis}
+                        emojiCategories={categories}
+                        recentChatMessages={messages}
+                        realtimeConfig={realtimeConfig}
+                        chatCollaborationEnabled={!!char.chatCollaborationEnabled}
+                        requestedPreviewAssetId={collaborationPreviewAssetId}
+                        onRequestedPreviewHandled={handleCollaborationPreviewHandled}
+                        onClose={() => { setCollaborationOpen(false); setCollaborationPreviewAssetId(null); }}
+                        onSendToChat={handleCollaborationTransfer}
+                        onInstallArtifact={handleCollaborationInstall}
+                        onArchiveToMemory={handleCollaborationArchiveToMemory}
+                        onToggleChatCollaboration={enabled => updateCharacter(char.id, { chatCollaborationEnabled: enabled })}
+                        notify={handleCollaborationNotify}
+                    />
+                </React.Suspense>
+            )}
             <McdMiniApp
                 open={mcdAppOpen}
                 onClose={() => setMcdAppOpen(false)}

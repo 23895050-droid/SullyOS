@@ -10,6 +10,8 @@ import { ContextBuilder } from '../utils/context';
 import { ChatParser } from '../utils/chatParser';
 // 思考链 / HTML / MCD / memoryPalace 注入已下沉到 chatRequestPayload；这里不再直接调用
 import { useMusic, loadMusicHooks } from '../context/MusicContext';
+import { buildUserListeningContext } from '../utils/musicContextBlock';
+import { getMusicStore } from '../apps/couple/musicStore';
 import { processNewMessagesWithAutoArchive } from '../utils/memoryPalace/autoArchive';
 import { incrementDigestRound, runCognitiveDigestion, detectPersonalityStyle } from '../utils/memoryPalace';
 // evolveFlowNarrative 保留为低频深刷新备用，日常意识流由副 API 的情绪评估同轮产出（innerState 字段）
@@ -611,6 +613,8 @@ export const useChatAI = ({
                         playing: deps.music.playing,
                         lyric: deps.music.lyric,
                         activeLyricIdx: deps.music.activeLyricIdx,
+                        plainLyric: deps.music.plainLyric,
+                        hotComments: deps.music.hotComments,
                         listeningTogetherWith: deps.music.listeningTogetherWith,
                         cfg: deps.music.cfg,
                         recentTrackChange: deps.music.recentTrackChange,
@@ -923,29 +927,8 @@ export const useChatAI = ({
                 realtimeConfig,
                 innerState: skipEmotionInjection ? undefined : (evolvedNarrative || undefined),
                 userListeningContext: (() => {
-                    if (music.current && music.playing && music.lyric.length > 0) {
-                        const idx = music.activeLyricIdx;
-                        if (idx >= 0) {
-                            const from = Math.max(0, idx - 2);
-                            const to = Math.min(music.lyric.length, idx + 2 + 1);
-                            const window = music.lyric.slice(from, to).map(l => l.text);
-                            return {
-                                songName: music.current.name,
-                                artists: music.current.artists,
-                                lyricWindow: window,
-                                activeIdx: idx - from,
-                            };
-                        }
-                    }
-                    if (music.current && music.playing) {
-                        return {
-                            songName: music.current.name,
-                            artists: music.current.artists,
-                            lyricWindow: [],
-                            activeIdx: -1,
-                        };
-                    }
-                    return null;
+                    if (!music.current || !music.playing) return null;
+                    return buildUserListeningContext(music, getMusicStore().lyricInject);
                 })(),
                 isListeningTogether: !!(music.current && music.playing && music.listeningTogetherWith.includes(char.id)),
                 musicCfg: music.cfg,

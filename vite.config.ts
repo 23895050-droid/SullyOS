@@ -49,6 +49,12 @@ let showBuildBadge = !isReleaseBranch;
 if (process.env.VITE_HIDE_BUILD_BADGE === '1') showBuildBadge = false;
 if (process.env.VITE_SHOW_BUILD_BADGE === '1') showBuildBadge = true;
 
+// vite 8 自带 http-proxy 类型漏了 router 选项（运行时支持）：MiniMax 三处代理按请求头切国服/海外。
+function minimaxRouter(req: { headers: Record<string, string | string[] | undefined> }) {
+  const region = String(req.headers['x-minimax-region'] || '').toLowerCase();
+  return region === 'overseas' ? 'https://api.minimax.io' : 'https://api.minimaxi.com';
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -79,30 +85,24 @@ export default defineConfig({
         secure: true,
         rewrite: () => '/v1/t2a_v2',
         // Route to 国服 / 海外 based on X-MiniMax-Region header sent by the client.
-        router: (req) => {
-          const region = String(req.headers['x-minimax-region'] || '').toLowerCase();
-          return region === 'overseas' ? 'https://api.minimax.io' : 'https://api.minimaxi.com';
-        },
+        // @ts-expect-error 类型缺口见 minimaxRouter 注释
+        router: minimaxRouter,
       },
       '/api/minimax/get-voice': {
         target: 'https://api.minimaxi.com',
         changeOrigin: true,
         secure: true,
         rewrite: () => '/v1/get_voice',
-        router: (req) => {
-          const region = String(req.headers['x-minimax-region'] || '').toLowerCase();
-          return region === 'overseas' ? 'https://api.minimax.io' : 'https://api.minimaxi.com';
-        },
+        // @ts-expect-error 类型缺口见 minimaxRouter 注释
+        router: minimaxRouter,
       },
       '/api/minimax/music': {
         target: 'https://api.minimaxi.com',
         changeOrigin: true,
         secure: true,
         rewrite: () => '/v1/music_generation',
-        router: (req) => {
-          const region = String(req.headers['x-minimax-region'] || '').toLowerCase();
-          return region === 'overseas' ? 'https://api.minimax.io' : 'https://api.minimaxi.com';
-        },
+        // @ts-expect-error 类型缺口见 minimaxRouter 注释
+        router: minimaxRouter,
       },
       // 鱼声 Fish Audio TTS：转发到 https://api.fish.audio/v1/tts（返回二进制音频）
       '/api/fishaudio/tts': {

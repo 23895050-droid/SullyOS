@@ -12,12 +12,13 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOS } from '../../context/OSContext';
-import { useMusic, musicApi, toHttps, Song } from '../../context/MusicContext';
+import { useMusic, type Song } from '../../context/MusicContext';
 import { CharacterProfile, CharPlaylist, CharPlaylistSong } from '../../types';
 import { CharMusicPersona } from '../../utils/charMusicPersona';
 import { computeCurrentListening } from '../../utils/charMusicSchedule';
 import { removeSongsFromPlaylist } from '../../utils/charPlaylistEdit';
 import { DB } from '../../utils/db';
+import { getMusicStore } from '../couple/musicStore';
 import { C, Sparkle, MizuHeader, BokehBg, MiniPlayer } from './MusicUI';
 import { ArrowLeft, MusicNote, Heart, Plus, MagnifyingGlass, Trash, Check } from '@phosphor-icons/react';
 import { getDailyScheduleForChar } from '../../utils/dailySchedule';
@@ -41,25 +42,10 @@ const gradientMap: Record<string, string> = {
 };
 const gradientFor = (key?: string) => gradientMap[key || 'gradient-01'] || gradientMap['gradient-01'];
 
-const songFromSearch = (s: any): Song => ({
-  id: s.id,
-  name: s.name,
-  artists: (s.ar || s.artists || []).map((a: any) => a.name).join(' / '),
-  album: s.al?.name || s.album?.name || '',
-  albumPic: toHttps(s.al?.picUrl || s.album?.picUrl || ''),
-  duration: (s.dt || s.duration || 0) / 1000,
-  fee: s.fee ?? 0,
-});
-
-const toPlaylistSong = (s: Song): CharPlaylistSong => ({
-  id: s.id, name: s.name, artists: s.artists, album: s.album,
-  albumPic: s.albumPic, duration: s.duration, fee: s.fee,
-});
-
 const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
   const { characters, updateCharacter, userProfile, apiConfig, addToast } = useOS();
   const {
-    cfg, playSong,
+    playSong,
     current, playing, togglePlay, nextSong, prevSong,
   } = useMusic();
   const char = useMemo(() => characters.find(c => c.id === charId), [characters, charId]);
@@ -217,44 +203,15 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
    *  - 再按歌单 index 旋转 signatureArtists 取一段，保证不同歌单艺人不重叠
    *  - 还要去掉本角色其它歌单已经有的歌，避免跨歌单撞曲
    */
+  // 从 CC 导入的歌池里挑（2026-08-26 改造：不再按关键词搜网易云，纯函数本地挑，不烧 token）
+  // 排序：recommendPlaylist 点名要进本歌单的优先 → 其余按导入顺序；跨歌单去重；上限 8
   const fillPlaylistFromTaste = useCallback(async (pl: CharPlaylist) => {
     if (!char || !profile || fillingPl) return;
     setFillingPl(pl.id);
     try {
-      const moodKeywordMap: Record<string, string> = {
-        happy: '快乐', sad: '悲伤', romantic: '浪漫', angry: '发泄',
-        chill: '放松', epic: '史诗', nostalgic: '怀旧', dreamy: '氛围',
-      };
-
-      const plIndex = Math.max(0, profile.playlists.findIndex(p => p.id === pl.id));
-      const allArtists = profile.signatureArtists.map(a => a.name).filter(Boolean);
-      const allGenres = profile.genreTags.filter(Boolean);
-
-      // 按歌单序号轮换艺人/曲风，让 A/B/C 三个歌单永远拿到不同切片
-      const rotate = (arr: string[], offset: number, take: number): string[] => {
-        if (arr.length === 0) return [];
-        const out: string[] = [];
-        for (let i = 0; i < take && i < arr.length; i++) {
-          out.push(arr[(offset + i) % arr.length]);
-        }
-        return out;
-      };
-
-      const keywords: string[] = [];
-      // 1) 歌单自己的 title 直接当关键词 — 这是最能拉开差异的一项
-      const cleanTitle = (pl.title || '').trim();
-      if (cleanTitle && !/^歌单\s*\d*$/.test(cleanTitle)) keywords.push(cleanTitle);
-      // 2) mood → 中文搜索词
-      if (pl.mood && moodKeywordMap[pl.mood]) keywords.push(moodKeywordMap[pl.mood]);
-      // 3) 旋转后的艺人（每歌单 2 个，错开起点）
-      keywords.push(...rotate(allArtists, plIndex * 2, 2));
-      // 4) 没艺人就用旋转后的曲风兜底
-      if (allArtists.length === 0) keywords.push(...rotate(allGenres, plIndex, 2));
-
-      // 去重 + 去空
-      const uniqKeywords = Array.from(new Set(keywords.map(k => k.trim()).filter(Boolean)));
-      if (uniqKeywords.length === 0) {
-        addToast('还没有足够的品味数据，先初始化一下吧', 'info');
+      const pool = getMusicStore().importedSongs;
+      if (pool.length === 0) {
+        addToast('还没有导入的歌——先在「CC 导入」歌单带一批进来吧', 'info');
         return;
       }
 
@@ -265,24 +222,32 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
         for (const s of other.songs) usedInOthers.add(s.id);
       }
 
+      // recommendPlaylist 匹配本歌单 title 的优先（模糊双向）
+      const t = pl.title.trim().toLowerCase();
+      const byRec = pool.filter((s) => {
+        const rec = s.recommendPlaylist?.trim().toLowerCase() ?? '';
+        return rec && (rec === t || rec.includes(t) || t.includes(rec));
+      });
+      const rest = pool.filter((s) => !byRec.includes(s));
+      const ordered = [...byRec, ...rest];
+
       const picked: CharPlaylistSong[] = [];
-      const seen = new Set<number>();
-      for (const kw of uniqKeywords) {
+      for (const s of ordered) {
         if (picked.length >= 8) break;
-        try {
-          const r = await musicApi.search(cfg, kw);
-          const songs: Song[] = (r?.result?.songs || []).slice(0, 4).map(songFromSearch);
-          for (const s of songs) {
-            if (seen.has(s.id) || usedInOthers.has(s.id)) continue;
-            seen.add(s.id);
-            picked.push(toPlaylistSong(s));
-            if (picked.length >= 8) break;
-          }
-        } catch { /* 单个关键词失败不阻塞 */ }
+        if (usedInOthers.has(s.neteaseId)) continue;
+        picked.push({
+          id: s.neteaseId,
+          name: s.name,
+          artists: s.artists.join(' / '),
+          album: s.album ?? '',
+          albumPic: s.albumPic ?? '',
+          duration: s.duration ? Math.round(s.duration / 1000) : 0,
+          fee: s.fee ?? 0,
+        });
       }
 
       if (picked.length === 0) {
-        addToast('没搜到合适的歌', 'error');
+        addToast('没有合适的歌，先导入一批吧', 'info');
         return;
       }
       const updatedPl: CharPlaylist = {
@@ -304,13 +269,14 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
     } finally {
       setFillingPl(null);
     }
-  }, [char, profile, cfg, fillingPl, updateCharacter, addToast]);
+  }, [char, profile, fillingPl, updateCharacter, addToast]);
 
   const playPlaylistSong = (pl: CharPlaylist, song: CharPlaylistSong) => {
     // 用 char 歌单作为队列，点击的歌作为起点
     const queue: Song[] = pl.songs.map(s => ({ ...s }));
     const startIdx = queue.findIndex(s => s.id === song.id);
     playSong(queue[startIdx], { replaceQueue: queue, startIdx });
+    // 手动点播不记角色听歌次数（次数由一起听会话贡献，批 2）
     onOpenPlayer();
     trackEvent('播放角色歌单里的一首歌');
   };
@@ -327,7 +293,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
   }
 
   return (
-    <div className="flex flex-col h-full relative"
+    <div className="mz-visitchar flex flex-col h-full relative"
       style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
       <BokehBg />
       <MizuHeader
@@ -339,22 +305,22 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
         {/* Banner + 拜访徽标 */}
         <div className="relative h-32 overflow-hidden">
           <div className="absolute inset-0"
-            style={{ background: `linear-gradient(135deg, ${C.lavender}50, ${C.sakura}40, ${C.accent}40)` }} />
+            style={{ background: `linear-gradient(135deg, rgba(var(--mz-lavender-rgb, 207,195,232), 0.31), rgba(var(--mz-sakura-rgb, 244,194,207), 0.25), rgba(var(--mz-accent-rgb, 179,168,206), 0.25))` }} />
           <div className="absolute top-3 left-4 text-[10px] tracking-[0.35em] uppercase font-semibold"
             style={{ color: 'rgba(255,255,255,0.9)', textShadow: '0 1px 4px rgba(0,0,0,0.2)' }}>
             Visiting Another Soul
           </div>
-          <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, transparent 0%, ${C.bg}CC 100%)` }} />
+          <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, transparent 0%, rgba(var(--mz-bg-rgb, 251,251,255), 0.8) 100%)` }} />
         </div>
 
         {/* 角色卡 */}
         <div className="-mt-12 mx-4 rounded-3xl p-4 shizuku-glass-strong relative z-10"
-          style={{ boxShadow: `0 10px 40px ${C.glow}15` }}>
+          style={{ boxShadow: `0 10px 40px rgba(var(--mz-glow-rgb, 205,198,233), 0.08)` }}>
           <div className="flex items-center gap-3">
             <div className="relative shrink-0">
               {char.avatar && char.avatar.startsWith('data:') || char.avatar?.startsWith('http') ? (
                 <img src={char.avatar} alt="" className="w-16 h-16 rounded-2xl object-cover"
-                  style={{ border: `2px solid ${C.glow}60`, boxShadow: `0 4px 20px ${C.glow}30` }} />
+                  style={{ border: `2px solid rgba(var(--mz-glow-rgb, 205,198,233), 0.38)`, boxShadow: `0 4px 20px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }} />
               ) : (
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl"
                   style={{ background: gradientFor('gradient-04'), color: 'white' }}>
@@ -376,7 +342,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
               <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                 {(profile?.genreTags || []).slice(0, 4).map(tag => (
                   <span key={tag} className="text-[9px] px-2 py-0.5 rounded-full"
-                    style={{ background: `${C.accent}22`, color: C.primary, border: `1px solid ${C.accent}30` }}>
+                    style={{ background: `rgba(var(--mz-accent-rgb, 179,168,206), 0.13)`, color: C.primary, border: `1px solid rgba(var(--mz-accent-rgb, 179,168,206), 0.19)` }}>
                     #{tag}
                   </span>
                 ))}
@@ -405,7 +371,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
               onClick={doInitialize}
               disabled={initializing}
               className="w-full py-2.5 rounded-xl text-xs text-white tracking-wider transition-all disabled:opacity-60"
-              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px ${C.glow}30` }}
+              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}
             >
               {initializing ? '敲门中…' : '敲敲门 · 生成音乐人格'}
             </button>
@@ -415,7 +381,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
         {/* 正在听 */}
         {initialized && profile?.currentListening && (
           <div className="mx-4 mt-4 rounded-2xl p-4 shizuku-glass"
-            style={{ boxShadow: `0 4px 20px ${C.glow}15` }}>
+            style={{ boxShadow: `0 4px 20px rgba(var(--mz-glow-rgb, 205,198,233), 0.08)` }}>
             <div className="flex items-center gap-2 mb-2">
               <Sparkle size={8} color={C.sakura} delay={0} />
               <span className="text-[10px] tracking-[0.25em] uppercase" style={{ color: C.muted }}>此刻在听</span>
@@ -501,7 +467,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
                     </button>
 
                     {isExpanded && (
-                      <div className="px-3 pb-3 border-t" style={{ borderColor: `${C.faint}30` }}>
+                      <div className="px-3 pb-3 border-t" style={{ borderColor: `rgba(var(--mz-faint-rgb, 188,184,204), 0.19)` }}>
                         {pl.songs.length === 0 ? (
                           <div className="text-center py-3">
                             <div className="text-[10px] italic mb-2" style={{ color: C.faint }}>
@@ -511,7 +477,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
                               onClick={() => fillPlaylistFromTaste(pl)}
                               disabled={isFilling}
                               className="text-[10px] px-3 py-1.5 rounded-full shizuku-glass disabled:opacity-60"
-                              style={{ color: C.primary, border: `1px solid ${C.primary}30` }}
+                              style={{ color: C.primary, border: `1px solid rgba(var(--mz-primary-rgb, 128,124,157), 0.19)` }}
                             >
                               <MagnifyingGlass size={10} weight="bold" className="inline mr-1" />
                               {isFilling ? '正在挑…' : '让 ta 挑几首'}
@@ -590,7 +556,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
                                       <div className="text-[9px] truncate" style={{ color: C.muted }}>{s.artists}</div>
                                     </div>
                                     {s.fee === 1 && !selecting && (
-                                      <span className="text-[8px] px-1 rounded" style={{ color: C.vip, border: `1px solid ${C.vip}50` }}>VIP</span>
+                                      <span className="text-[8px] px-1 rounded" style={{ color: C.vip, border: `1px solid rgba(var(--mz-vip-rgb, 212,160,106), 0.31)` }}>VIP</span>
                                     )}
                                   </button>
                                 );
@@ -685,8 +651,8 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
                 className="inline-flex items-center gap-1 px-3 py-1 rounded-full transition-all disabled:opacity-50"
                 style={{
                   color: C.primary,
-                  background: `${C.sakura}14`,
-                  border: `1px solid ${C.sakura}35`,
+                  background: `rgba(var(--mz-sakura-rgb, 244,194,207), 0.08)`,
+                  border: `1px solid rgba(var(--mz-sakura-rgb, 244,194,207), 0.21)`,
                 }}
                 title="清空后重新生成。"
               >

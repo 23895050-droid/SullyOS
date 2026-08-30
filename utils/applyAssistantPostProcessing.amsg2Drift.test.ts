@@ -84,6 +84,7 @@ describe('directive 重放出来的副作用产物带推送标记', () => {
                 musicHooks: {
                     getListeningSnapshot: () => null,
                     joinListeningTogether: vi.fn(),
+                    endListeningTogether: vi.fn(),
                     addSongToCharPlaylist: addSong,
                 },
             },

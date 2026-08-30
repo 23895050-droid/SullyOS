@@ -5,28 +5,31 @@
 import React, { useEffect } from 'react';
 import {
   ArrowLeft, X, MagnifyingGlass,
-  Play, Pause, SkipBack, SkipForward,
+  Play, Pause, SkipBack, SkipForward, Headphones, CaretRight, MusicNote,
 } from '@phosphor-icons/react';
 import { useBlobRefUrl } from '../../utils/blobRef';
 
 /* ══════════ 色板 — 水滴 × 星空 ══════════ */
+/* 2026-08-26 CSS 预设机制：全部 token 桥接成 CSS 变量（var(--mz-*, 默认值)）。
+   预设 CSS 只需要覆盖 --mz-* 自定义属性就能整体换肤；默认值不变，零逻辑改动。 */
 export const C = {
-  bg:       '#fbfbff',       // 几乎纯白 (一抹紫灰)
-  bgDeep:   '#f3f1fa',       // 轻雾紫
-  bgTint:   '#ebe9f5',       // 最深层也只是浅紫雾
-  primary:  '#807c9d',       // 淡紫调灰 — 比深紫更柔，饱和度更低
-  accent:   '#b3a8ce',       // 淡紫
-  soft:     '#e0d9f0',       // secondary container — 紫雾
-  glow:     '#cdc6e9',       // 发光淡紫
-  sakura:   '#f4c2cf',       // 樱花粉 (装饰)
-  lavender: '#cfc3e8',       // 薰衣草 (装饰)
-  surface:  'rgba(255,255,255,0.65)',
-  glass:    'rgba(255,255,255,0.35)',
-  text:     '#22232a',       // 正文
-  muted:    '#7c779a',       // 弱文字 (紫调)
-  faint:    '#bcb8cc',       // 超弱
-  vip:      '#d4a06a',       // VIP
-  danger:   '#ba1a1a',
+  bg:       'var(--mz-bg, #fbfbff)',       // 几乎纯白 (一抹紫灰)
+  bgDeep:   'var(--mz-bgDeep, #f3f1fa)',   // 轻雾紫
+  bgTint:   'var(--mz-bgTint, #ebe9f5)',   // 最深层也只是浅紫雾
+  primary:  'var(--mz-primary, #807c9d)',  // 淡紫调灰 — 比深紫更柔，饱和度更低
+  accent:   'var(--mz-accent, #b3a8ce)',   // 淡紫
+  soft:     'var(--mz-soft, #e0d9f0)',     // secondary container — 紫雾
+  glow:     'var(--mz-glow, #cdc6e9)',     // 发光淡紫
+  sakura:   'var(--mz-sakura, #f4c2cf)',   // 樱花粉 (装饰)
+  lavender: 'var(--mz-lavender, #cfc3e8)', // 薰衣草 (装饰)
+  deep:     'var(--mz-deep, #9a6bc5)',     // 渐变深紫尾停（当前歌词行等渐变第三停，调色台接管）
+  surface:  'var(--mz-surface, rgba(255,255,255,0.65))',
+  glass:    'var(--mz-glass, rgba(255,255,255,0.35))',
+  text:     'var(--mz-text, #22232a)',     // 正文
+  muted:    'var(--mz-muted, #7c779a)',    // 弱文字 (紫调)
+  faint:    'var(--mz-faint, #bcb8cc)',    // 超弱
+  vip:      'var(--mz-vip, #d4a06a)',      // VIP
+  danger:   'var(--mz-danger, #ba1a1a)',
 } as const;
 
 /* ══════════ 全局 CSS 动画 (注入一次) ══════════ */
@@ -40,14 +43,14 @@ const injectStyles = () => {
 @keyframes shizuku-drift{0%{transform:translateX(0) translateY(0) rotate(0deg)}25%{transform:translateX(12px) translateY(-10px) rotate(5deg)}50%{transform:translateX(-6px) translateY(-20px) rotate(-3deg)}75%{transform:translateX(8px) translateY(-8px) rotate(4deg)}100%{transform:translateX(0) translateY(0) rotate(0deg)}}
 @keyframes shizuku-twinkle{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:.9;transform:scale(1.2)}}
 @keyframes shizuku-ripple{0%{transform:scale(0);opacity:.6}100%{transform:scale(4);opacity:0}}
-@keyframes shizuku-glow{0%,100%{box-shadow:0 0 15px ${C.glow}30,0 0 40px ${C.glow}10}50%{box-shadow:0 0 25px ${C.glow}50,0 0 60px ${C.glow}20}}
+@keyframes shizuku-glow{0%,100%{box-shadow:0 0 15px rgba(var(--mz-glow-rgb, 205,198,233), 0.19),0 0 40px rgba(var(--mz-glow-rgb, 205,198,233), 0.06)}50%{box-shadow:0 0 25px rgba(var(--mz-glow-rgb, 205,198,233), 0.31),0 0 60px rgba(var(--mz-glow-rgb, 205,198,233), 0.13)}}
 @keyframes shizuku-vinyl{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 @keyframes shizuku-shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
 @keyframes shizuku-drop{0%{transform:translateY(-30px) scale(0);opacity:0}40%{opacity:.7}100%{transform:translateY(100vh) scale(1);opacity:0}}
 .shizuku-glass{background:rgba(255,255,255,0.22);backdrop-filter:blur(16px) saturate(1.4);-webkit-backdrop-filter:blur(16px) saturate(1.4);border:1px solid rgba(255,255,255,0.35)}
 .shizuku-glass-strong{background:rgba(255,255,255,0.45);backdrop-filter:blur(24px) saturate(1.6);-webkit-backdrop-filter:blur(24px) saturate(1.6);border:1px solid rgba(255,255,255,0.5)}
 .shizuku-scrollbar::-webkit-scrollbar{width:3px}
-.shizuku-scrollbar::-webkit-scrollbar-thumb{background:${C.faint}60;border-radius:3px}
+.shizuku-scrollbar::-webkit-scrollbar-thumb{background:rgba(var(--mz-faint-rgb, 188,184,204), 0.38);border-radius:3px}
 .shizuku-scrollbar::-webkit-scrollbar-track{background:transparent}
 `;
   document.head.appendChild(style);
@@ -122,7 +125,7 @@ export const SearchBar: React.FC<{
   <div className="flex gap-2 px-4 py-3 relative z-10">
     <div className="flex-1 flex items-center gap-2.5 rounded-2xl px-4 py-2 shizuku-glass transition-all"
       style={{
-        boxShadow: `0 2px 20px ${C.glow}15, inset 0 1px 0 rgba(255,255,255,0.4)`,
+        boxShadow: `0 2px 20px rgba(var(--mz-glow-rgb, 205,198,233), 0.08), inset 0 1px 0 rgba(255,255,255,0.4)`,
       }}>
       <MagnifyingGlass size={15} color={C.muted} weight="bold" />
       <input
@@ -141,7 +144,7 @@ export const SearchBar: React.FC<{
       className="px-4 py-2 rounded-2xl text-xs text-white disabled:opacity-50 transition-all relative overflow-hidden"
       style={{
         background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
-        boxShadow: `0 3px 15px ${C.primary}30`,
+        boxShadow: `0 3px 15px rgba(var(--mz-primary-rgb, 128,124,157), 0.19)`,
       }}
     >
       <span className="relative z-10">{searching ? '...' : '搜索'}</span>
@@ -170,14 +173,14 @@ export const SongRow: React.FC<{
   return (
   <button
     onClick={onClick}
-    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl transition-all mb-1.5 mx-1"
+    className="mz-songrow w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl transition-all mb-1.5 mx-1"
     style={{
       background: isActive
         ? `linear-gradient(135deg, ${C.glass}, rgba(137,212,255,0.15))`
         : 'rgba(255,255,255,0.08)',
       backdropFilter: isActive ? 'blur(12px)' : 'none',
       border: isActive ? `1px solid rgba(255,255,255,0.4)` : '1px solid transparent',
-      boxShadow: isActive ? `0 2px 16px ${C.glow}15` : 'none',
+      boxShadow: isActive ? `0 2px 16px rgba(var(--mz-glow-rgb, 205,198,233), 0.08)` : 'none',
     }}
   >
     {/* 封面 — 圆角 + 水光边框 */}
@@ -202,7 +205,7 @@ export const SongRow: React.FC<{
 };
 
 /* ══════════ 小头像 — 处理 emoji / URL / data: 三种 avatar ══════════ */
-const TinyAvatar: React.FC<{
+export const TinyAvatar: React.FC<{
   avatar?: string;
   name: string;
   size?: number;
@@ -234,7 +237,7 @@ const TinyAvatar: React.FC<{
 };
 
 /* ══════════ 一起听徽章 — 居中 · 两个头像 · 粉紫高级感 ══════════ */
-const TogetherHeader: React.FC<{
+export const TogetherHeader: React.FC<{
   userAvatar?: string;
   userName?: string;
   companions: { id: string; name: string; avatar?: string }[];
@@ -245,18 +248,18 @@ const TogetherHeader: React.FC<{
   const main = companions[0];
   const extraCount = companions.length - 1;
   return (
-    <div className="relative mb-2 pt-1 pb-2 rounded-2xl overflow-hidden"
+    <div className="mz-together relative mb-2 pt-1 pb-2 rounded-2xl overflow-hidden"
       style={{
-        background: `linear-gradient(135deg, ${C.sakura}18 0%, ${C.lavender}16 50%, ${C.glow}12 100%)`,
-        border: `1px solid ${C.sakura}35`,
-        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.5), 0 2px 12px ${C.sakura}20`,
+        background: `linear-gradient(135deg, rgba(var(--mz-sakura-rgb, 244,194,207), 0.09) 0%, rgba(var(--mz-lavender-rgb, 207,195,232), 0.09) 50%, rgba(var(--mz-glow-rgb, 205,198,233), 0.07) 100%)`,
+        border: `1px solid rgba(var(--mz-sakura-rgb, 244,194,207), 0.21)`,
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.5), 0 2px 12px rgba(var(--mz-sakura-rgb, 244,194,207), 0.13)`,
       }}
     >
       {/* 背景光晕 */}
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-60"
         style={{
-          background: `radial-gradient(ellipse at 30% 40%, ${C.sakura}40 0%, transparent 45%),
-                       radial-gradient(ellipse at 70% 60%, ${C.lavender}38 0%, transparent 50%)`,
+          background: `radial-gradient(ellipse at 30% 40%, rgba(var(--mz-sakura-rgb, 244,194,207), 0.25) 0%, transparent 45%),
+                       radial-gradient(ellipse at 70% 60%, rgba(var(--mz-lavender-rgb, 207,195,232), 0.22) 0%, transparent 50%)`,
         }} />
       {/* 居中两头像 + 中间的心 */}
       <div className="relative flex items-center justify-center gap-2">
@@ -272,7 +275,7 @@ const TogetherHeader: React.FC<{
         <TinyAvatar avatar={main?.avatar} name={main?.name || ''} size={30} ring={C.sakura} />
         {extraCount > 0 && (
           <span className="ml-0.5 text-[9px] px-1.5 py-0.5 rounded-full"
-            style={{ background: `${C.lavender}33`, color: C.primary, border: `1px solid ${C.lavender}55` }}>
+            style={{ background: `rgba(var(--mz-lavender-rgb, 207,195,232), 0.2)`, color: C.primary, border: `1px solid rgba(var(--mz-lavender-rgb, 207,195,232), 0.33)` }}>
             +{extraCount}
           </span>
         )}
@@ -307,6 +310,116 @@ const TogetherHeader: React.FC<{
   );
 };
 
+/* ══════════ 邀请一起听弹层（2026-08-30：专用邀请弹层，不再是转发选人）══════════ */
+const InviteCharAvatar: React.FC<{ avatar?: string; name: string }> = ({ avatar, name }) => {
+  const url = useBlobRefUrl(avatar);
+  if (url) return <img src={url} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />;
+  return (
+    <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-white font-semibold"
+      style={{ background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`, fontSize: 13 }}>
+      {name.slice(0, 1)}
+    </div>
+  );
+};
+
+export const InviteTogetherModal: React.FC<{
+  songName?: string;
+  artists?: string;
+  characters: { id: string; name: string; avatar?: string }[];
+  onPick: (c: { id: string; name: string }) => void;
+  onClose: () => void;
+}> = ({ songName, artists, characters, onPick, onClose }) => (
+  <div className="fixed inset-0 flex items-end justify-center"
+    style={{ zIndex: 130, background: 'rgba(30,22,40,0.35)' }}
+    onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="flex flex-col"
+      style={{
+        width: 'min(100%, 560px)', background: 'rgba(255,255,255,0.97)', borderRadius: '28px 28px 0 0',
+        padding: 20, paddingBottom: 'calc(20px + var(--safe-bottom, 0px))', gap: 12,
+        boxShadow: '0 -12px 40px rgba(0,0,0,0.18)',
+      }}>
+      {/* 标题 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Headphones size={18} weight="duotone" color={C.sakura} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: C.text }}>邀请 Ta 一起听</span>
+        </div>
+        <button onClick={onClose} className="w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90"
+          style={{ color: C.muted, background: C.glass }} aria-label="关闭">
+          <X size={13} weight="bold" />
+        </button>
+      </div>
+      {/* 当前歌 */}
+      <div className="flex items-center gap-2 rounded-2xl px-3 py-2.5"
+        style={{ background: `linear-gradient(135deg, rgba(var(--mz-sakura-rgb, 244,194,207), 0.14), rgba(var(--mz-lavender-rgb, 207,195,232), 0.14))`, border: `1px solid rgba(var(--mz-sakura-rgb, 244,194,207), 0.25)` }}>
+        <MusicNote size={16} weight="duotone" color={C.primary} className="shrink-0" />
+        {songName ? (
+          <div className="min-w-0">
+            <div className="text-[12px] font-semibold truncate" style={{ color: C.text }}>{songName}</div>
+            <div className="text-[10px] truncate" style={{ color: C.muted }}>{artists || '·'}</div>
+          </div>
+        ) : (
+          <div className="text-[12px]" style={{ color: C.muted }}>现在没在放歌——先一起戴上耳机，歌你来放</div>
+        )}
+      </div>
+      {/* 角色列表 */}
+      <div className="space-y-1.5 max-h-[46vh] overflow-y-auto shizuku-scrollbar">
+        {characters.length === 0 && (
+          <div className="text-center py-4 text-[11px]" style={{ color: C.faint }}>还没有角色</div>
+        )}
+        {characters.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onPick(c)}
+            className="w-full flex items-center gap-2.5 rounded-2xl px-3 py-2.5 transition-all active:scale-[0.98] text-left"
+            style={{ background: C.glass, border: '1px solid rgba(255,255,255,0.45)' }}
+          >
+            <InviteCharAvatar avatar={c.avatar} name={c.name} />
+            <span className="flex-1 min-w-0 truncate text-[12px] font-medium" style={{ color: C.text }}>{c.name}</span>
+            <span className="text-[9px] shrink-0" style={{ color: C.sakura }}>一起听</span>
+            <CaretRight size={13} color={C.faint} />
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={onClose} className="w-full py-2 text-[11px] border-0 cursor-pointer"
+        style={{ color: C.faint, background: 'transparent' }}>
+        取消
+      </button>
+    </div>
+  </div>
+);
+
+/* ══════════ 夜色预设 · 双人状态区（2026-08-30 附件图一/图二）══════════ */
+export const NightTogetherStrip: React.FC<{
+  userAvatar?: string;
+  userName?: string;
+  companion: { name: string; avatar?: string };
+}> = ({ userAvatar, userName, companion }) => {
+  const resolvedUser = useBlobRefUrl(userAvatar) || '';
+  const resolvedChar = useBlobRefUrl(companion.avatar) || '';
+  return (
+    <div className="mz-together-strip shrink-0 flex flex-col items-center pt-2.5">
+      {/* 重叠双头像 + 极细弧线半包围 */}
+      <div className="relative" style={{ width: 96, height: 46 }}>
+        <svg className="absolute inset-0" width="96" height="46" viewBox="0 0 96 46" fill="none" style={{ overflow: 'visible' }}>
+          <path d="M 16 40 A 32 32 0 0 1 80 40" stroke="rgba(255,255,255,0.28)" strokeWidth="1" strokeLinecap="round" />
+        </svg>
+        <div className="absolute top-1 rounded-full overflow-hidden" style={{ left: 20, width: 36, height: 36, border: '1.5px solid rgba(255,255,255,0.45)' }}>
+          {resolvedUser ? <img src={resolvedUser} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full" style={{ background: 'rgba(255,255,255,0.16)' }} />}
+        </div>
+        <div className="absolute top-1 rounded-full overflow-hidden" style={{ left: 40, width: 36, height: 36, border: '1.5px solid rgba(255,255,255,0.45)' }}>
+          {resolvedChar ? <img src={resolvedChar} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full" style={{ background: 'rgba(255,255,255,0.16)' }} />}
+        </div>
+      </div>
+      {/* 状态文本 */}
+      <div className="mt-0.5 text-[9px] tracking-[0.22em]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+        {userName || '你'} ♥ {companion.name}
+      </div>
+    </div>
+  );
+};
+
 /* ══════════ Mini 播放器 — 浮游玻璃条 ══════════ */
 export const MiniPlayer: React.FC<{
   name: string;
@@ -330,9 +443,9 @@ export const MiniPlayer: React.FC<{
   return (
   <div
     onClick={onTap}
-    className="absolute left-3 right-3 bottom-3 z-30 rounded-2xl px-3 py-2.5 cursor-pointer shizuku-glass-strong"
+    className="mz-miniplayer absolute left-3 right-3 bottom-3 z-30 rounded-2xl px-3 py-2.5 cursor-pointer shizuku-glass-strong"
     style={{
-      boxShadow: `0 4px 30px ${C.glow}20, 0 1px 0 inset rgba(255,255,255,0.4)`,
+      boxShadow: `0 4px 30px rgba(var(--mz-glow-rgb, 205,198,233), 0.13), 0 1px 0 inset rgba(255,255,255,0.4)`,
       animation: 'shizuku-glow 4s ease-in-out infinite',
     }}
   >
@@ -349,7 +462,7 @@ export const MiniPlayer: React.FC<{
       {/* 封面 — 水滴圆角 */}
       <div className="relative">
         <img src={resolvedAlbumPic} alt="" className="w-10 h-10 rounded-xl object-cover"
-          style={{ border: `1.5px solid ${C.accent}40`, opacity: regenStatus ? 0.4 : 1 }} />
+          style={{ border: `1.5px solid rgba(var(--mz-accent-rgb, 179,168,206), 0.25)`, opacity: regenStatus ? 0.4 : 1 }} />
         {playing && !regenStatus && <div className="absolute -bottom-1 -right-1"><Sparkle size={6} color={C.glow} /></div>}
         {regenStatus && (
           <div className="absolute inset-0 rounded-xl flex items-center justify-center"
@@ -373,7 +486,7 @@ export const MiniPlayer: React.FC<{
         <button onClick={(e) => { e.stopPropagation(); onPrev(); }} className="p-1.5 rounded-full transition-colors" style={{ color: C.muted }}><SkipBack size={14} weight="fill" /></button>
         <button onClick={(e) => { e.stopPropagation(); onToggle(); }}
           className="p-2 rounded-full transition-all"
-          style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 2px 10px ${C.primary}30` }}>
+          style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 2px 10px rgba(var(--mz-primary-rgb, 128,124,157), 0.19)` }}>
           {playing ? <Pause size={14} weight="fill" color="white" /> : <Play size={14} weight="fill" color="white" />}
         </button>
         <button onClick={(e) => { e.stopPropagation(); onNext(); }} className="p-1.5 rounded-full transition-colors" style={{ color: C.muted }}><SkipForward size={14} weight="fill" /></button>
@@ -399,12 +512,12 @@ export const VinylDisc: React.FC<{
 }> = ({ albumPic, playing, size = 180, bitrate }) => {
   const resolvedAlbumPic = useBlobRefUrl(albumPic) || '';
   return (
-  <div className="relative" style={{ width: size, height: size }}>
+  <div className="mz-vinyl relative" style={{ width: size, height: size }}>
     {/* 单层柔光 — 收敛简洁，不再散乱 */}
     <div className="absolute rounded-full pointer-events-none"
       style={{
         inset: -size * 0.08,
-        background: `radial-gradient(circle, ${C.glow}30 0%, ${C.glow}10 50%, transparent 75%)`,
+        background: `radial-gradient(circle, rgba(var(--mz-glow-rgb, 205,198,233), 0.19) 0%, rgba(var(--mz-glow-rgb, 205,198,233), 0.06) 50%, transparent 75%)`,
         filter: 'blur(20px)',
       }} />
 
@@ -413,7 +526,7 @@ export const VinylDisc: React.FC<{
       style={{
         animation: playing ? 'shizuku-vinyl 18s linear infinite' : 'none',
         border: `1.5px solid rgba(255,255,255,0.6)`,
-        boxShadow: `0 8px 32px ${C.primary}20, 0 0 0 1px ${C.glow}30`,
+        boxShadow: `0 8px 32px rgba(var(--mz-primary-rgb, 128,124,157), 0.13), 0 0 0 1px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)`,
       }}>
       {/* 单张封面 — 完全不透明，干净清晰 */}
       <img src={resolvedAlbumPic} alt=""
@@ -427,7 +540,7 @@ export const VinylDisc: React.FC<{
             height: size * 0.34,
             background: `radial-gradient(circle at 35% 35%, rgba(255,255,255,0.95), ${C.soft})`,
             border: `1px solid rgba(255,255,255,0.85)`,
-            boxShadow: `inset 0 2px 6px rgba(255,255,255,0.6), 0 2px 8px ${C.primary}20`,
+            boxShadow: `inset 0 2px 6px rgba(255,255,255,0.6), 0 2px 8px rgba(var(--mz-primary-rgb, 128,124,157), 0.13)`,
           }}>
           {/* 中心轴心 */}
           <div className="rounded-full"
@@ -452,7 +565,7 @@ export const VinylDisc: React.FC<{
           color: C.primary,
           fontFamily: `'Space Grotesk', 'SF Mono', monospace`,
           letterSpacing: '0.18em',
-          border: `1px solid ${C.primary}20`,
+          border: `1px solid rgba(var(--mz-primary-rgb, 128,124,157), 0.13)`,
         }}>
         {bitrate}
       </div>
@@ -475,7 +588,7 @@ export const MetaChip: React.FC<{ children: React.ReactNode; className?: string 
     style={{
       color: C.primary,
       background: 'rgba(255,255,255,0.55)',
-      border: `1px solid ${C.faint}40`,
+      border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.25)`,
       fontFamily: `'Space Grotesk', 'SF Mono', monospace`,
     }}>
     {children}
@@ -587,7 +700,7 @@ export const GlassProgress: React.FC<{
           style={{
             width: `${pct}%`,
             background: `linear-gradient(90deg, ${C.primary}, ${C.glow})`,
-            boxShadow: `0 0 10px ${C.glow}40`,
+            boxShadow: `0 0 10px rgba(var(--mz-glow-rgb, 205,198,233), 0.25)`,
           }} />
         {/* 水滴指示点 */}
         <div className="absolute top-1/2 -translate-y-1/2 transition-[left] duration-150"
@@ -595,7 +708,7 @@ export const GlassProgress: React.FC<{
           <div className="w-3 h-3 rounded-full"
             style={{
               background: `radial-gradient(circle at 35% 35%, white, ${C.glow})`,
-              boxShadow: `0 0 8px ${C.glow}60`,
+              boxShadow: `0 0 8px rgba(var(--mz-glow-rgb, 205,198,233), 0.38)`,
             }} />
         </div>
       </div>
@@ -625,7 +738,7 @@ export const PlayControls: React.FC<{
       className="w-[56px] h-[56px] rounded-full flex items-center justify-center transition-transform active:scale-95 relative"
       style={{
         background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
-        boxShadow: `0 4px 24px ${C.glow}40, 0 0 60px ${C.glow}15`,
+        boxShadow: `0 4px 24px rgba(var(--mz-glow-rgb, 205,198,233), 0.25), 0 0 60px rgba(var(--mz-glow-rgb, 205,198,233), 0.08)`,
         animation: playing ? 'shizuku-glow 3s ease-in-out infinite' : 'none',
       }}
     >
@@ -652,20 +765,20 @@ export const BokehBg: React.FC = () => {
   useEffect(() => { injectStyles(); }, []);
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
-      {/* 白色柔光 bokeh (主力) */}
+      {/* 白色柔光 bokeh (主力)——2026-08-30 调暗：纯白大球晃眼睛，换成淡紫灰且透明度压低 */}
       <div className="absolute top-[8%] right-[5%] w-32 h-32 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0) 70%)`, animation: 'shizuku-float 8s ease-in-out infinite' }} />
+        style={{ background: `radial-gradient(circle, rgba(203,201,218,0.38) 0%, rgba(203,201,218,0) 70%)`, animation: 'shizuku-float 8s ease-in-out infinite' }} />
       <div className="absolute bottom-[25%] left-[0%] w-48 h-48 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(255,255,255,0.75) 0%, rgba(255,255,255,0) 70%)`, animation: 'shizuku-float 10s ease-in-out 2s infinite' }} />
+        style={{ background: `radial-gradient(circle, rgba(203,201,218,0.3) 0%, rgba(203,201,218,0) 70%)`, animation: 'shizuku-float 10s ease-in-out 2s infinite' }} />
       <div className="absolute top-[45%] left-[25%] w-16 h-16 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0) 70%)`, animation: 'shizuku-float 7s ease-in-out 1s infinite' }} />
+        style={{ background: `radial-gradient(circle, rgba(203,201,218,0.34) 0%, rgba(203,201,218,0) 70%)`, animation: 'shizuku-float 7s ease-in-out 1s infinite' }} />
       <div className="absolute top-[25%] right-[32%] w-24 h-24 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0) 70%)`, animation: 'shizuku-drift 12s ease-in-out infinite' }} />
+        style={{ background: `radial-gradient(circle, rgba(203,201,218,0.24) 0%, rgba(203,201,218,0) 70%)`, animation: 'shizuku-drift 12s ease-in-out infinite' }} />
       {/* 轻微彩色点缀 (极低饱和) */}
       <div className="absolute top-[65%] right-[10%] w-20 h-20 rounded-full"
-        style={{ background: `radial-gradient(circle, ${C.sakura}18 0%, transparent 70%)`, filter: 'blur(8px)' }} />
+        style={{ background: `radial-gradient(circle, rgba(var(--mz-sakura-rgb, 244,194,207), 0.09) 0%, transparent 70%)`, filter: 'blur(8px)' }} />
       <div className="absolute top-[15%] left-[20%] w-16 h-16 rounded-full"
-        style={{ background: `radial-gradient(circle, ${C.lavender}15 0%, transparent 70%)`, filter: 'blur(8px)' }} />
+        style={{ background: `radial-gradient(circle, rgba(var(--mz-lavender-rgb, 207,195,232), 0.08) 0%, transparent 70%)`, filter: 'blur(8px)' }} />
       {/* 浮游星芒 */}
       <Sparkle size={10} className="absolute top-[12%] left-[15%]" color={C.glow} delay={0} />
       <Sparkle size={7} className="absolute top-[30%] right-[20%]" color={C.sakura} delay={1} />

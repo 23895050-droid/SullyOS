@@ -406,7 +406,9 @@ function buildAmsgOptions(env: Env) {
   };
 }
 
-const cfWorker = createCloudflareWorker((env: Env) => {
+// amsg-instant 把 env 声明成 Record<string, string>（CF 秘钥都是字符串）；我们还要拿 DB binding，进来后转回 Env。
+const cfWorker = createCloudflareWorker((rawEnv: Record<string, string>) => {
+  const env = rawEnv as unknown as Env;
   return {
     ...buildAmsgOptions(env),
     clientToken: env.AMSG_CLIENT_TOKEN,

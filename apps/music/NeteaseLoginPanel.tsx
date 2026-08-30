@@ -174,14 +174,14 @@ const NeteaseLoginPanel: React.FC<Props> = ({ onBack, onLoggedIn }) => {
         {mode === 'qr' && (
           <div className="flex flex-col items-center">
             <div className="relative rounded-3xl p-4 shizuku-glass-strong"
-              style={{ boxShadow: `0 8px 40px ${C.glow}20` }}>
+              style={{ boxShadow: `0 8px 40px rgba(var(--mz-glow-rgb, 205,198,233), 0.13)` }}>
               {qrImg ? (
                 <img src={qrImg} alt="qr" className="w-48 h-48 rounded-xl" />
               ) : (
                 <div className="w-48 h-48 rounded-xl flex items-center justify-center"
                   style={{ background: C.glass }}>
                   <span className="w-5 h-5 border-2 rounded-full animate-spin"
-                    style={{ borderColor: `${C.faint}40`, borderTopColor: C.primary }} />
+                    style={{ borderColor: `rgba(var(--mz-faint-rgb, 188,184,204), 0.25)`, borderTopColor: C.primary }} />
                 </div>
               )}
               <div className="absolute -top-1 -right-1"><Sparkle size={12} color={C.glow} delay={0} /></div>
@@ -242,7 +242,7 @@ const NeteaseLoginPanel: React.FC<Props> = ({ onBack, onLoggedIn }) => {
               onClick={doLogin}
               disabled={loggingIn}
               className="w-full py-3 rounded-2xl text-sm text-white tracking-wider relative overflow-hidden disabled:opacity-60"
-              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px ${C.glow}30` }}
+              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}
             >
               <span className="relative z-10">{loggingIn ? '登录中...' : '登录'}</span>
             </button>
@@ -277,7 +277,7 @@ const NeteaseLoginPanel: React.FC<Props> = ({ onBack, onLoggedIn }) => {
                 onLoggedIn(final);
               }}
               className="w-full py-3 rounded-2xl text-sm text-white"
-              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px ${C.glow}30` }}
+              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}
             >
               保存并登录
             </button>

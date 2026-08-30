@@ -190,8 +190,10 @@ const SIDE_EFFECT_TAGS: SideEffectSpec[] = [
     toDirective: (m) => ({ type: 'schedule_message', time: m[1], text: m[2] }),
   },
   // [[MUSIC_ACTION:verb]] 或 [[MUSIC_ACTION:verb|arg1|arg2]]
+  // 批 2 一起听状态机：动词表扩 invite/accept/decline/exit（与客户端 chatParser 同一张表）；
+  // join 系仍在此处收（客户端重放时会 defuse，不产生效果）
   {
-    re: /\[\[MUSIC_ACTION:(join|add|add_new|join_and_add|join_and_add_new)(?:\|([^\]]*))?\]\]/g,
+    re: /\[\[MUSIC_ACTION:(invite|accept|decline|exit|join|add|add_new|join_and_add|join_and_add_new)(?:\|([^\]]*))?\]\]/g,
     toDirective: (m) => ({
       type: 'music_action',
       verb: m[1],

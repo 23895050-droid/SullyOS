@@ -13,6 +13,9 @@ import McdCard from './McdCard';
 import HtmlCard from './HtmlCard';
 import LuckinCard from './LuckinCard';
 import LuckinCheckoutCard from './LuckinCheckoutCard';
+import { loadMusicHooks, loadMusicPlaybackSnapshot, loadMusicPlayRequest, musicApi } from '../../context/MusicContext';
+import { removePendingInvite } from '../../apps/couple/musicStore';
+import { DB } from '../../utils/db';
 
 // 思考链卡片支持的 12 种风格预设 — 同时被 MessageItem 与 ThinkingChainSettingsModal 复用
 export type ThinkingChainStyleId = 'echo' | 'whisper' | 'minimal' | 'ink' | 'neon' | 'terminal' | 'stellar' | 'tama' | 'pixel' | 'muji' | 'ins' | 'custom';
@@ -425,7 +428,7 @@ export const ThinkingChainBlock: React.FC<{
     const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pointerIdRef = useRef<number | null>(null);
-    const pointerTypeRef = useRef<React.PointerEvent<HTMLDivElement>['pointerType']>('');
+    const pointerTypeRef = useRef<React.PointerEvent<HTMLDivElement>['pointerType'] | ''>('');
     const pointerStartRef = useRef({ x: 0, y: 0 });
     const longPressReadyRef = useRef(false);
     const suppressNextClickRef = useRef(false);
@@ -1377,6 +1380,10 @@ interface MessageItemProps {
     onToggleSelect: (id: number) => void;
     /** 思维链卡片在多选模式下有独立勾选框，与 isSelected 分开。 */
     isThinkingSelected?: boolean;
+    /** 图片消息：点击查看大图 */
+    onPreviewImage?: (m: Message) => void;
+    /** 图片消息：下载图片 */
+    onDownloadImage?: (m: Message) => void;
     onToggleThinkingSelect?: (id: number) => void;
     // Translation (AI messages only, bilingual content parsed from %%BILINGUAL%%)
     translationEnabled?: boolean;
@@ -1412,6 +1419,8 @@ interface MessageItemProps {
     onResolveTransfer?: (m: Message, action: 'accepted' | 'returned') => void;
     /** 用户点「生活记录」卡 → 确认 / 否决（角色代记的记录） */
     onResolveLifeRecord?: (m: Message, action: 'confirmed' | 'rejected') => void;
+    /** 打开协同文件柜里的原始 Blob；消息本身只保存 assetId 引用。 */
+    onOpenCollaborationFile?: (m: Message) => void | Promise<void>;
     /** 思考链卡片视觉与交互 */
     thinkingChainOptions?: {
         styleId?: ThinkingChainStyleId;
@@ -1458,7 +1467,10 @@ const MessageItem = React.memo(({
     onLuckinCandidate,
     onResolveTransfer,
     onResolveLifeRecord,
+    onOpenCollaborationFile,
     thinkingChainOptions,
+    onPreviewImage,
+    onDownloadImage,
 }: MessageItemProps) => {
     const isUser = m.role === 'user';
     const isSystem = m.role === 'system';
@@ -1478,9 +1490,12 @@ const MessageItem = React.memo(({
     const activePointerType = useRef<string>('');
     const replyGestureActiveRef = useRef(false);
     const replyReadyRef = useRef(false);
+    // 长按/右键触发后 600ms 内阻止 click 误开 lightbox
+    const longPressTriggeredRef = useRef(false);
 
     const styleConfig = isUser ? activeTheme.user : activeTheme.ai;
     const [showVoiceText, setShowVoiceText] = useState(false);
+    const [openingCollaborationFile, setOpeningCollaborationFile] = useState(false);
     const [replyOffset, setReplyOffset] = useState(0);
     const [isReplyGestureActive, setIsReplyGestureActive] = useState(false);
     const [isReplyReady, setIsReplyReady] = useState(false);
@@ -1512,6 +1527,9 @@ const MessageItem = React.memo(({
             activePointerId.current = null;
             activePointerType.current = '';
             resetReplyGesture();
+            longPressTriggeredRef.current = true;
+            // 600ms 后自动复位，避免永久阻止 click
+            setTimeout(() => { longPressTriggeredRef.current = false; }, 600);
             onLongPress(m);
         }, 600);
     };
@@ -1570,6 +1588,7 @@ const MessageItem = React.memo(({
     };
 
     const handleClick = (e: React.MouseEvent) => {
+        longPressTriggeredRef.current = false;
         if (selectionMode) {
             e.stopPropagation();
             e.preventDefault();
@@ -1589,6 +1608,8 @@ const MessageItem = React.memo(({
             activePointerId.current = null;
             activePointerType.current = '';
             resetReplyGesture();
+            longPressTriggeredRef.current = true;
+            setTimeout(() => { longPressTriggeredRef.current = false; }, 600);
             onLongPress(m);
         },
         onDragStart: (e: React.DragEvent) => e.preventDefault(),
@@ -1630,6 +1651,79 @@ const MessageItem = React.memo(({
                         )}
                     </>
                 )}
+            </div>
+        );
+    };
+
+    // ── 音乐卡共用小件（批 2：一起听邀请/接受/总结卡，样式跟 music_card 一套粉紫渐变）──
+    const musicCardAvatar = (src: string | undefined, name: string, ring: string) => (
+        <div className="relative shrink-0 rounded-full overflow-hidden"
+            style={{ width: 32, height: 32, boxShadow: `0 0 0 2px #fff, 0 0 0 3.5px ${ring}, 0 2px 6px ${ring}66` }}>
+            {src ? (
+                <img src={src} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer"
+                    onError={(e: any) => {
+                        const img = e.target;
+                        const p = img.parentElement;
+                        if (!p || p.querySelector('.ava-fallback')) return;
+                        img.style.display = 'none';
+                        const fb = document.createElement('div');
+                        fb.className = 'ava-fallback w-full h-full flex items-center justify-center text-white text-xs font-semibold';
+                        fb.style.background = `linear-gradient(135deg, ${ring}, #c3b2ff)`;
+                        fb.textContent = (name || '·').slice(0, 1);
+                        p.appendChild(fb);
+                    }}
+                />
+            ) : (
+                <div className="w-full h-full flex items-center justify-center text-white text-xs font-semibold"
+                    style={{ background: `linear-gradient(135deg, ${ring}, #c3b2ff)` }}>
+                    {(name || '·').slice(0, 1)}
+                </div>
+            )}
+        </div>
+    );
+
+    /** 邀请卡共用主体（不含外包装）：双头像头图 + 邀请文案 + 底部动作区（按钮/状态） */
+    const musicInviteCardBody = (inv: { song?: any; inviteSongName?: string; status?: string }, footer: React.ReactNode) => {
+        const song = inv.song || null;
+        const name = song?.name || inv.inviteSongName || '';
+        return (
+            <div className="w-64 rounded-2xl overflow-hidden shadow-sm border"
+                style={{ borderColor: '#f3d9e6', background: 'linear-gradient(135deg, #fff2f7 0%, #f5edff 55%, #eaf1ff 100%)' }}>
+                <div className="relative px-3 pt-3 pb-2 overflow-hidden">
+                    <div aria-hidden className="pointer-events-none absolute inset-0 opacity-70"
+                        style={{
+                            background: `radial-gradient(ellipse at 30% 50%, rgba(255,170,200,0.32) 0%, transparent 52%),
+                                         radial-gradient(ellipse at 70% 50%, rgba(195,178,255,0.32) 0%, transparent 55%)`,
+                        }} />
+                    <div className="relative flex items-center justify-center gap-2">
+                        {musicCardAvatar(userAvatar, '你', '#ffb5cf')}
+                        <svg width="16" height="15" viewBox="0 0 24 22" fill="none"
+                            className="animate-pulse"
+                            style={{ color: '#ff7fae', filter: 'drop-shadow(0 0 5px rgba(255,127,174,0.55))' }}>
+                            <path d="M12 21s-8-5.3-8-11.5C4 6 6.5 3.5 9.5 3.5c1.6 0 3 .8 2.5 2.2C11.5 4.3 12.9 3.5 14.5 3.5 17.5 3.5 20 6 20 9.5 20 15.7 12 21 12 21z"
+                                fill="currentColor" />
+                        </svg>
+                        {musicCardAvatar(charAvatar, charName || 'Ta', '#c3b2ff')}
+                    </div>
+                    <div className="relative mt-1.5 text-center text-[9px] tracking-[0.3em] uppercase font-semibold"
+                        style={{ color: '#9c6fc2', opacity: 0.8 }}>
+                        Listening Together
+                    </div>
+                    <div className="relative mt-0.5 text-center text-[11px]"
+                        style={{ color: '#5a49a8', fontFamily: `'Noto Serif','Georgia',serif` }}>
+                        <span className="font-medium">你</span>
+                        <span className="mx-1.5 opacity-50">×</span>
+                        <span className="font-medium">{charName || 'Ta'}</span>
+                    </div>
+                </div>
+                <div className="p-3 pt-1.5">
+                    <div className="text-[11px] leading-relaxed" style={{ color: '#6b5b8f' }}>
+                        {name ? (
+                            <>邀请你一起听 <span className="font-semibold" style={{ color: '#2a1f4d' }}>《{name}》</span></>
+                        ) : '想和你一起听首歌'}
+                    </div>
+                    {footer}
+                </div>
             </div>
         );
     };
@@ -1829,6 +1923,370 @@ const MessageItem = React.memo(({
             );
         }
 
+        // Camera a2 一起看照片摘要 — 漂亮的卡片，可编辑
+        if (m.metadata?.source === 'camera_a2') {
+            const lines = displayText.split('\n').filter(Boolean);
+            const header = lines[0] || '📷 一起看照片';
+            const body = lines.slice(1).join('\n').trim();
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md" style={{ border: '1.5px solid rgba(236,72,153,0.25)', background: 'linear-gradient(180deg, #fdf2f8 0%, #fff 30%, #fce7f3 100%)' }}>
+                            <div className="px-4 pt-3 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(236,72,153,0.15)', background: 'linear-gradient(135deg, rgba(236,72,153,0.08), rgba(219,39,119,0.04))' }}>
+                                <span className="text-xl">📷</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#be185d' }}>一起看照片 · 相机</div>
+                                </div>
+                            </div>
+                            {body && (
+                                <div className="px-4 py-3">
+                                    <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#475569' }}>
+                                        {body}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 日记转发卡片（diary_forward：批阅 + 原文打包，笔记纸样式，与粉色 couple 卡区分）
+        if (m.metadata?.source === 'diary_forward') {
+            const card = (m.metadata.forwardCard || {}) as { kind?: string; title?: string; subtitle?: string; original?: string; review?: string };
+            const SERIF = "Georgia, 'Times New Roman', 'Songti SC', 'STKaiti', 'KaiTi', serif";
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div
+                            className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md relative"
+                            style={{ border: '1.5px solid #e4d7bf', background: 'linear-gradient(180deg, #fffdf6 0%, #faf4e4 100%)' }}
+                        >
+                            {/* 横线纸底 */}
+                            <div className="absolute inset-0 pointer-events-none" style={{ background: 'repeating-linear-gradient(transparent, transparent 23px, rgba(139,110,80,0.08) 23px, rgba(139,110,80,0.08) 24px)' }} />
+                            <div className="absolute left-7 top-0 bottom-0 pointer-events-none" style={{ width: 1, background: 'rgba(196,110,132,0.25)' }} />
+                            <div className="relative px-3 pt-2.5 pb-2 pl-9 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,110,80,0.15)' }}>
+                                <span className="text-base">📔</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#8a5a3b' }}>日记 · {card.kind || '批阅'}</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#4a3a2e' }}>{card.title || ''}</div>
+                                </div>
+                                {card.subtitle && <div className="text-[9px] shrink-0" style={{ color: '#b5a68c' }}>{card.subtitle}</div>}
+                            </div>
+                            <div className="relative p-3 pl-9">
+                                {card.original ? (
+                                    <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#4a4036', fontFamily: SERIF }}>{card.original}</div>
+                                ) : null}
+                                {card.review ? (
+                                    <div className="mt-2 pt-2" style={{ borderTop: '1px dashed rgba(139,110,80,0.25)' }}>
+                                        <div className="text-[9px] font-bold tracking-wider" style={{ color: '#b08a5a', marginBottom: 3 }}>批阅</div>
+                                        <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#7a5a3a', fontFamily: SERIF }}>{card.review}</div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 和 Ta 转发卡片（together_forward：回忆暖橙 / 约定淡蓝；角色只读文字描述，不读图）
+        if (m.metadata?.source === 'together_forward') {
+            const card = (m.metadata.forwardCard || {}) as { kind?: string; title?: string; subtitle?: string; body?: string; feelings?: string; photosDesc?: string; color?: string };
+            const isMemory = card.kind === '回忆';
+            const accent = card.color || (isMemory ? '#e08e5e' : '#5b9cd6');
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div
+                            className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md relative"
+                            style={{ border: '1.5px solid rgba(180,160,160,0.25)', background: isMemory ? 'linear-gradient(180deg, #fffdf8 0%, #fdf3e8 100%)' : 'linear-gradient(180deg, #fbfdff 0%, #eef4fc 100%)' }}
+                        >
+                            <div className="absolute left-0 top-0 bottom-0" style={{ width: 3, background: accent }} />
+                            <div className="relative px-3 pt-2.5 pb-2 pl-4 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,110,80,0.12)' }}>
+                                <span className="text-base">{isMemory ? '📷' : '🤝'}</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: accent }}>和 Ta · {card.kind || '事件'}</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#3a3a3a' }}>{card.title || ''}</div>
+                                </div>
+                                {card.subtitle && <div className="text-[9px] shrink-0" style={{ color: '#b0a8ab' }}>{card.subtitle}</div>}
+                            </div>
+                            <div className="relative p-3 pl-4">
+                                <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#475569' }}>{card.body || displayText}</div>
+                                {card.photosDesc ? (
+                                    <div className="mt-2 text-[10px] leading-relaxed whitespace-pre-wrap" style={{ color: '#8a7a6e', background: 'rgba(255,255,255,0.65)', borderRadius: 8, padding: '6px 8px' }}>
+                                        📷 {card.photosDesc}
+                                    </div>
+                                ) : null}
+                                {card.feelings ? (
+                                    <div className="mt-2 pt-2" style={{ borderTop: '1px dashed rgba(139,110,80,0.2)' }}>
+                                        <div className="text-[9px] font-bold tracking-wider" style={{ color: '#b08a5a', marginBottom: 3 }}>感受记录</div>
+                                        <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#6a5a4e' }}>{card.feelings}</div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 情侣空间转发卡片（couple_forward：生理期/待办/活动/纪念日，AI 只读 content 文本标记）
+        if (m.metadata?.source === 'couple_forward') {
+            const card = (m.metadata.forwardCard || {}) as { kind?: string; title?: string; subtitle?: string; body?: string };
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md" style={{ border: '1.5px solid #e8d5de', background: 'linear-gradient(180deg, #ffffff 0%, #fdf2f8 100%)' }}>
+                            <div className="px-3 pt-2.5 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,139,139,0.15)' }}>
+                                <span className="text-base">💌</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#8b8b8b' }}>转发 · {card.kind || '情侣空间'}</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#383639' }}>{card.title || ''}</div>
+                                </div>
+                                {card.subtitle && <div className="text-[9px] shrink-0" style={{ color: '#b0a8ab' }}>{card.subtitle}</div>}
+                            </div>
+                            <div className="p-3">
+                                <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#475569' }}>{card.body || displayText}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 相册转发卡片 — 模拟照片卡（AI 只读 content 文本标记）
+        if (m.metadata?.source === 'album_forward') {
+            const card = (m.metadata.forwardCard || {}) as { thumbnail?: string; charName?: string; timestamp?: number; summary?: string };
+            const d = card.timestamp ? new Date(card.timestamp) : null;
+            const dateStr = d ? `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日` : '';
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md" style={{ border: '1.5px solid #e0d1d4', background: 'linear-gradient(180deg, #ffffff 0%, #fdf2f8 100%)' }}>
+                            <div className="px-3 pt-2.5 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,139,139,0.15)' }}>
+                                <span className="text-base">📸</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#8b8b8b' }}>转发 · 历史照片</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#383639' }}>{card.charName || '角色'}</div>
+                                </div>
+                                {dateStr && <div className="text-[9px] shrink-0" style={{ color: '#b0a8ab' }}>{dateStr}</div>}
+                            </div>
+                            <div className="p-3 flex gap-2.5">
+                                {card.thumbnail && (
+                                    <img src={card.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0 bg-slate-100" loading="lazy" decoding="async" />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#475569', display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                        {card.summary || displayText}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 一起听邀请卡（她发起的：等角色 AI 用 accept/decline 标签回应，这里只展示状态）
+        if (m.type === 'music_invite' && m.metadata?.invite) {
+            const inv = m.metadata.invite as { song?: any; inviteSongName?: string; status?: string };
+            const status = inv.status || 'pending';
+            const statusChip = status === 'accepted'
+                ? <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium" style={{ background: 'rgba(195,178,255,0.3)', color: '#7a5db0', border: '1px solid rgba(195,178,255,0.5)' }}>💗 {charName || 'Ta'} 已接受</span>
+                : status === 'declined'
+                    ? <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium" style={{ background: 'rgba(148,163,184,0.15)', color: '#7a7a85', border: '1px solid rgba(148,163,184,0.3)' }}>🍃 婉拒了这次邀请</span>
+                    : <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium animate-pulse" style={{ background: 'rgba(255,181,207,0.25)', color: '#b06a8d', border: '1px solid rgba(255,181,207,0.4)' }}>⏳ 等 Ta 回应</span>;
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mx-auto flex justify-center mz-music-card">
+                            {musicInviteCardBody(inv, <div className="flex justify-center">{statusChip}</div>)}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 一起听回应卡（accept / decline / exit，双向都落这一种卡）
+        if (m.type === 'music_accept' && m.metadata?.acceptCard) {
+            const card = m.metadata.acceptCard as { action?: string; song?: any };
+            const action = card.action || 'accept';
+            const songName = card.song?.name;
+            const isAccept = action === 'accept';
+            const isDecline = action === 'decline';
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mz-music-card mx-auto w-60 rounded-2xl border px-4 py-3 text-center shadow-sm"
+                            style={{ borderColor: '#f3d9e6', background: 'linear-gradient(135deg, #fff7fa 0%, #f7f1ff 100%)' }}>
+                            <div className="text-base leading-none">{isAccept ? '💗' : isDecline ? '🍃' : '🎧'}</div>
+                            <div className="text-[11px] font-semibold mt-1.5" style={{ color: '#383639' }}>
+                                {isAccept ? `${charName || 'Ta'} 接受了一起听` : isDecline ? `${charName || 'Ta'} 婉拒了这次邀请` : `${charName || 'Ta'} 结束了这次一起听`}
+                            </div>
+                            {songName ? (
+                                <div className="text-[10px] mt-0.5 truncate" style={{ color: '#9c6fc2' }}>《{songName}》</div>
+                            ) : null}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 一起听总结卡（听了 N 首歌 + 对歌的总结；行可点击点播）
+        if (m.type === 'music_summary' && m.metadata?.summaryCard) {
+            const card = m.metadata.summaryCard as { songs?: any[]; summaryText?: string; startedAt?: string; endedAt?: string };
+            const songs: any[] = card.songs || [];
+            const minutes = card.startedAt && card.endedAt
+                ? Math.max(1, Math.round((Date.parse(card.endedAt) - Date.parse(card.startedAt)) / 60000))
+                : 0;
+            const playSummarySong = (s: any) => {
+                const req = loadMusicPlayRequest();
+                if (!req) return;
+                req({
+                    id: s.neteaseId,
+                    name: s.name,
+                    artists: (s.artists || []).join(' / '),
+                    album: '',
+                    albumPic: s.albumPic || '',
+                    duration: 0,
+                    fee: 0,
+                });
+            };
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mz-music-card mx-auto w-72 rounded-2xl overflow-hidden shadow-md"
+                            style={{ border: '1.5px solid #f3d9e6', background: 'linear-gradient(135deg, #fff2f7 0%, #f5edff 55%, #eaf1ff 100%)' }}>
+                            <div className="px-3 pt-2.5 pb-2 flex items-center gap-2" style={{ borderBottom: '1px solid rgba(156,111,194,0.15)' }}>
+                                <span className="text-sm">🎧</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[9px] tracking-[0.3em] uppercase font-semibold" style={{ color: '#9c6fc2', opacity: 0.8 }}>Listening Together</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#2a1f4d' }}>
+                                        一起听了 {songs.length} 首歌{minutes > 0 ? ` · 约 ${minutes} 分钟` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="px-3 py-2">
+                                {songs.map((s: any, i: number) => (
+                                    <div key={s.neteaseId ?? i}
+                                        className="flex items-center gap-2.5 py-1.5 cursor-pointer active:opacity-80 transition-opacity"
+                                        onClick={() => playSummarySong(s)}
+                                        title="点一下播放">
+                                        {s.albumPic ? (
+                                            <img src={s.albumPic} alt="" className="w-8 h-8 rounded-md object-cover shrink-0 bg-slate-100" loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+                                        ) : (
+                                            <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 text-sm text-white"
+                                                style={{ background: 'linear-gradient(135deg, #8b7ab8 0%, #6b95c7 100%)' }}>♪</div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-[11px] font-semibold line-clamp-1" style={{ color: '#2a1f4d' }}>{s.name || '未命名'}</div>
+                                            <div className="text-[9px] truncate" style={{ color: '#9c8ab8' }}>{(s.artists || []).join(' / ') || '—'}</div>
+                                        </div>
+                                        {s.count > 1 && (
+                                            <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(195,178,255,0.3)', color: '#7a5db0' }}>×{s.count}</span>
+                                        )}
+                                    </div>
+                                ))}
+                                {card.summaryText && (
+                                    <div className="mt-1 pt-2 text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#5a49a8', borderTop: '1px dashed rgba(156,111,194,0.25)' }}>
+                                        {card.summaryText}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 聊歌总结卡（聊歌框每 50 条自动一张 + 退出补一段；与一起听总结卡分开渲染）
+        if (m.type === 'music_chat_summary' && m.metadata?.chatSummaryCard) {
+            const card = m.metadata.chatSummaryCard as { summaryText?: string; segFrom?: number; segTo?: number };
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mz-music-card mx-auto w-64 rounded-2xl border px-3 py-2.5 shadow-sm"
+                            style={{ borderColor: '#dbe7f4', background: 'linear-gradient(180deg, #f6faff 0%, #f0f6ff 100%)' }}>
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-xs">💬</span>
+                                <span className="text-[9px] tracking-[0.25em] uppercase font-semibold" style={{ color: '#7c93b8' }}>聊歌小结</span>
+                                {typeof card.segFrom === 'number' && (
+                                    <span className="text-[8px] ml-auto" style={{ color: '#a8b8d0' }}>第 {card.segFrom + 1}-{card.segTo || card.segFrom + 1} 条</span>
+                                )}
+                            </div>
+                            <div className="mt-1 text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#4a5f80' }}>
+                                {card.summaryText || displayText}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         return (
             <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
                 {selectionMode && (
@@ -1881,7 +2339,9 @@ const MessageItem = React.memo(({
     // 音乐卡片（一起听 / 收歌单）与 HTML 卡片同为定宽模块，跟随同一套 chatModuleAlign 约定。
     // 条件与下方渲染分支一致：没有 song 元数据会落回普通气泡，不按模块排版。
     const isMusicCard = m.type === 'music_card' && !!m.metadata?.song;
-    const isModuleCard = isHtmlCard || isMusicCard;
+    // 一起听邀请卡（他发起的）也是定宽模块
+    const isMusicInviteCard = m.type === 'music_invite' && !!m.metadata?.invite;
+    const isModuleCard = isHtmlCard || isMusicCard || isMusicInviteCard;
     // 聊天细节微调 chatModuleAlign：HTML 卡片 / 心象卡片 / 音乐卡片默认水平居中，'anchor' 才贴气泡列。
     // 心象居中时抽出到气泡行上方的独立行（不带 .group 类，注入的钉位 CSS 自然不命中）。
     const centerModules = moduleAlign !== 'anchor';
@@ -2024,6 +2484,75 @@ const MessageItem = React.memo(({
     }
 
     // --- Music Card Rendering (一起听 / 加入歌单) ---
+    // 一起听邀请卡（他发起的：带接受/拒绝按钮，她点了才发生——批 2 双向状态机方向 B）
+    if (m.type === 'music_invite' && m.metadata?.invite) {
+        const inv = m.metadata.invite as { song?: any; inviteSongName?: string; status?: string };
+        const status = inv.status || 'pending';
+        const respondInvite = async (accepted: boolean) => {
+            if (status !== 'pending') return;
+            const hooks = loadMusicHooks();
+            if (accepted && hooks) hooks.joinListeningTogether(m.charId);
+            removePendingInvite(m.charId, accepted ? 'accepted' : 'declined');
+            await DB.updateMessageMetadata(m.id, (prev) => ({
+                ...(prev || {}),
+                invite: { ...((prev || {}).invite || {}), status: accepted ? 'accepted' : 'declined' },
+            })).catch(() => {});
+            await DB.saveMessage({
+                charId: m.charId,
+                role: 'system',
+                type: 'music_accept',
+                content: accepted ? '[你接受了一起听]' : '[你婉拒了这次邀请]',
+                metadata: { source: 'music_accept', acceptCard: { action: accepted ? 'accept' : 'decline', song: inv.song || null } },
+            }).catch(() => {});
+            if (accepted) {
+                // 他带歌名邀请：正在放歌就去搜这首来播（搜不到保持当前）；没在放就只激活状态，等她自己去放
+                const name = inv.inviteSongName;
+                const snap = loadMusicPlaybackSnapshot();
+                if (name && snap?.playing && snap.current && snap.cfg) {
+                    try {
+                        const r: any = await musicApi.search(snap.cfg, name);
+                        const hit = (r?.result?.songs || [])[0];
+                        if (hit) {
+                            const req = loadMusicPlayRequest();
+                            if (req) {
+                                req({
+                                    id: hit.id,
+                                    name: hit.name,
+                                    artists: (hit.ar || hit.artists || []).map((a: any) => a.name).join(' / '),
+                                    album: hit.al?.name || hit.album?.name || '',
+                                    albumPic: String(hit.al?.picUrl || hit.album?.picUrl || '').replace(/^http:/, 'https:'),
+                                    duration: (hit.dt || hit.duration || 0) / 1000,
+                                    fee: hit.fee ?? 0,
+                                });
+                            }
+                        }
+                    } catch { /* 搜不到就保持当前播放 */ }
+                }
+            }
+        };
+        const footer = status === 'pending' ? (
+            <div className="mt-2.5 flex gap-2">
+                <button
+                    onClick={(e) => { e.stopPropagation(); void respondInvite(true); }}
+                    className="flex-1 py-1.5 rounded-full text-[10px] font-semibold active:scale-95 transition-transform"
+                    style={{ background: 'linear-gradient(135deg, #ff9dbb, #c9b3ff)', color: '#fff', boxShadow: '0 2px 8px rgba(201,141,255,0.35)' }}>
+                    💗 接受
+                </button>
+                <button
+                    onClick={(e) => { e.stopPropagation(); void respondInvite(false); }}
+                    className="flex-1 py-1.5 rounded-full text-[10px] font-medium active:scale-95 transition-transform"
+                    style={{ background: 'rgba(148,163,184,0.12)', color: '#7a7a85', border: '1px solid rgba(148,163,184,0.3)' }}>
+                    婉拒
+                </button>
+            </div>
+        ) : status === 'accepted' ? (
+            <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a5db0' }}>💗 已接受，正在一起听</div>
+        ) : (
+            <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a7a85' }}>已婉拒这次邀请</div>
+        );
+        return commonLayout(musicInviteCardBody(inv, footer));
+    }
+
     if (m.type === 'music_card' && m.metadata?.song) {
         const song = m.metadata.song as { songId: number; name: string; artists: string; albumPic: string };
         const intent = (m.metadata.intent || 'join') as 'join' | 'add' | 'join_and_add';
@@ -3255,6 +3784,73 @@ const MessageItem = React.memo(({
         return <LifeRecordCard m={m} charName={charName} commonLayout={commonLayout} selectionMode={selectionMode} onResolveLifeRecord={onResolveLifeRecord} />;
     }
 
+    if (m.type === 'collaboration_file') {
+        const fileName = String(m.metadata?.fileName || m.content || '未命名文件');
+        const mimeType = String(m.metadata?.mimeType || 'application/octet-stream');
+        const rawSize = Number(m.metadata?.fileSize || 0);
+        const fileSize = rawSize >= 1024 * 1024
+            ? `${(rawSize / (1024 * 1024)).toFixed(rawSize >= 10 * 1024 * 1024 ? 0 : 1)} MB`
+            : rawSize >= 1024 ? `${Math.max(1, Math.round(rawSize / 1024))} KB` : `${rawSize || 0} B`;
+        const extension = String(m.metadata?.format || fileName.split('.').pop() || 'FILE').toUpperCase().slice(0, 8);
+        const isPdf = extension === 'PDF' || mimeType.includes('pdf');
+        const isWord = ['DOC', 'DOCX'].includes(extension) || mimeType.includes('wordprocessingml');
+        const isInstallable = m.metadata?.collaborationAttachmentKind === 'installable' || mimeType.includes('vnd.sullyos.installable');
+        const displayExtension = isInstallable ? '作品' : extension;
+        const accentClass = isInstallable
+            ? 'bg-violet-50 text-violet-600 border-violet-100'
+            : isPdf
+            ? 'bg-rose-50 text-rose-600 border-rose-100'
+            : isWord ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200';
+        const badgeClass = isInstallable ? 'bg-violet-600' : isPdf ? 'bg-rose-600' : isWord ? 'bg-blue-600' : 'bg-slate-600';
+        const openFile = async (event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            if (selectionMode) {
+                onToggleSelect(m.id);
+                return;
+            }
+            if (!onOpenCollaborationFile || openingCollaborationFile) return;
+            setOpeningCollaborationFile(true);
+            try {
+                await onOpenCollaborationFile(m);
+            } finally {
+                setOpeningCollaborationFile(false);
+            }
+        };
+        return commonLayout(
+            <button
+                type="button"
+                onClick={openFile}
+                disabled={openingCollaborationFile && !selectionMode}
+                className="sully-collaboration-file group w-[min(276px,72vw)] overflow-hidden rounded-[18px] border border-slate-200/90 bg-white text-left shadow-[0_8px_24px_rgba(15,23,42,0.08)] transition-[transform,box-shadow,opacity] duration-150 active:scale-[0.985] disabled:opacity-70"
+                aria-label={`打开文件 ${fileName}`}
+            >
+                <span className="flex min-w-0 items-center gap-3.5 px-3.5 py-3.5">
+                    <span className={`sully-collaboration-file-icon relative grid h-12 w-11 shrink-0 place-items-center rounded-[13px] border ${accentClass}`}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6" aria-hidden="true">
+                            <path d="M7 3.75h6.75L18.5 8.5v11.75H7z" />
+                            <path d="M13.5 3.75V8.5h5" />
+                        </svg>
+                        <span className={`absolute -bottom-1 rounded-[5px] px-1.5 py-[1px] text-[7px] font-black tracking-[0.08em] text-white ${badgeClass}`}>{displayExtension}</span>
+                    </span>
+                    <span className="sully-collaboration-file-meta min-w-0 flex-1">
+                        <span className="sully-collaboration-file-name block max-h-[2.7em] overflow-hidden break-words text-[13px] font-semibold leading-[1.35] text-slate-800">{fileName}</span>
+                        <span className="sully-collaboration-file-detail mt-1.5 block text-[10px] font-medium tracking-wide text-slate-400">{displayExtension} · {fileSize}</span>
+                    </span>
+                    <span className="sully-collaboration-file-action grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-400 transition-colors group-hover:text-slate-700">
+                        {openingCollaborationFile ? (
+                            <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px] animate-spin" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity=".22"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                        ) : isInstallable ? (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.6"/></svg>
+                        ) : (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]" aria-hidden="true"><path d="M12 3v12"/><path d="m7.5 11 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>
+                        )}
+                    </span>
+                </span>
+                <span className="block border-t border-slate-100 px-3.5 py-2 text-[9px] font-semibold tracking-[0.12em] text-slate-400">协同工作 · {isInstallable ? '可安装作品' : '原始文件'}</span>
+            </button>
+        );
+    }
+
     // 表情气泡默认尺寸 160→96（吸收社区美化的共识尺寸）。sully-emoji-msg 是给自定义 CSS 用的
     // 稳定锚点——旧美化代码锚在 .max-w-\[160px\] 类名上，类名一变就失配（恰好无缝退休：
     // 新默认就是它们想要的 96px）；以后想改尺寸请选择器写 .sully-emoji-msg，不再锚类名。
@@ -3269,10 +3865,72 @@ const MessageItem = React.memo(({
     }
 
     if (m.type === 'image') {
+        const genStatus = (m.metadata as any)?.imageGenStatus as string | undefined;
+        const genDesc = (m.metadata as any)?.imageGenDescription as string | undefined;
+        const genError = (m.metadata as any)?.imageGenError as string | undefined;
+
+        // 生图失败 — 灰色卡片 + 快捷操作
+        if (genStatus === 'failed') {
+            return commonLayout(
+                <div className="relative group">
+                    <div className="px-4 py-4 rounded-2xl bg-slate-100 border border-red-200/60 text-center min-w-[160px] max-w-[220px] space-y-2">
+                        <div className="text-slate-300 text-2xl">🖼️‍💥</div>
+                        {genDesc ? (
+                            <p className="text-[10px] text-slate-500 leading-relaxed line-clamp-3">{genDesc}</p>
+                        ) : (
+                            <p className="text-xs text-slate-400 italic">图片生成失败</p>
+                        )}
+                        {genError && (
+                            <p className="text-[9px] text-red-400 leading-relaxed line-clamp-2">{genError}</p>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // 加载中 — 骨架动画
+        if (genStatus === 'pending') {
+            return commonLayout(
+                <div className="relative group">
+                    <div className="w-[160px] h-[160px] rounded-2xl bg-slate-200 animate-pulse flex items-center justify-center">
+                        <div className="flex flex-col items-center gap-2">
+                            <div className="w-6 h-6 border-2 border-slate-300 border-t-slate-400 rounded-full animate-spin"></div>
+                            <span className="text-[10px] text-slate-400">生成中…</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 成功 — 正常图片 + 点击预览 + hover 下载
+        const openPreview = () => {
+            if (selectionMode || longPressTriggeredRef.current) return;
+            onPreviewImage?.(m);
+        };
         return commonLayout(
             <div className="relative group">
                 {m.content ? (
-                    <img src={m.content} className="max-w-[200px] max-h-[300px] rounded-2xl" alt="Uploaded" loading="lazy" decoding="async" />
+                    <>
+                        <img
+                            src={m.content}
+                            className="max-w-[200px] max-h-[300px] rounded-2xl cursor-zoom-in"
+                            alt={genDesc || '聊天图片'}
+                            loading="lazy"
+                            decoding="async"
+                            draggable={false}
+                            onClick={openPreview}
+                        />
+                        {onDownloadImage && (
+                            <button
+                                type="button"
+                                aria-label="下载图片"
+                                onClick={(e) => { e.stopPropagation(); onDownloadImage(m); }}
+                                className="absolute bottom-1.5 right-1.5 z-10 w-7 h-7 rounded-full bg-black/55 text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity active:scale-90"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                            </button>
+                        )}
+                    </>
                 ) : (
                     <div className="px-4 py-6 rounded-2xl bg-slate-100 text-slate-400 text-xs italic text-center min-w-[120px]">[图片已丢失]</div>
                 )}

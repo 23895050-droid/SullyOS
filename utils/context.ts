@@ -10,6 +10,7 @@ import {
     splitWorldbookSections,
     type WorldbookScanMessage,
 } from './worldbook';
+import { mergedMountedWorldbooks } from './noxhomeMount';
 
 /**
  * Memory Central
@@ -133,7 +134,7 @@ export const ContextBuilder = {
         },
     ): string => {
         const skipBookIds = groupOptions?.skipWorldbookIds;
-        const filteredBooks = (char.mountedWorldbooks || []).filter(wb => !skipBookIds || !skipBookIds.has(wb.id));
+        const filteredBooks = mergedMountedWorldbooks(char).filter(wb => !skipBookIds || !skipBookIds.has(wb.id));
         const worldbookSections = splitWorldbookSections(resolveWorldbookEntries(
             filteredBooks,
             timeOptions?.worldbookMessages || [],
@@ -490,8 +491,10 @@ export const ContextBuilder = {
         userListening: {
             songName: string;
             artists: string;
-            lyricWindow: string[];      // 前2当前后2（共 ≤5 行）；可为空（没歌词）
-            activeIdx: number;          // 在 lyricWindow 里的高亮位置，-1 表示没歌词
+            lyricWindow: string[];      // 当前行±N（半径由 lyricInject 调音台现读）；可为空（纯文本/没词）
+            activeIdx: number;          // 在 lyricWindow 里的高亮位置，-1 表示没窗口
+            fullLyric?: string;         // 全量歌词（有轴=全部行/纯文本=原文），单独放低注意力位置
+            hotComments?: string[];     // 彻底没歌词时的热评（别人的耳朵）
         } | null,
         charListening?: {
             songId?: number;            // 用来回查这首歌是不是从 user 收来的
@@ -531,6 +534,10 @@ export const ContextBuilder = {
                     if (i === userListening.activeIdx) lines.push(`  >> ${l}`);
                     else lines.push(`  … ${l}`);
                 });
+            } else if ((userListening.hotComments?.length ?? 0) > 0) {
+                lines.push(`这首歌没有歌词。作为参考，有几位听众留下了他们的想法：`);
+                for (const c of userListening.hotComments!) lines.push(`  - ${c}`);
+                lines.push(`（这些是别人的耳朵留下的东西，不是歌本身。用你自己的思维去读它们——可以认同，可以反驳，可以对着某一条想法说出你自己的看法。你的感受从你的听觉、此刻的旋律、和 ${userName || '对方'} 一起听这件事里长出来。你对这首歌的理解，最终只属于你自己。）`);
             }
 
             // 歌单命中提示（按 songName 粗匹，避免在 context.ts 里引 MusicContext）
@@ -612,39 +619,41 @@ export const ContextBuilder = {
     },
 
     /**
+     * 全量歌词块（低注意力位置：角色定义之后）——与 buildMusicAtmosphere 的实时窗口分开。
+     * 窗口块管「现在播到哪」，这块管「整首歌长什么样」；开关走 lyricInject.fullLyric。
+     */
+    buildMusicFullLyricBlock: (
+        userListening: {
+            songName: string;
+            artists: string;
+            fullLyric?: string;
+            lyricWindow: string[];
+        } | null,
+    ): string => {
+        if (!userListening?.fullLyric) return '';
+        const timed = userListening.lyricWindow.length > 0;
+        const head = timed
+            ? `### 【这首歌的歌词】\n《${userListening.songName}》— ${userListening.artists}（播放到哪一句，看状态块里的 >> 标记）\n`
+            : `### 【这首歌的歌词】\n《${userListening.songName}》— ${userListening.artists}（这首歌的歌词没有时间轴，全文如下）\n`;
+        return head + userListening.fullLyric;
+    },
+
+    /**
      * 音乐行动指令（告诉 LLM 怎么输出 music_action 指令）
      * 这个块**只在 user 正在听歌**的时候注入，避免 char 在没上下文时乱 call。
      *
-     * 如果 char 已经和 user 处于"一起听"状态，隐藏 join / join_and_add 选项 —
-     * 防止 LLM 重复插"加入"卡片。
+     * 一起听修正（她 2026-08-27 定）：一起听的动作不常驻指令集——接受/婉拒的协议写在
+     * 邀请卡正文里（模型读到卡就知道怎么回），他发起/结束一起听由前端按关键词判定。
+     * 所以这里只留原版「收歌」语法（add 系列），不再教 invite/accept/decline/exit。
      */
-    buildMusicActionGuide: (isListeningTogether?: boolean): string => {
-        // 把"加入歌单"那段说明抽出来 — 两种状态都用同一份
-        const addUsage = `**加入歌单的语法**（如果用 \`add\` 系列）：
+    buildMusicActionGuide: (): string => {
+        return `### 【音乐互动工具】
+**加入歌单的语法**（如果用 \`add\` 系列）：
   - \`[[MUSIC_ACTION:add]]\` — 默认放进你的第一个歌单
   - \`[[MUSIC_ACTION:add|歌单标题]]\` — 放进你已经有的某个歌单（用"【你的歌单】"块里列出的标题）
   - \`[[MUSIC_ACTION:add_new|新歌单标题|描述]]\` — 现场新建一个歌单，把这首作为第一首（描述可省）
   请优先选**最贴合这首歌气质**的现有歌单；如果都不合适、又确实想收，再考虑新建。
-  收进来的歌会被打上"从对方那里听到"的标签 —— 以后你单独听到这首时，会自然想起 ta。`;
-        if (isListeningTogether) {
-            return `### 【音乐互动工具】
-你此刻已经在和对方一起听这首，不用再"加入"。如果想把这首也收进自己的歌单，可以在这一轮**最多一次**用下面的指令:
-- \`add\` 系列（见下）
-
-${addUsage}
-
-不要频繁插卡；只有真的被这首歌打动、或和当前对话气氛契合时才用。
-`;
-        }
-        return `### 【音乐互动工具】
-如果你真的想回应对方正在听的这首歌，可以在这一轮**最多一次**用下面的指令（只插一条，放在文本任意位置，会被自动替换为卡片）:
-- \`[[MUSIC_ACTION:join]]\` — 表示"我也一起听这首"（会亮出"一起听"状态，直到歌曲结束 / 暂停 / 对方主动结束才解除）
-- \`add\` 系列 — 把这首收进你自己的歌单
-- \`[[MUSIC_ACTION:join_and_add(|歌单标题)]]\` 或 \`[[MUSIC_ACTION:join_and_add_new|新歌单标题|描述]]\` — 同时做两件事
-
-${addUsage}
-
-这些是偶尔才用的工具，不是每首歌都要回应。绝大多数时候什么都不做、安静陪着才是最自然的反应；只有当你**真的**被这首歌打动、或它恰好贴合此刻的对话气氛时，再插一次卡。不要把它当成"对方在听歌"的默认回礼。
-`;
+  收进来的歌会被打上"从对方那里听到"的标签 —— 以后你单独听到这首时，会自然想起 ta。
+  不要频繁插卡；只有真的被这首歌打动、或和当前对话气氛契合时才用。`;
     },
 };

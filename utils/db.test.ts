@@ -79,10 +79,12 @@ describe('openDB 版本回退 (现有版本高于当前 build)', () => {
     });
     hi.close();
 
-    // openDB 带 DB_VERSION(<999) 打开 → VersionError → 回退到不带版本号 → 连到 v999
+    // openDB 带 DB_VERSION(<999) 打开 → VersionError → 回退到不带版本号 → 连到 v999。
+    // fork 自愈（ensureForkStores，2026-08-14 桌面端近期接收存不进修复）：回退打开后
+    // 检查 fork store 缺失就 close 后以 version+1 重开建表补齐 → 版本变成 1000。
     const db = await openDB();
     expect(db).toBeTruthy();
-    expect(db.version).toBe(999);
+    expect(db.version).toBe(1000);
 
     await DB.deleteDB(); // 收尾, 避免污染后续用例
   });

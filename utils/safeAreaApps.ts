@@ -44,6 +44,14 @@ export const SELF_SAFE_AREA_APPS: ReadonlySet<AppID> = new Set<AppID>([
     AppID.WorldHome,
     AppID.CharCreatorDev,
     AppID.SpecialMoments,
+    // 相机/相册全家桶（2026-08-13 迁移）：顶栏改 --chrome-top 自理
+    AppID.ImageGen,
+    AppID.ImageReceipts,
+    AppID.Album,
+    // Nox 的单间（2026-08-18）：全屏铺满，底部导航自己让位 home 条
+    AppID.NoxHome,
+    // 小助手（2026-08-30）：顶栏 --chrome-top 自理，覆盖状态栏
+    AppID.Assistant,
 ]);
 
 // 外壳是否需要替这个 App 让出安全区：不在自理名单里的才需要。

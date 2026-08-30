@@ -50,15 +50,15 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
   <div
     className="rounded-2xl overflow-hidden relative"
     style={{
-      background: `linear-gradient(135deg, ${C.sakura}25, ${C.lavender}22, ${C.glow}20)`,
-      border: `1px solid ${C.sakura}50`,
-      boxShadow: `0 4px 18px ${C.sakura}25, inset 0 1px 0 rgba(255,255,255,0.5)`,
+      background: `linear-gradient(135deg, rgba(var(--mz-sakura-rgb, 244,194,207), 0.15), rgba(var(--mz-lavender-rgb, 207,195,232), 0.13), rgba(var(--mz-glow-rgb, 205,198,233), 0.13))`,
+      border: `1px solid rgba(var(--mz-sakura-rgb, 244,194,207), 0.31)`,
+      boxShadow: `0 4px 18px rgba(var(--mz-sakura-rgb, 244,194,207), 0.15), inset 0 1px 0 rgba(255,255,255,0.5)`,
     }}
   >
     <div
       aria-hidden
       className="pointer-events-none absolute inset-0 opacity-50"
-      style={{ background: `radial-gradient(ellipse at 80% 20%, ${C.sakura}40 0%, transparent 50%)` }}
+      style={{ background: `radial-gradient(ellipse at 80% 20%, rgba(var(--mz-sakura-rgb, 244,194,207), 0.25) 0%, transparent 50%)` }}
     />
     <button
       onClick={() => setExpanded((v: boolean) => !v)}
@@ -68,8 +68,8 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
         <div className="absolute inset-0 rounded-xl flex items-center justify-center overflow-hidden"
           style={{
             background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
-            border: `1.5px solid ${C.glow}80`,
-            boxShadow: `0 2px 8px ${C.glow}40`,
+            border: `1.5px solid rgba(var(--mz-glow-rgb, 205,198,233), 0.5)`,
+            boxShadow: `0 2px 8px rgba(var(--mz-glow-rgb, 205,198,233), 0.25)`,
           }}
         >
           <Sparkle size={20} color="white" delay={0} />
@@ -100,7 +100,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
       </div>
     </button>
     {expanded && (
-      <div className="relative border-t px-1 py-1" style={{ borderColor: `${C.sakura}30` }}>
+      <div className="relative border-t px-1 py-1" style={{ borderColor: `rgba(var(--mz-sakura-rgb, 244,194,207), 0.19)` }}>
         {songs.map((s, idx) => {
           const active = currentId === s.id;
           return (
@@ -110,7 +110,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
                 className="flex-1 flex items-center gap-2 min-w-0 text-left"
               >
                 <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
-                  style={{ background: active ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : `${C.faint}25` }}>
+                  style={{ background: active ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : `rgba(var(--mz-faint-rgb, 188,184,204), 0.15)` }}>
                   {active && playing ? (
                     <span className="flex gap-0.5">
                       <span className="w-0.5 h-2 bg-white rounded-full" style={{ animation: 'shizuku-twinkle 0.6s ease-in-out infinite' }} />
@@ -358,7 +358,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
             className="mt-3 w-full rounded-2xl shizuku-glass p-4 flex items-center gap-3 transition-all active:scale-[0.99]"
           >
             <div className="w-10 h-10 rounded-full flex items-center justify-center"
-              style={{ background: `linear-gradient(135deg, ${C.faint}40, ${C.muted}30)`, border: `1px solid ${C.faint}40` }}>
+              style={{ background: `linear-gradient(135deg, rgba(var(--mz-faint-rgb, 188,184,204), 0.25), rgba(var(--mz-muted-rgb, 124,119,154), 0.19))`, border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.25)` }}>
               <UserIcon size={18} color={C.muted} weight="duotone" />
             </div>
             <div className="flex-1 text-left">
@@ -390,7 +390,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
   }
 
   return (
-    <div className="flex flex-col h-full relative"
+    <div className="mz-profile flex flex-col h-full relative"
       style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
       <BokehBg />
       <MizuHeader
@@ -428,21 +428,21 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
           {profile.backgroundUrl ? (
             <img src={profile.backgroundUrl} className="absolute inset-0 w-full h-full object-cover" alt="" />
           ) : (
-            <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${C.accent}40, ${C.sakura}40, ${C.lavender}40)` }} />
+            <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, rgba(var(--mz-accent-rgb, 179,168,206), 0.25), rgba(var(--mz-sakura-rgb, 244,194,207), 0.25), rgba(var(--mz-lavender-rgb, 207,195,232), 0.25))` }} />
           )}
-          <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, transparent 0%, ${C.bg}CC 100%)` }} />
+          <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, transparent 0%, rgba(var(--mz-bg-rgb, 251,251,255), 0.8) 100%)` }} />
         </div>
 
         {/* 用户卡 */}
         <div className="-mt-12 mx-4 rounded-3xl p-4 shizuku-glass-strong relative z-10"
-          style={{ boxShadow: `0 10px 40px ${C.glow}15` }}>
+          style={{ boxShadow: `0 10px 40px rgba(var(--mz-glow-rgb, 205,198,233), 0.08)` }}>
           <div className="flex items-center gap-3">
             <div className="relative shrink-0">
               <img
                 src={profile.avatarUrl || 'https://p1.music.126.net/y19E5SadGUmSR8SZxkrNtw==/109951163965029180.jpg'}
                 alt=""
                 className="w-16 h-16 rounded-2xl object-cover"
-                style={{ border: `2px solid ${C.glow}60`, boxShadow: `0 4px 20px ${C.glow}30` }}
+                style={{ border: `2px solid rgba(var(--mz-glow-rgb, 205,198,233), 0.38)`, boxShadow: `0 4px 20px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}
               />
               <div className="absolute -bottom-1 -right-1">
                 <Sparkle size={10} color={C.sakura} delay={0.3} />
@@ -460,7 +460,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                   style={{ background: `linear-gradient(135deg, ${C.vip}, #e0b88a)`, letterSpacing: '0.05em' }}>
                   {vipLabel}
                 </span>
-                <span className="text-[9px] px-2 py-0.5 rounded-full" style={{ color: C.muted, border: `1px solid ${C.faint}40` }}>
+                <span className="text-[9px] px-2 py-0.5 rounded-full" style={{ color: C.muted, border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.25)` }}>
                   UID · {profile.userId}
                 </span>
               </div>
@@ -502,7 +502,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 } catch (e: any) { addToast(`获取失败：${e.message}`, 'error'); }
               }}
               className="flex-1 py-2 rounded-xl text-[11px] transition-all text-white"
-              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 2px 10px ${C.glow}30` }}
+              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 2px 10px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}
             >
               每日推荐
             </button>
@@ -525,7 +525,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 } catch (e: any) { addToast(`FM 失败：${e.message}`, 'error'); }
               }}
               className="flex-1 py-2 rounded-xl text-[11px] transition-all shizuku-glass"
-              style={{ color: C.accent, border: `1px solid ${C.accent}30` }}
+              style={{ color: C.accent, border: `1px solid rgba(var(--mz-accent-rgb, 179,168,206), 0.19)` }}
             >
               私人 FM
             </button>
@@ -569,7 +569,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                           className="w-14 h-14 rounded-full object-cover transition-transform group-active:scale-95"
                           style={{
                             border: `2px solid ${initialized ? C.accent : C.faint}60`,
-                            boxShadow: initialized ? `0 2px 12px ${C.glow}40` : 'none',
+                            boxShadow: initialized ? `0 2px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.25)` : 'none',
                             opacity: initialized ? 1 : 0.55,
                           }}
                         />
@@ -581,7 +581,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                               ? `linear-gradient(135deg, ${C.primary}, ${C.lavender})`
                               : `linear-gradient(135deg, ${C.faint}, ${C.muted})`,
                             border: `2px solid ${initialized ? C.accent : C.faint}60`,
-                            boxShadow: initialized ? `0 2px 12px ${C.glow}40` : 'none',
+                            boxShadow: initialized ? `0 2px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.25)` : 'none',
                             opacity: initialized ? 1 : 0.7,
                             fontFamily: `'Noto Serif', serif`,
                           }}
@@ -591,7 +591,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                       )}
                       {!initialized && (
                         <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
-                          style={{ background: C.bg, color: C.muted, border: `1px solid ${C.faint}60` }}>
+                          style={{ background: C.bg, color: C.muted, border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.38)` }}>
                           +
                         </div>
                       )}
@@ -631,7 +631,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
         {loading && (
           <div className="text-center text-[10px] mt-6" style={{ color: C.faint }}>
             <span className="inline-block w-3 h-3 border-2 rounded-full animate-spin"
-              style={{ borderColor: `${C.faint}40`, borderTopColor: C.primary }} />
+              style={{ borderColor: `rgba(var(--mz-faint-rgb, 188,184,204), 0.25)`, borderTopColor: C.primary }} />
             <span className="ml-2">loading...</span>
           </div>
         )}
@@ -663,7 +663,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 >
                   <img src={pl.coverImgUrl} alt=""
                     className="w-12 h-12 rounded-xl object-cover"
-                    style={{ border: `1px solid ${C.faint}30` }} />
+                    style={{ border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.19)` }} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm truncate" style={{ color: C.text }}>{pl.name}</div>
                     <div className="text-[10px] truncate" style={{ color: C.muted }}>
@@ -676,7 +676,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                   </div>
                 </button>
                 {expandedPl === pl.id && (
-                  <div className="border-t px-2 py-1" style={{ borderColor: `${C.faint}20` }}>
+                  <div className="border-t px-2 py-1" style={{ borderColor: `rgba(var(--mz-faint-rgb, 188,184,204), 0.13)` }}>
                     {(plTracks[pl.id] || []).slice(0, 30).map(s => (
                       <button key={s.id}
                         onClick={() => {

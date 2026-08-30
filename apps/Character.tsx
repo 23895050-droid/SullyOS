@@ -4,7 +4,8 @@ import { useOS } from '../context/OSContext';
 import { AppID, CharacterProfile, CharacterExportData, UserImpression, MemoryFragment } from '../types';
 import { SlidersHorizontal, SpeakerHigh, Books, BookOpen } from '@phosphor-icons/react';
 import Modal from '../components/os/Modal';
-import { processImage } from '../utils/file';
+import { processImage, processImageToBlob } from '../utils/file';
+import { putImageBlob, useBlobRefUrl, deleteBlobRef } from '../utils/blobRef';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -131,8 +132,12 @@ const Character: React.FC = () => {
       characterLaunch.consume();
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const refImageInputRef = useRef<HTMLInputElement>(null);
   const cardImportRef = useRef<HTMLInputElement>(null);
   
+  // 参考图 blob URL（hooks 必须在组件顶层，不可在 JSX 条件/循环内调用）
+  const refImageUrl = useBlobRefUrl(formData?.referenceImageAssetId);
+
   // Race Condition Guards
   const editingIdRef = useRef<string | null>(null);
   
@@ -431,13 +436,41 @@ const Character: React.FC = () => {
               // 在用户正在打 URL 时吃掉 draft.
               setAvatarUrlDraft('');
               addToast('头像上传成功', 'success');
-          } catch (error: any) { 
-              addToast(error.message || '图片处理失败', 'error'); 
+          } catch (error: any) {
+              addToast(error.message || '图片处理失败', 'error');
           } finally {
               setIsCompressing(false);
               if (fileInputRef.current) fileInputRef.current.value = '';
           }
       }
+  };
+
+  const handleRefImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+          setIsCompressing(true);
+          const blob = await processImageToBlob(file, { quality: 0.85 });
+          const ref = await putImageBlob(blob);
+          // 换新图前先清旧图 Blob（best-effort）
+          if (formData?.referenceImageAssetId) {
+              deleteBlobRef(formData.referenceImageAssetId);
+          }
+          handleChange('referenceImageAssetId', ref);
+          addToast('参考图已上传', 'success');
+      } catch (error: any) {
+          addToast(error.message || '参考图上传失败', 'error');
+      } finally {
+          setIsCompressing(false);
+          if (refImageInputRef.current) refImageInputRef.current.value = '';
+      }
+  };
+
+  const handleRemoveRefImage = () => {
+      if (!formData?.referenceImageAssetId) return;
+      deleteBlobRef(formData.referenceImageAssetId);
+      handleChange('referenceImageAssetId', undefined);
+      addToast('参考图已移除', 'info');
   };
   
   const handleRefineMonth = async (year: string, month: string, rawText: string, formattedPrompt?: string) => {
@@ -1382,6 +1415,39 @@ ${isInitialGeneration ? `
                                     className="w-full h-24 bg-white rounded-3xl p-5 text-sm shadow-sm resize-none focus:ring-1 focus:ring-primary/20 transition-all vr-reader-scroll"
                                     placeholder="在这个世界里，魔法是存在的..."
                                 />
+                           </div>
+
+                           {/* 外貌描述 + 参考图（生图锁脸用） */}
+                           <div className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100 space-y-3">
+                               <label className="text-[10px] font-bold text-pink-500 uppercase tracking-widest block">外貌描述 & 参考图（生图锁脸）</label>
+                               <p className="text-[11px] text-slate-400 leading-relaxed">外貌描述会在生图时自动拼入 prompt；参考图在锁脸模式下作为 reference_image 传给生图 API。不填不影响普通生图。</p>
+                               <textarea
+                                   value={formData.appearanceDescription || ''}
+                                   onChange={(e) => handleChange('appearanceDescription', e.target.value)}
+                                   className="w-full h-20 bg-slate-50 rounded-2xl p-3 text-sm resize-none focus:ring-1 focus:ring-pink-300 outline-none transition-all"
+                                   placeholder="黑色短发，单眼皮，高鼻梁，薄唇，瓜子脸…"
+                               />
+                               <div className="space-y-2">
+                                   {refImageUrl ? (
+                                       <div className="relative w-24 h-24 rounded-2xl overflow-hidden border-2 border-pink-100 shadow-sm group">
+                                           <img src={refImageUrl} className="w-full h-full object-cover" alt="参考图" />
+                                           <button
+                                               onClick={handleRemoveRefImage}
+                                               className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold"
+                                           >
+                                               移除
+                                           </button>
+                                       </div>
+                                   ) : null}
+                                   <button
+                                       onClick={() => refImageInputRef.current?.click()}
+                                       className="text-xs px-3 py-2 rounded-2xl bg-pink-50 text-pink-500 font-bold hover:bg-pink-100 active:scale-95 transition-all flex items-center gap-1.5"
+                                   >
+                                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                                       {formData.referenceImageAssetId ? '更换参考图' : '上传角色参考图'}
+                                   </button>
+                                   <input type="file" ref={refImageInputRef} className="hidden" accept="image/*" onChange={handleRefImageChange} />
+                               </div>
                            </div>
 
                            {/* 时间感知 & 时区：三个独立开关，可任意组合（聊天时间感知 / 自定义时区 / 线下时间感知） */}

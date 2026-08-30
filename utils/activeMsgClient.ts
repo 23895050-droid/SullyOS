@@ -1925,7 +1925,9 @@ export const ActiveMsgClient = {
     const anchorMs = firePack?.lastUserMessageAt ?? 0;
     // 任务身份：客户端自造 clientTaskId——远端 uuid 要创建成功后才有，而 metadata
     // 必须在创建时就带上归属键；push 原样透传，送达归属全靠它。
-    const clientTaskId = crypto.randomUUID();
+    const clientTaskId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     const remoteAvatarUrl = toRemoteAvatarUrl(char.avatar);
     const payload: Record<string, any> = {
@@ -2138,7 +2140,9 @@ export const ActiveMsgClient = {
       chat: { messages: toFirePackChatMessages(chatMessages), builtAt: now },
     };
 
-    const clientTaskId = crypto.randomUUID();
+    const clientTaskId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     // ── 这一轮的凭据走引用还是内联 ──
     //

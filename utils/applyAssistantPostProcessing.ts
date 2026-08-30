@@ -49,6 +49,7 @@ import {
 } from './agenticTools';
 import { getLocalDateKey } from './localDate';
 import { normalizeAssistantActionFormatting } from './assistantActionFormat';
+import { parsePhotoTags, processPhotoTags } from './photoTagHandler';
 
 // ─── 模块内辅助 ──────────────────────────────────────────────────────────────
 
@@ -297,8 +298,11 @@ export interface PostProcessMusicHooks {
         albumPic: string;
         duration: number;
         fee: number;
+        listeningTogetherWith: string[];
     } | null;
     joinListeningTogether: (charId: string) => void;
+    /** 批 2：一起听统一退出出口（exit 标签 / 用户点 × 都走它） */
+    endListeningTogether: (charId: string) => void;
     addSongToCharPlaylist: (
         charId: string,
         song: any,
@@ -1992,6 +1996,14 @@ export async function applyAssistantPostProcessing(
         aiContent = aiContent.replace(/\[html\][\s\S]*?\[\/html\]/gi, '[HTML 卡片]').trim();
     }
 
+    // ─── Step 5.5: 生图标签 [photo:...] / [photo:selfie:...] ───
+    // 从本轮回复中提取生图标签、剥离标签文本，稍后异步生图并追加为 image 消息。
+    const photoParseResult = parsePhotoTags(aiContent);
+    const pendingPhotos = photoParseResult.photos;
+    if (pendingPhotos.length > 0) {
+        aiContent = photoParseResult.cleanText;
+    }
+
     // ─── Step 6: 展示本轮回复 (二轮结果 B / 无二轮时的单轮回复) ───
     // - 跑过二轮 (data !== initialData): aiContent 现在是 B; 一轮正文 A 已在 Step 2 开头先行展示, 这里只展示 B。
     // - 有重生指令但没真正发起二轮 (data 不变: 未配置/无结果/无日志/已激活/二轮异常 等): A 已展示, 跳过避免重复。
@@ -2010,5 +2022,11 @@ export async function applyAssistantPostProcessing(
         } else {
             setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
         }
+    }
+
+    // ─── Step 6.5: 异步生图 ───
+    // 文字消息已落库上屏，现在在后台生图。不 await——让图片慢慢生成，好了自动追加。
+    if (pendingPhotos.length > 0) {
+        void processPhotoTags(pendingPhotos, char, char.id);
     }
 }

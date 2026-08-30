@@ -17,6 +17,8 @@ export interface ShareOrDownloadBlobOptions {
     blob: Blob;
     fileName: string;
     shareTitle?: string;
+    /** 网页端明确显示为「下载」的入口跳过 Web Share；原生 App 仍使用系统分享。 */
+    preferDownloadOnWeb?: boolean;
 }
 
 const blobToBase64 = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
@@ -62,7 +64,7 @@ export async function fetchBlobForShare(sourceUrl: string, fallbackMimeType = 'a
  * 桌面浏览器才使用 a.download。WebView 普遍不可靠的裸 download 点击只作为末级兜底。
  */
 export async function shareOrDownloadBlob(options: ShareOrDownloadBlobOptions): Promise<'shared' | 'downloaded' | 'cancelled'> {
-    const { blob, fileName, shareTitle = fileName } = options;
+    const { blob, fileName, shareTitle = fileName, preferDownloadOnWeb = false } = options;
     if (!(blob instanceof Blob) || blob.size === 0) throw new Error('文件为空，无法保存');
 
     if (Capacitor.isNativePlatform()) {
@@ -84,6 +86,7 @@ export async function shareOrDownloadBlob(options: ShareOrDownloadBlobOptions): 
     try {
         const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
         const canShareFile = typeof navigator !== 'undefined'
+            && !preferDownloadOnWeb
             && typeof navigator.share === 'function'
             && (typeof navigator.canShare !== 'function' || navigator.canShare({ files: [file] }));
         if (canShareFile) {

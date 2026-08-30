@@ -9,7 +9,8 @@ import {
   synthesizeSpeechDetailed as minimaxSynthesizeDetailed,
   type TtsResult,
 } from './minimaxTts';
-import { synthesizeSpeechFishDetailed } from './fishAudioTts';
+import { synthesizeSpeechFishDetailed, resolveFishAudioApiKey } from './fishAudioTts';
+import { resolveMiniMaxApiKey } from './minimaxApiKey';
 import { resolveTtsProvider } from './ttsProvider';
 
 export type { TtsResult };
@@ -50,3 +51,14 @@ export const characterHasVoice = (char: CharacterProfile, apiConfig: APIConfig):
   }
   return !!(vp?.voiceId || (vp?.timberWeights && vp.timberWeights.length > 0));
 };
+
+/** 当前服务商的 Key + 当前角色音色是否都已配置。 */
+export const canSynthesizeSpeech = (char: CharacterProfile, apiConfig: APIConfig): boolean => {
+  if (!characterHasVoice(char, apiConfig)) return false;
+  if (resolveTtsProvider(apiConfig) === 'fishaudio') return !!resolveFishAudioApiKey(apiConfig);
+  return !!resolveMiniMaxApiKey(apiConfig);
+};
+
+/** Fish 的清洗器需要看到原始 inline cue；MiniMax 使用已消毒的 speech。 */
+export const providerUsesRawVoiceMarkup = (apiConfig: APIConfig): boolean =>
+  resolveTtsProvider(apiConfig) !== 'minimax';

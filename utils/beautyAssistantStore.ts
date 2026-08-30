@@ -1,0 +1,332 @@
+// 小助手 store（2026-08-30 新建；当天改名通用化——不锁美化，以后可能做别的活）。
+// 工作向的小 AI：当前工作是美化各页面 CSS 预设，模式切换靠页面选择器。
+// 带版本号 + ISO 时间戳；专属 API 槽：不配置就不调用、不回退主 API（模型独立性）。
+// 2026-08-30 任务存档：消息按「任务（会话）」分组，做完一个活就新建任务，不用删聊天记录。
+import { useSyncExternalStore } from 'react';
+import { deleteBlobRef } from './blobRef';
+
+export interface AssistantMsg {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  /** 用户消息可带图（blobRef，发给他看的多模态参考图） */
+  imageRef?: string;
+  /** 所属任务；旧数据迁移时补齐，此后每条都有 */
+  sessionId?: string;
+  at: string;
+}
+
+/** 任务存档（对标官方客户端的会话列表）：做完一个活就新建，历史随时翻出来接着聊 */
+export interface AssistantSession {
+  id: string;
+  title: string;      // 自动取第一条用户消息前 18 字；空 = 「新任务」
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssistantFavorite {
+  id: string;
+  name: string;
+  css: string;
+  at: string;
+}
+
+export interface AssistantV1 {
+  version: 1;
+  updatedAt: string;
+  name: string;               // 轻量人设名（默认「小助手」）
+  avatarRef?: string;         // 头像 blobRef
+  persona: string;            // 轻量人设（可编辑）
+  api?: { baseUrl: string; apiKey: string; model: string };
+  messages: AssistantMsg[];   // 全局上限 400，丢最旧（跨任务共用上限）
+  favorites: AssistantFavorite[]; // 收藏夹：挑中的 CSS 片段，可导出 txt
+  /** 调色台（2026-08-30 她要求：紫色受不了）：主色/辅色/文字色，缺省用内置粉紫 */
+  theme?: { primary?: string; accent?: string; text?: string };
+  /** 小助手自己页面的 CSS（2026-08-30）：美化他自己 */
+  cssSelf: string;
+  /** 任务存档（2026-08-30）：上限 30 个，超了丢最久没动的任务（连消息一起） */
+  sessions: AssistantSession[];
+  activeSessionId: string | null;
+}
+
+const KEY = 'assistant_v1';
+const MESSAGE_CAP = 400;      // 跨任务全局上限
+const SESSION_CAP = 30;
+const SESSION_MESSAGE_CAP = 120; // 单任务上限
+const NEW_TASK_TITLE = '新任务';
+const isoNow = () => new Date().toISOString();
+// 与 couple stores 同款：randomUUID 优先，老 WebView 回退时间戳+随机数（同毫秒建两个任务也不撞 id）
+const uidLocal = () =>
+  (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+const DEFAULT_PERSONA =
+  '你是她贴身的数字小助手。说话简洁、靠谱、说人话，不油腔滑调。' +
+  '交给你的活就认真做完；拿不准的地方先给最稳妥的版本，再补一句可调项。';
+
+const DEFAULT: AssistantV1 = {
+  version: 1,
+  updatedAt: '1970-01-01T00:00:00.000Z',
+  name: '小助手',
+  persona: DEFAULT_PERSONA,
+  messages: [],
+  favorites: [],
+  cssSelf: '',
+  sessions: [],
+  activeSessionId: null,
+};
+
+/** 旧数据迁移：把任务存档之前的消息收进一个「默认任务」，保证升级无缝。 */
+const migrateSessions = (s: AssistantV1): AssistantV1 => {
+  // 脏数据防御：sessions 必须是有效数组，否则从空开始重算
+  const sessions = Array.isArray(s.sessions) && s.sessions.every((x) => x && typeof x.id === 'string')
+    ? s.sessions
+    : [];
+  const orphans = s.messages.filter((m) => !m.sessionId);
+  let next = { ...s, sessions };
+  if (orphans.length > 0) {
+    const now = isoNow();
+    const first = orphans[0];
+    const session: AssistantSession = {
+      id: `as-sess-${Date.now()}`,
+      title: (first.role === 'user' && first.content.trim() ? first.content.trim().slice(0, 18) : '') || NEW_TASK_TITLE,
+      createdAt: first.at || now,
+      updatedAt: now,
+    };
+    next = {
+      ...next,
+      sessions: [...sessions, session],
+      messages: s.messages.map((m) => (m.sessionId ? m : { ...m, sessionId: session.id })),
+    };
+  }
+  // activeSessionId 必须指向真实存在的任务，否则回落到最新一个
+  const activeOk = next.sessions.some((x) => x.id === next.activeSessionId);
+  return {
+    ...next,
+    activeSessionId: activeOk
+      ? (next.activeSessionId as string)
+      : (next.sessions[next.sessions.length - 1]?.id ?? null),
+  };
+};
+
+const load = (): AssistantV1 => {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return DEFAULT;
+    const parsed = JSON.parse(raw) as Partial<AssistantV1>;
+    const base = { ...DEFAULT, ...parsed };
+    return migrateSessions(base);
+  } catch {
+    return DEFAULT;
+  }
+};
+
+let state: AssistantV1 = load();
+const listeners = new Set<() => void>();
+
+const persist = () => {
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* 配额满放弃持久化 */ }
+};
+const setState = (next: AssistantV1) => {
+  state = next;
+  persist();
+  listeners.forEach((l) => l());
+};
+const patch = (fn: (s: AssistantV1) => AssistantV1) => setState(fn({ ...state }));
+
+export const useAssistant = (): AssistantV1 =>
+  useSyncExternalStore(
+    (cb) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
+    () => state,
+  );
+
+export const getAssistant = (): AssistantV1 => state;
+
+/** 仅测试用：把模块状态重置回默认（vitest 里每个用例之间隔离） */
+export const __resetAssistantForTest = () => {
+  state = { ...DEFAULT };
+};
+
+/** 仅测试用：重新从 localStorage 读一遍（测旧数据迁移路径） */
+export const __reloadAssistantForTest = () => {
+  state = load();
+};
+
+/** 名字 + 头像 + 人设（换头像时清旧 blobRef） */
+export const saveAssistantProfile = (patch0: { name?: string; avatarRef?: string; persona?: string }) => {
+  const prev = state.avatarRef;
+  if (prev && patch0.avatarRef !== undefined && prev !== patch0.avatarRef) void deleteBlobRef(prev);
+  patch((s) => ({
+    ...s,
+    name: (patch0.name ?? s.name).trim() || '小助手',
+    avatarRef: patch0.avatarRef !== undefined ? patch0.avatarRef : s.avatarRef,
+    persona: patch0.persona !== undefined ? patch0.persona : s.persona,
+    updatedAt: isoNow(),
+  }));
+};
+
+export const saveAssistantApi = (api: { baseUrl: string; apiKey: string; model: string }) =>
+  patch((s) => ({ ...s, api, updatedAt: isoNow() }));
+
+const touchSession = (sessions: AssistantSession[], sessionId: string, now: string): AssistantSession[] =>
+  sessions.map((x) => (x.id === sessionId ? { ...x, updatedAt: now } : x));
+
+/** 自动起名：任务还是「新任务」且来了第一条用户消息 → 用它的前 18 字当标题 */
+const autoTitleSession = (s: AssistantV1, msgs: AssistantMsg[], now: string): AssistantSession[] => {
+  const firstUser = msgs.find((m) => m.role === 'user' && m.content.trim());
+  if (!firstUser) return s.sessions;
+  return s.sessions.map((x) =>
+    x.id === s.activeSessionId && x.title === NEW_TASK_TITLE
+      ? { ...x, title: firstUser.content.trim().slice(0, 18), updatedAt: now }
+      : x,
+  );
+};
+
+/** 当前任务没有就现建一个（send 之前调用），返回 activeSessionId */
+export const ensureAssistantSession = (): string | null => {
+  if (state.activeSessionId && state.sessions.some((x) => x.id === state.activeSessionId)) {
+    return state.activeSessionId;
+  }
+  const now = isoNow();
+  const session: AssistantSession = { id: `as-sess-${uidLocal()}`, title: NEW_TASK_TITLE, createdAt: now, updatedAt: now };
+  patch((s) => ({ ...s, sessions: [...s.sessions, session], activeSessionId: session.id, updatedAt: now }));
+  return session.id;
+};
+
+export const appendAssistantMessages = (msgs: AssistantMsg[]) =>
+  patch((s) => {
+    const sessionId = s.activeSessionId;
+    if (!sessionId) return s; // 没有任务就不落盘（理论上 send 前已 ensure）
+    const now = isoNow();
+    const stamped = msgs.map((m) => ({ ...m, sessionId }));
+    const merged = [...s.messages, ...stamped];
+    // 单任务上限：当前任务超过就丢它最旧的
+    const inSession = merged.filter((m) => m.sessionId === sessionId);
+    const trimmed = inSession.length > SESSION_MESSAGE_CAP
+      ? merged.filter((m) => !(m.sessionId === sessionId && inSession.indexOf(m) < inSession.length - SESSION_MESSAGE_CAP))
+      : merged;
+    return {
+      ...s,
+      messages: trimmed.slice(-MESSAGE_CAP),
+      sessions: touchSession(autoTitleSession(s, msgs, now), sessionId, now),
+      updatedAt: now,
+    };
+  });
+
+export const editAssistantMessage = (id: string, content: string) =>
+  patch((s) => ({
+    ...s,
+    messages: s.messages.map((m) => (m.id === id ? { ...m, content } : m)),
+    updatedAt: isoNow(),
+  }));
+
+export const deleteAssistantMessage = (id: string) =>
+  patch((s) => ({
+    ...s,
+    messages: s.messages.filter((m) => m.id !== id),
+    updatedAt: isoNow(),
+  }));
+
+/** 清空「当前任务」的聊天记录（任务本身保留，标题不清） */
+export const clearAssistantMessages = () =>
+  patch((s) => ({
+    ...s,
+    messages: s.messages.filter((m) => m.sessionId !== s.activeSessionId),
+    updatedAt: isoNow(),
+  }));
+
+/** 批量删除（2026-08-30 多选）：连图清 blobRef */
+export const deleteAssistantMessages = (ids: string[]) =>
+  patch((s) => {
+    const idSet = new Set(ids);
+    s.messages.filter((m) => idSet.has(m.id)).forEach((m) => { if (m.imageRef) void deleteBlobRef(m.imageRef); });
+    return { ...s, messages: s.messages.filter((m) => !idSet.has(m.id)), updatedAt: isoNow() };
+  });
+
+// ── 任务存档（2026-08-30）：新建 / 切换 / 删除 ──
+
+export const newAssistantSession = () => {
+  const now = isoNow();
+  const session: AssistantSession = { id: `as-sess-${uidLocal()}`, title: NEW_TASK_TITLE, createdAt: now, updatedAt: now };
+  patch((s) => {
+    let sessions = [...s.sessions, session];
+    // 超过上限：丢最久没动的任务（连它的消息一起）
+    if (sessions.length > SESSION_CAP) {
+      const drop = sessions
+        .slice()
+        .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))[0];
+      sessions = sessions.filter((x) => x.id !== drop.id);
+      const droppedIds = new Set([drop.id]);
+      return {
+        ...s,
+        sessions,
+        activeSessionId: session.id,
+        messages: s.messages.filter((m) => !droppedIds.has(m.sessionId ?? '')),
+        updatedAt: now,
+      };
+    }
+    return { ...s, sessions, activeSessionId: session.id, updatedAt: now };
+  });
+};
+
+export const switchAssistantSession = (id: string) =>
+  patch((s) => (s.sessions.some((x) => x.id === id) ? { ...s, activeSessionId: id, updatedAt: isoNow() } : s));
+
+export const deleteAssistantSession = (id: string) =>
+  patch((s) => {
+    const target = s.sessions.find((x) => x.id === id);
+    if (!target) return s;
+    // 清这个任务的图（blobRef），消息一起删
+    s.messages.filter((m) => m.sessionId === id).forEach((m) => { if (m.imageRef) void deleteBlobRef(m.imageRef); });
+    const sessions = s.sessions.filter((x) => x.id !== id);
+    const nextActive = s.activeSessionId === id
+      ? (sessions[sessions.length - 1]?.id ?? null)
+      : s.activeSessionId;
+    return {
+      ...s,
+      sessions,
+      activeSessionId: nextActive,
+      messages: s.messages.filter((m) => m.sessionId !== id),
+      updatedAt: isoNow(),
+    };
+  });
+
+/** 调色台（2026-08-30）：缺省回内置粉紫 */
+export const saveAssistantTheme = (theme: { primary?: string; accent?: string; text?: string }) =>
+  patch((s) => ({ ...s, theme: { ...s.theme, ...theme }, updatedAt: isoNow() }));
+
+export const resetAssistantTheme = () =>
+  patch((s) => ({ ...s, theme: undefined, updatedAt: isoNow() }));
+
+/** 小助手自己页面的 CSS（2026-08-30）：追加式 */
+export const saveAssistantCssSelf = (css: string) =>
+  patch((s) => ({ ...s, cssSelf: css, updatedAt: isoNow() }));
+
+/** 收藏夹（CSS 片段）：id 缺省自动生成 */
+export const addAssistantFavorite = (name: string, css: string) =>
+  patch((s) => ({
+    ...s,
+    favorites: [...s.favorites, { id: `fav-${Date.now()}`, name: name.trim() || `片段 ${s.favorites.length + 1}`, css, at: isoNow() }],
+    updatedAt: isoNow(),
+  }));
+
+export const renameAssistantFavorite = (id: string, name: string) =>
+  patch((s) => ({
+    ...s,
+    favorites: s.favorites.map((f) => (f.id === id ? { ...f, name: name.trim() || f.name } : f)),
+    updatedAt: isoNow(),
+  }));
+
+export const deleteAssistantFavorite = (id: string) =>
+  patch((s) => ({
+    ...s,
+    favorites: s.favorites.filter((f) => f.id !== id),
+    updatedAt: isoNow(),
+  }));
+
+/** 导出收藏夹成 txt 文本（Blob 下载在 UI 层做） */
+export const buildFavoritesExportText = (): string => {
+  const { favorites, name } = state;
+  const header = `${name} 的收藏夹 · 导出 ${new Date().toLocaleString('zh-CN')}\n\n`;
+  const body = favorites.map((f) => `/* ── ${f.name}（收藏于 ${f.at}）── */\n${f.css}`).join('\n\n');
+  return header + body;
+};

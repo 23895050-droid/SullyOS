@@ -7,7 +7,7 @@ import {
     GalleryImage, FullBackupData, GroupProfile, SocialPost, StudyCourse, GameSession, Worldbook, NovelBook, Emoji, EmojiCategory,
     BankTransaction, SavingsGoal, BankFullState, DollhouseState, XhsStockImage, XhsActivityRecord, SongSheet, QuizSession, GuidebookSession,
     LifeSimState, HandbookEntry, Tracker, TrackerEntry, HotNewsSnapshot,
-    LifeRecord, MedPlan, LifeRecordSettings, CharacterGroup,
+    LifeRecord, MedPlan, LifeRecordSettings, CharacterGroup, ImageReceipt,
     VRWorldNovel, VRNovelAnnotation, CustomCreatorPart, VRMusicRoomState, VRGuestbookState, VRScript, VRStagedPlay, VRLetter,
     WorldProfile, WorldEpisode, StoryTheaterEntry, StoryTheaterPreset, StoryTheaterMask
 } from '../types';
@@ -26,7 +26,8 @@ const DB_NAME = 'AetherOS_Data';
 // v68：character_groups 角色分组（神经链接"文件夹"，见 types.ts CharacterGroup）。
 // v69：见面·剧情条目与糯米机原生预设。正文继续复用 messages 表，避免再造会话存储。
 // v70：剧场面具箱（原创人物面具）；角色面具仍只存 characterId，不复制神经链接资料。
-const DB_VERSION = 70;
+// v71：image_receipts 近期接收 — 生图独立备份站（与聊天消息解耦，各删各的）。
+const DB_VERSION = 71;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -83,6 +84,7 @@ const STORE_LIFE_SETTINGS = 'life_record_settings'; // 生活记录设置单例�
 const STORE_STORY_THEATERS = 'story_theaters';       // 见面·剧情条目（消息用 story-theater:${id}）
 const STORE_STORY_THEATER_PRESETS = 'story_theater_presets'; // 糯米机原生剧情预设
 const STORE_STORY_THEATER_MASKS = 'story_theater_masks'; // 剧场原创人物面具
+const STORE_IMAGE_RECEIPTS = 'image_receipts'; // 近期接收 — 生图独立备份站
 
 // API 调用记录：保留近 5 天，超期丢弃；再加一个硬上限防止异常情况撑爆
 const API_CALL_LOG_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
@@ -129,6 +131,46 @@ export const openDB = (): Promise<IDBDatabase> => {
     // 重开并缓存了新 promise, 陈旧连接的回调不能误清新单例 (否则又凭空多开一条连接)。
     let settled = false;
 
+    // 挂失效自愈回调 (另一 tab 升级 / 浏览器强关连接), 两条成功路径共用。
+    const wire = (db: IDBDatabase) => {
+        db.onversionchange = () => {
+            db.close();
+            if (dbPromise === promise) dbPromise = null;
+        };
+        db.onclose = () => {
+            if (dbPromise === promise) dbPromise = null;
+        };
+    };
+
+    // 自愈补建: 本 fork 独有的 store (如 v71 的 image_receipts) 只在本 build 的升级块里建。
+    // 若浏览器里的库版本 ≥ 本 build (上游版本号碰撞 / 用户先跑过更新的 build), 升级块没跑过,
+    // store 缺失 → 近期接收写入 NotFoundError。此时 close 后以 version+1 重开, 幂等建表补齐。
+    const ensureForkStores = (db: IDBDatabase) => {
+        if (db.objectStoreNames.contains(STORE_IMAGE_RECEIPTS)) {
+            wire(db);
+            resolve(db);
+            return;
+        }
+        console.warn('[DB] 库缺 image_receipts, 以 version+1 重开补建 store');
+        const nextVersion = db.version + 1;
+        db.close();
+        const rq = indexedDB.open(DB_NAME, nextVersion);
+        rq.onsuccess = () => {
+            wire(rq.result);
+            resolve(rq.result);
+        };
+        rq.onerror = () => {
+            console.error('DB Open Error (self-heal reopen):', rq.error);
+            if (dbPromise === promise) dbPromise = null;
+            reject(rq.error);
+        };
+        rq.onblocked = () => {
+            console.warn('[DB] self-heal open blocked —— 另一个 tab 仍持有旧版本连接未关闭');
+            if (dbPromise === promise) dbPromise = null;
+            reject(new Error('IndexedDB open blocked —— 关闭其它标签页后重试'));
+        };
+    };
+
     request.onerror = () => {
         const err = request.error;
         // 版本回退兜底: 浏览器里已存在「比当前 build 的 DB_VERSION 更高」的版本时
@@ -143,16 +185,9 @@ export const openDB = (): Promise<IDBDatabase> => {
             settled = true; // 原 request 已终结 (VersionError 后不会再 onsuccess), 标记以防迟到回调
             const fb = indexedDB.open(DB_NAME); // 不带版本号 = 连到现有(更高)版本, 不触发 upgrade
             fb.onsuccess = () => {
-                const db = fb.result;
-                // 与正常路径一致地挂上失效自愈回调 (另一 tab 升级 / 浏览器强关连接)。
-                db.onversionchange = () => {
-                    db.close();
-                    if (dbPromise === promise) dbPromise = null;
-                };
-                db.onclose = () => {
-                    if (dbPromise === promise) dbPromise = null;
-                };
-                resolve(db);
+                // 与正常路径一致: ensureForkStores 会挂回调, 并在缺本 fork 独有 store 时
+                // (上游版本号更高 → v71 升级块从没在这台设备跑过) version+1 重开幂等补建。
+                ensureForkStores(fb.result);
             };
             fb.onerror = () => {
                 console.error("DB Open Error (versionless fallback):", fb.error);
@@ -175,26 +210,10 @@ export const openDB = (): Promise<IDBDatabase> => {
             try { db.close(); } catch { /* ignore */ }
             return;
         }
-        // 另一个 tab 触发版本升级时必须主动 close 让位, 否则对方 open 会被 block;
-        // 顺手清缓存, 下次 openDB 重开到新版本。
-        db.onversionchange = () => {
-            db.close();
-            if (dbPromise === promise) dbPromise = null;
-        };
-        // Chromium 因 backing store 出错等原因强制关闭连接时触发 —— 清缓存自愈,
-        // 避免后续操作一直复用一条已死的连接。
-        //
-        // 已知残余 (有意不修): onclose 是异步派发的, 强关到回调跑之间, 命中这条 fast-path
-        // 的调用方会拿到将死连接, 其 db.transaction() 同步抛 InvalidStateError —— 当次操作
-        // 失败, 但下一次调用就自愈。主库这 ~165 个调用点全是记忆管线 / UI 读写, 失败是
-        // 瞬时且会自然重试的 (不丢数据), 不值得为它给每个调用点铺事务级重试 (要全覆盖得上
-        // 共享 runTx 层并迁移所有 DB.* 方法, 是独立大重构)。SW inbox 那条路径不一样: 同样
-        // 的竞态会让 push 静默丢失 → 主线程超时, 所以那边 (worker/sw-keep-alive.ts 的
-        // withInboxTx) 单独补了「InvalidStateError 清缓存重开一次」的事务级兜底。
-        db.onclose = () => {
-            if (dbPromise === promise) dbPromise = null;
-        };
-        resolve(db);
+        // 挂失效自愈回调 (见 wire 的定义注释: 另一 tab 升级主动 close 让位; Chromium
+        // 强制关连接时清缓存避免复用死连接)。挂好后走 ensureForkStores —— 顺带检查本 fork
+        // 独有的 store 是否缺失 (上游版本碰撞时升级块没跑过) 并补建。
+        ensureForkStores(db);
     };
 
     request.onblocked = () => {
@@ -346,6 +365,12 @@ export const openDB = (): Promise<IDBDatabase> => {
       createStore(STORE_STORY_THEATERS, { keyPath: 'id' });
       createStore(STORE_STORY_THEATER_PRESETS, { keyPath: 'id' });
       createStore(STORE_STORY_THEATER_MASKS, { keyPath: 'id' });
+
+      // v71: 近期接收 — 生图独立备份站
+      if (!db.objectStoreNames.contains(STORE_IMAGE_RECEIPTS)) {
+          const irStore = db.createObjectStore(STORE_IMAGE_RECEIPTS, { keyPath: 'id' });
+          irStore.createIndex('charId', 'charId', { unique: false });
+      }
 
       createStore(STORE_HOTNEWS, { keyPath: 'id' });
 
@@ -1261,6 +1286,45 @@ export const DB = {
           transaction.oncomplete = () => resolve();
           transaction.onerror = () => reject(transaction.error);
           transaction.onabort = () => reject(transaction.error || new Error('deleteBlobAsset aborted'));
+      });
+  },
+
+  // ─── 近期接收（image_receipts）───────────────
+  getAllImageReceipts: async (): Promise<ImageReceipt[]> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_IMAGE_RECEIPTS)) return [];
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_IMAGE_RECEIPTS, 'readonly');
+          const request = transaction.objectStore(STORE_IMAGE_RECEIPTS).getAll();
+          request.onsuccess = () => {
+              const result = (request.result || []) as ImageReceipt[];
+              result.sort((a, b) => b.timestamp - a.timestamp);
+              resolve(result);
+          };
+          request.onerror = () => reject(request.error);
+      });
+  },
+
+  saveImageReceipt: async (receipt: ImageReceipt): Promise<void> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_IMAGE_RECEIPTS, 'readwrite');
+          transaction.objectStore(STORE_IMAGE_RECEIPTS).put(receipt);
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () => reject(transaction.error || new Error('saveImageReceipt aborted'));
+      });
+  },
+
+  deleteImageReceipt: async (id: string): Promise<void> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_IMAGE_RECEIPTS)) return;
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_IMAGE_RECEIPTS, 'readwrite');
+          transaction.objectStore(STORE_IMAGE_RECEIPTS).delete(id);
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () => reject(transaction.error || new Error('deleteImageReceipt aborted'));
       });
   },
 

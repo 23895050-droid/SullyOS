@@ -158,6 +158,7 @@ export function collectCharSettings(
         日程与情绪: anyOn(x => x.scheduleFeatureEnabled),
         HTML卡片: anyOn(x => x.htmlModeEnabled),
         角色级聊天装扮: anyOn(x => x.chatFineTune?.enabled),
+        日常聊天协同: anyOn(x => x.chatCollaborationEnabled),
         自定义时区: anyOn(x => x.customTimezoneEnabled),
         生活记录注入: anyOn(x => x.lifeRecordEnabled),
         小红书: anyOn(x => x.xhsEnabled),
@@ -319,6 +320,8 @@ export interface FeatureSources {
      * Worker 地址和共享密钥本身不进上报。
      */
     amsg2Global: { workerUrl?: string; initializedAt?: number; instantChatEnabled?: boolean };
+    /** 协同 sidecar 只用 count() 取出的行数，不读取窗口标题、消息、文件名或 Blob。 */
+    collaborationUsage: { sessions: number; messages: number; assets: number };
 }
 
 /**
@@ -425,6 +428,15 @@ export function collectFeatureFlags(src: FeatureSources): Record<string, string>
         单独关了即时对话的角色数: bucketFewCount(
             amsg2ActiveChars.filter((ch) => ch.activeMsg2Config?.instantChatEnabled === false).length,
         ),
+
+        // ── 协同工作 ──
+        // 三个数字都来自 IndexedDB.count()，不会把窗口标题、对话正文或文件名读进统计层。
+        协同工作: src.collaborationUsage.sessions > 0 || src.collaborationUsage.messages > 0 || src.collaborationUsage.assets > 0
+            ? '用过'
+            : '没用过',
+        协同窗口数: bucketFewCount(src.collaborationUsage.sessions),
+        协同消息数: bucketFewCount(src.collaborationUsage.messages),
+        协同文件数: bucketFewCount(src.collaborationUsage.assets),
     };
 }
 
@@ -434,12 +446,15 @@ export function collectFeatureFlags(src: FeatureSources): Record<string, string>
  * 存在哪、要不要 await。
  */
 export async function collectFeatureFlagsAsync(
-    src: Omit<FeatureSources, 'vrIndependentApi' | 'amsg2Global'>,
+    src: Omit<FeatureSources, 'vrIndependentApi' | 'amsg2Global' | 'collaborationUsage'>,
 ): Promise<Record<string, string>> {
     // 读不出来就当没配。为一条统计去打断启动流程不值得。
-    const [vrIndependentApi, amsg2Global] = await Promise.all([
+    const [vrIndependentApi, amsg2Global, collaborationUsage] = await Promise.all([
         getVRApi().then(cfg => Boolean(cfg)).catch(() => false),
         ActiveMsgStore.getGlobalConfig().catch(() => ({ workerUrl: '' })),
+        import('../features/collaboration/store')
+            .then(module => module.CollaborationStore.getUsageCounts())
+            .catch(() => ({ sessions: 0, messages: 0, assets: 0 })),
     ]);
-    return collectFeatureFlags({ ...src, vrIndependentApi, amsg2Global });
+    return collectFeatureFlags({ ...src, vrIndependentApi, amsg2Global, collaborationUsage });
 }

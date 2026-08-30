@@ -190,7 +190,7 @@ describe('MUSIC_ACTION 取不到"正在听"快照', () => {
 
         const out = await ChatParser.parseAndExecuteActions(
             '这首真好听[[MUSIC_ACTION:add|深夜]]', charId, '阿一', noop,
-            { getListeningSnapshot: () => null, joinListeningTogether: noop, addSongToCharPlaylist: addSong as any },
+            { getListeningSnapshot: () => null, joinListeningTogether: noop, endListeningTogether: noop, addSongToCharPlaylist: addSong as any },
         );
 
         expect(out).toBe('这首真好听');
@@ -233,7 +233,7 @@ describe('MUSIC_ACTION 用推送里冻结的那首歌重放', () => {
 
         await ChatParser.parseAndExecuteActions(
             '在听《夜航星》，也收进歌单了[[MUSIC_ACTION:add|深夜]]', charId, '阿一', noop,
-            { getListeningSnapshot: () => null, joinListeningTogether: noop, addSongToCharPlaylist: addSong },
+            { getListeningSnapshot: () => null, joinListeningTogether: noop, endListeningTogether: noop, addSongToCharPlaylist: addSong },
             undefined, undefined, inheritMeta,
             { id: 33, name: '夜航星', artists: '某某' },
         );
@@ -260,12 +260,12 @@ describe('MUSIC_ACTION 用推送里冻结的那首歌重放', () => {
         await putCharWithPlaylist(charId);
         const addSong = vi.fn().mockResolvedValue({ playlistTitle: '深夜', created: false });
         const userSong = {
-            songId: 99, name: '用户在听的歌', artists: '别人', album: '', albumPic: '', duration: 0, fee: 0,
+            songId: 99, name: '用户在听的歌', artists: '别人', album: '', albumPic: '', duration: 0, fee: 0, listeningTogetherWith: [],
         };
 
         await ChatParser.parseAndExecuteActions(
             '[[MUSIC_ACTION:add|深夜]]', charId, '阿一', noop,
-            { getListeningSnapshot: () => userSong, joinListeningTogether: noop, addSongToCharPlaylist: addSong },
+            { getListeningSnapshot: () => userSong, joinListeningTogether: noop, endListeningTogether: noop, addSongToCharPlaylist: addSong },
             undefined, undefined, inheritMeta,
             { id: 33, name: '夜航星', artists: '某某' },
         );
@@ -285,9 +285,10 @@ describe('MUSIC_ACTION 用推送里冻结的那首歌重放', () => {
             '[[MUSIC_ACTION:add|深夜]]', charId, '阿一', noop,
             {
                 getListeningSnapshot: () => ({
-                    songId: 99, name: '用户在听的歌', artists: '别人', album: '', albumPic: '', duration: 0, fee: 0,
+                    songId: 99, name: '用户在听的歌', artists: '别人', album: '', albumPic: '', duration: 0, fee: 0, listeningTogetherWith: [],
                 }),
                 joinListeningTogether: noop,
+                endListeningTogether: noop,
                 addSongToCharPlaylist: addSong,
             },
             undefined, undefined, inheritMeta,
@@ -302,12 +303,12 @@ describe('MUSIC_ACTION 用推送里冻结的那首歌重放', () => {
         const charId = `c-music-live-${Date.now()}`;
         const addSong = vi.fn().mockResolvedValue({ playlistTitle: '我喜欢的音乐', created: false });
         const userSong = {
-            songId: 99, name: '用户在听的歌', artists: '别人', album: '', albumPic: '', duration: 0, fee: 0,
+            songId: 99, name: '用户在听的歌', artists: '别人', album: '', albumPic: '', duration: 0, fee: 0, listeningTogetherWith: [],
         };
 
         await ChatParser.parseAndExecuteActions(
             '[[MUSIC_ACTION:add]]', charId, '阿一', noop,
-            { getListeningSnapshot: () => userSong, joinListeningTogether: noop, addSongToCharPlaylist: addSong },
+            { getListeningSnapshot: () => userSong, joinListeningTogether: noop, endListeningTogether: noop, addSongToCharPlaylist: addSong },
             undefined, undefined, inheritMeta,
         );
 
