@@ -2151,6 +2151,8 @@ export interface StoryTheaterEntry {
     presetOverride?: StoryTheaterPresetDocument;
     /** 仅供拒绝 assistant prefill、要求最后一条消息必须为 user 的接口使用；默认关闭以保留原生预设效果。 */
     forceUserLastMessage?: boolean;
+    /** 兼容不接受酒馆高级采样参数的接口；默认关闭，完整发送预设中的 top_p 与两项 penalty。 */
+    omitSamplingParams?: boolean;
     createdAt: number;
     updatedAt: number;
 }
@@ -3640,6 +3642,7 @@ export interface FullBackupData {
     chatTranslateSourceLangByChar?: Record<string, string>;
     chatTranslateTargetLangByChar?: Record<string, string>;
     chatTranslateEnabledByChar?: Record<string, boolean>;
+    chatTranslateExpandedByChar?: Record<string, boolean>;
     chatArchivePrompts?: any;
     chatActiveArchivePromptId?: string;
     characterRefinePrompts?: any;

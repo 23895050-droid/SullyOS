@@ -2,8 +2,8 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { APIConfig, AppID, OSTheme, VirtualTime, CharacterProfile, CharacterGroup, ChatTheme, Toast, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, SongSheet, Message, RealtimeConfig, AppearancePreset, CloudBackupConfig, CloudBackupFile } from '../types';
 import { DB } from '../utils/db';
-import { modelRejectsSamplingParams, stripSamplingParams, isSamplingParamError } from '../utils/samplingParamCompat';
-import { extractImagesInPlace, deepCloneForExport } from '../utils/backupExport';
+import { modelRejectsSamplingParams, stripSamplingParams } from '../utils/samplingParamCompat';
+import { buildMalformedImageDiagnostics, extractImagesInPlace, deepCloneForExport, parseImageDataUrlForBackup, type BackupObjectPath, type MalformedBackupImageDiagnostic } from '../utils/backupExport';
 import { isBlobRef, getBlobForRef, migrateDataUrlToRef, migrateAppearancePresetBlobRefs, resolveBlobRefsDeep, BLOBREF_PREFIX, deleteBlobRefIfUnreferenced } from '../utils/blobRef';
 import { initPwaIcon, clearPwaIcon } from '../utils/appIcon';
 import { LEGACY_DEFAULT_WALLPAPER, isLegacyDefaultWallpaper, shouldPreserveLegacyDefaultWallpaper } from '../utils/wallpaperCompat';
@@ -24,7 +24,7 @@ import { safeFetchJson } from '../utils/safeApi';
 import { captureApiRequestOnce, getApiCallAmbientContext, recordApiCall, setApiCallAmbientContext, updateApiRequestCaptureUsage } from '../utils/apiCallLog';
 import { isGlobalStreamEnabled, upgradeChatBodyToStream, assembleUpgradedResponse } from '../utils/streamUpgrade';
 import { rewriteStaleWorkerUrl } from '../utils/proxyWorker';
-import { buildFetchFailureDetail, classifyFetchFailure, describeReachabilityProbe, parseTargetUrl, probeOriginReachability, shouldProbeReachability } from '../utils/networkFailureDiagnosis';
+import { buildFetchFailureDetail, classifyFetchFailure, describeReachabilityProbe, parseTargetUrl, probeOriginReachability, shouldProbeReachability, summarizeFetchRequestBody } from '../utils/networkFailureDiagnosis';
 import { INSTALLED_APPS, HIDDEN_APP_NAMES } from '../constants';
 import { isAnalyticsRequestUrl, trackEvent, trackDataScaleOnce, trackCurrentAppearanceOnce, trackCurrentCharSettingsOnce, trackCurrentFeaturesOnce } from '../utils/analytics';
 import { collectAppearance, collectCharSettings, collectDataScale, collectFeatureFlagsAsync } from '../utils/analyticsSnapshot';
@@ -1050,6 +1050,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
       // 1. Monkey Patch Fetch
       const originalFetch = window.fetch;
+      // “同一 API 在别的模式刚成功”是排查 CORS 包装错误最有价值的对照证据。
+      // 只记 method + URL + 状态与时间，不保存请求正文。
+      const recentSuccessfulFetches = new Map<string, { timestamp: number; status: number }>();
       const patchedFetch = async (...args: [RequestInfo | URL, RequestInit?]) => {
           const [resource, config] = args;
           
@@ -1061,10 +1064,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       ? resource.href
                       : String(resource);
           const fetchStartedAt = Date.now();
+          const fetchStartedAtPerf = typeof performance !== 'undefined' ? performance.now() : Number.NaN;
           // Bare fetch calls do not carry explicit metadata. Snapshot the active
           // App now; reading the ambient value after a long response would label
           // the request as whichever App the user navigated to in the meantime.
           const ambientMetaAtStart = getApiCallAmbientContext();
+          const method = ((config as RequestInit | undefined)?.method
+              || (typeof Request !== 'undefined' && resource instanceof Request ? resource.method : 'GET'))
+              .toUpperCase();
+          const requestComparisonKey = `${method} ${urlStr}`;
 
           // 采样参数兼容层（详见 utils/samplingParamCompat.ts）：
           // 某些模型废弃了 temperature/top_p/top_k，带上直接 400。这里在所有 /chat/completions
@@ -1072,7 +1080,6 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           let sendArgs: [RequestInfo | URL, RequestInit?] = args;
           // 透明流式升级状态（utils/streamUpgrade.ts）：请求侧改写 → 响应侧拼回 JSON
           let streamUpgraded = false;
-          let bodyBeforeStreamUpgrade: string | null = null;
           if (urlStr.includes('/chat/completions')) {
               const rawBody = (config as RequestInit | undefined)?.body;
               if (typeof rawBody === 'string') {
@@ -1089,7 +1096,6 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       if (isGlobalStreamEnabled()) {
                           const upgraded = upgradeChatBodyToStream(body);
                           if (upgraded) {
-                              bodyBeforeStreamUpgrade = body;
                               body = upgraded;
                               streamUpgraded = true;
                           }
@@ -1110,31 +1116,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           try {
               let response = await originalFetch(...sendArgs);
 
-              // 兜底：模型没被上面清单覆盖但仍拒收采样参数时，读 400 报文自愈——摘掉后重试一次。
-              if (!response.ok && response.status === 400 && urlStr.includes('/chat/completions')) {
-                  const sentBody = (sendArgs[1] as RequestInit | undefined)?.body;
-                  if (typeof sentBody === 'string') {
-                      let errText = '';
-                      try { errText = await response.clone().text(); } catch { /* 读不出就算了 */ }
-                      if (isSamplingParamError(errText)) {
-                          try {
-                              const parsed = JSON.parse(sentBody);
-                              if (stripSamplingParams(parsed)) {
-                                  sendArgs = [resource, { ...(sendArgs[1] as RequestInit), body: JSON.stringify(parsed) }];
-                                  response = await originalFetch(...sendArgs);
-                              }
-                          } catch { /* 解析失败：保留原始 400 响应 */ }
-                      }
-                  }
-              }
-
-              // 流式升级自愈：个别中转对 stream/stream_options 直接 4xx → 用升级前的
-              // 原 body 重发一次，行为退回旧版（升级只能赚不能赔）。
-              if (streamUpgraded && !response.ok && (response.status === 400 || response.status === 422) && bodyBeforeStreamUpgrade) {
-                  console.warn('🔁 [StreamUpgrade] 中转拒绝流式升级(HTTP ' + response.status + ')，回退原请求重发');
-                  response = await originalFetch(resource, { ...(config as RequestInit), body: bodyBeforeStreamUpgrade });
-                  streamUpgraded = false;
-              }
+              // /chat/completions 是可能已经开始计费的请求。拿到任何 HTTP 响应后都不在
+              // 兼容层静默重发：中转站可能在返回错误前已经把任务交给上游，重发会让用户
+              // 只看到一条调用记录却被扣两到三次。已知模型的采样参数仍在发送前清理；
+              // 未知兼容问题和流式 4xx 原样交给调用方，由用户明确决定是否重试。
               // 流式升级的响应归一化：SSE 攒齐拼回标准 chat.completion JSON——
               // 调用方（safeResponseJson / res.json() 均可）拿到与升级前等价的响应。
               if (streamUpgraded && response.ok) {
@@ -1160,6 +1145,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   if (usageClone) {
                       usageClone.text().then((t) => {
                           const durationMs = Date.now() - fetchStartedAt;
+                          // 一定要等正文完整读完再记成功；只拿到 200 响应头、随后 SSE 断流
+                          // 正是剧情故障的形态，不能拿它反过来当成功对照。
+                          if (ok) recentSuccessfulFetches.set(requestComparisonKey, { timestamp: Date.now(), status });
                           let parsed: any = undefined;
                           try { parsed = JSON.parse(t); } catch { /* 流式/非 JSON：把原始文本交给 recordApiCall 的 SSE 兜底解析 */ }
                           updateApiRequestCaptureUsage({ captureId: apiRequestCaptureId, ok, response: parsed, responseText: parsed === undefined ? t : undefined });
@@ -1169,6 +1157,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                           recordApiCall({ requestId, url: urlStr, body, status, ok, meta, durationMs: Date.now() - fetchStartedAt });
                       });
                   } else {
+                      // clone 失败时，只有已经在上面完整拼装过的升级流才能确认正文收完。
+                      if (ok && streamUpgraded) recentSuccessfulFetches.set(requestComparisonKey, { timestamp: Date.now(), status });
                       updateApiRequestCaptureUsage({ captureId: apiRequestCaptureId, ok });
                       recordApiCall({ requestId, url: urlStr, body, status, ok, meta, durationMs: Date.now() - fetchStartedAt });
                   }
@@ -1225,15 +1215,17 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   // 结论回填到同一条日志上——「网络不通」和「网络通但响应被 CORS 拦」要走的排查路
                   // 完全相反，不分开的话用户只能瞎试。详见 utils/networkFailureDiagnosis.ts。
                   const logId = `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                  const method = (typeof Request !== 'undefined' && resource instanceof Request)
-                      ? resource.method
-                      : ((config as RequestInit | undefined)?.method || 'GET');
+                  const requestMeta = (sendArgs[1] as any)?.__sullyMeta || ambientMetaAtStart;
+                  const recentSuccess = recentSuccessfulFetches.get(requestComparisonKey);
                   const baseDetail = buildFetchFailureDetail({
                       url: urlStr,
                       method,
                       durationMs: Date.now() - fetchStartedAt,
                       error: err,
-                  });
+                      requestSummary: summarizeFetchRequestBody((sendArgs[1] as any)?.body),
+                      requestPurpose: requestMeta?.purpose,
+                      recentSuccessfulSameRequest: recentSuccess,
+                  }, { startedAt: fetchStartedAtPerf });
                   setSystemLogs(prev => [{
                       id: logId,
                       timestamp: Date.now(),
@@ -3581,6 +3573,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           const zip = new JSZip();
           const assetsFolder = zip.folder("assets");
           let assetCount = 0;
+          let malformedImageCount = 0;
+          const malformedImageDiagnostics: MalformedBackupImageDiagnostic[] = [];
+          const maxMalformedImageDiagnostics = 100;
 
           // Dedup table — same base64 payload reused across stores (角色头像在
           // 多个 chat / handbook / room 里被嵌入) gets stored exactly once. Key
@@ -3612,19 +3607,33 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           };
 
           // 把一条 data:image base64 落进 ZIP 的 assets/ 文件夹，返回它的 assets/* 路径。
-          // 同一份 base64 全局只存一份（assetDedupMap 按完整 base64 去重）；无法识别的
-          // data url 原样返回，不动它。
-          const resolveImage = (value: string): string => {
+          // 同一份 base64 全局只存一份（assetDedupMap 按完整 base64 去重）。无法识别但
+          // 不一定损坏的 data url 原样保留；确认损坏的正文只在导出副本里置空。
+          const resolveImage = (value: string, location: string): string => {
               try {
                   const cached = assetDedupMap.get(value);
                   if (cached) return cached;
-                  const extMatch = value.match(/data:image\/([a-zA-Z0-9]+);base64,/);
-                  if (!extMatch) return value;
-                  const ext = extMatch[1] === 'jpeg' ? 'jpg' : extMatch[1];
-                  const filename = `asset_${Date.now()}_${assetCount++}.${ext}`;
-                  const base64Data = value.split(',')[1];
+                  const parsed = parseImageDataUrlForBackup(value);
+                  if (!parsed.ok) {
+                      // SVG、带额外 MIME 参数等本来就不走 assets/* 的 data URL 沿用旧行为，
+                      // 原样留在 JSON，也不把它误报成「损坏图片」。
+                      if (parsed.reason === 'unsupported-header') return value;
+                      malformedImageCount++;
+                      if (malformedImageDiagnostics.length < maxMalformedImageDiagnostics) {
+                          malformedImageDiagnostics.push({
+                              location,
+                              reason: parsed.reason,
+                              originalLength: value.length,
+                          });
+                      }
+                      // 坏 Base64 已无法还原；不把正文写进 assets 或备份 JSON，避免恢复后继续
+                      // 传播脏数据。这里只修改 IDB 结构化克隆/运行态深拷贝，不会改用户本地库。
+                      console.warn(`[Backup] 损坏图片已从导出副本跳过: ${location} (${parsed.reason}, ${value.length} chars)`);
+                      return '';
+                  }
+                  const filename = `asset_${Date.now()}_${assetCount++}.${parsed.extension}`;
                   // JPEG/PNG/WebP/GIF 本身已压缩，再跑 DEFLATE 只会浪费手机 CPU；直接存储。
-                  assetsFolder?.file(filename, base64Data, { base64: true, compression: 'STORE' });
+                  assetsFolder?.file(filename, parsed.base64, { base64: true, compression: 'STORE' });
                   const path = `assets/${filename}`;
                   assetDedupMap.set(value, path);
                   return path;
@@ -3638,8 +3647,32 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // 原地把 base64 换成 assets/* 路径，不再另建一棵对象树，导出大 store 时峰值内存更省。
           // 传进来的必须是独立副本：store 数据是 IDB 结构化克隆副本（安全）；theme /
           // customIcons / appearancePresets 引用了运行态 state，已在上面 backupData 里深拷贝。
-          const processObject = (obj: any): any => {
-              extractImagesInPlace(obj, resolveImage);
+          const processObject = (obj: any, source = 'backupData'): any => {
+              const safeRecordId = (value: unknown): string | null => {
+                  if (typeof value !== 'string' && typeof value !== 'number') return null;
+                  return String(value).replace(/[\r\n]/g, ' ').slice(0, 80);
+              };
+              const describeLocation = (path: BackupObjectPath): string => {
+                  let label = source;
+                  let pathStart = 0;
+                  if (Array.isArray(obj) && typeof path[0] === 'number') {
+                      const index = path[0];
+                      const row = obj[index];
+                      const id = row && typeof row === 'object'
+                          ? safeRecordId((row as any).id ?? (row as any).uuid ?? (row as any).key)
+                          : null;
+                      label += `[${index}]${id ? `(id=${id})` : ''}`;
+                      pathStart = 1;
+                  } else if (obj && typeof obj === 'object' && !source.includes('(id=')) {
+                      const id = safeRecordId((obj as any).id ?? (obj as any).uuid ?? (obj as any).key);
+                      if (id) label += `(id=${id})`;
+                  }
+                  for (const segment of path.slice(pathStart)) {
+                      label += typeof segment === 'number' ? `[${segment}]` : `.${segment}`;
+                  }
+                  return label;
+              };
+              extractImagesInPlace(obj, (dataUrl, path) => resolveImage(dataUrl, describeLocation(path)));
               return obj;
           };
 
@@ -3783,6 +3816,16 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       const key = localStorage.key(i);
                       if (!key || !key.startsWith('chat_translate_enabled_')) continue;
                       const charId = key.replace('chat_translate_enabled_', '');
+                      map[charId] = localStorage.getItem(key) === 'true';
+                  }
+                  return Object.keys(map).length > 0 ? map : undefined;
+              })() : undefined,
+              chatTranslateExpandedByChar: (mode === 'text_only' || mode === 'full') ? (() => {
+                  const map: Record<string, boolean> = {};
+                  for (let i = 0; i < localStorage.length; i++) {
+                      const key = localStorage.key(i);
+                      if (!key || !key.startsWith('chat_translate_expanded_')) continue;
+                      const charId = key.replace('chat_translate_expanded_', '');
                       map[charId] = localStorage.getItem(key) === 'true';
                   }
                   return Object.keys(map).length > 0 ? map : undefined;
@@ -3933,12 +3976,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               if (backupData.customIcons) await resolveBlobRefsDeep(backupData.customIcons);
               if (backupData.appearancePresets) await resolveBlobRefsDeep(backupData.appearancePresets);
 
-              if (backupData.socialAppData?.userProfile) processObject(backupData.socialAppData.userProfile);
-              if (backupData.socialAppData?.userBg) processObject(backupData.socialAppData.userBg);
-              if (backupData.roomCustomAssets) processObject(backupData.roomCustomAssets);
-              if (backupData.theme) processObject(backupData.theme);
-              if (backupData.customIcons) processObject(backupData.customIcons);
-              if (backupData.appearancePresets) processObject(backupData.appearancePresets);
+              if (backupData.socialAppData?.userProfile) processObject(backupData.socialAppData.userProfile, 'socialAppData.userProfile');
+              if (backupData.socialAppData?.userBg) processObject(backupData.socialAppData.userBg, 'socialAppData.userBg');
+              if (backupData.roomCustomAssets) processObject(backupData.roomCustomAssets, 'roomCustomAssets');
+              if (backupData.theme) processObject(backupData.theme, 'theme');
+              if (backupData.customIcons) processObject(backupData.customIcons, 'customIcons');
+              if (backupData.appearancePresets) processObject(backupData.appearancePresets, 'appearancePresets');
           } else {
               // Strip images for text only
               if (backupData.socialAppData?.userProfile) backupData.socialAppData.userProfile = stripBase64(backupData.socialAppData.userProfile);
@@ -3979,11 +4022,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           ]);
 
           // Chunked processObject for large arrays — yields to main thread every 200 items
-          const processArrayChunked = async (arr: any[], fn: (item: any) => any, chunkSize = 200): Promise<any[]> => {
+          const processArrayChunked = async (arr: any[], fn: (item: any, index: number) => any, chunkSize = 200): Promise<any[]> => {
               if (arr.length <= chunkSize) return arr.map(fn);
               const result: any[] = [];
               for (let i = 0; i < arr.length; i += chunkSize) {
-                  const chunk = arr.slice(i, i + chunkSize).map(fn);
+                  const chunk = arr.slice(i, i + chunkSize).map((item, offset) => fn(item, i + offset));
                   result.push(...chunk);
                   if (i + chunkSize < arr.length) {
                       await new Promise(r => setTimeout(r, 0));
@@ -4151,7 +4194,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   if (storeName === 'characters' && mode === 'media_only') {
                       // Character Logic: Export ONLY visual assets to mediaAssets array
                       // Do not export the full character array to avoid overwriting text data on import
-                      const mediaList = rawData.map((c: CharacterProfile) => {
+                      const mediaList = rawData.map((c: CharacterProfile, index: number) => {
                           const extracted = {
                               charId: c.id,
                               avatar: c.avatar,
@@ -4175,15 +4218,20 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                                   roomFloor: c.roomConfig?.floorImage
                               }
                           };
-                          return processObject(extracted);
+                          return processObject(extracted, `characters[${index}](id=${String(c.id).slice(0, 80)})`);
                       });
                       backupData.mediaAssets = mediaList;
                       continue; // Skip standard assignment
                   }
 
                   processedData = Array.isArray(rawData) && rawData.length > 200
-                      ? await processArrayChunked(rawData, processObject)
-                      : processObject(rawData);
+                      ? await processArrayChunked(rawData, (item, index) => {
+                          const id = item && typeof item === 'object'
+                              ? String(item.id ?? item.uuid ?? item.key ?? '').replace(/[\r\n]/g, ' ').slice(0, 80)
+                              : '';
+                          return processObject(item, `${storeName}[${index}]${id ? `(id=${id})` : ''}`);
+                      })
+                      : processObject(rawData, storeName);
               }
 
               // Assign to Backup Data
@@ -4292,6 +4340,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               },
           );
 
+          if (malformedImageCount > 0) {
+              zip.file(
+                  'diagnostics/malformed-images.json',
+                  JSON.stringify(buildMalformedImageDiagnostics({
+                      createdAt: new Date().toISOString(),
+                      mode,
+                      total: malformedImageCount,
+                      items: malformedImageDiagnostics,
+                  }), null, 2),
+              );
+          }
+
           // 进度提示：每 ~5% 更新一次（避免高频 React 重渲染），同时让进度
           // 条从 70% 平滑爬到 99%，用户能确切看到"在动"。
           let lastReportedPercent = -10;
@@ -4319,6 +4379,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           setSysOperation({ status: 'idle', message: '', progress: 100 });
           // 备份成功 → 推进「该备份啦」提醒的计时（本地导出 / 云备份都走这里，一处覆盖两条路径）
           markBackupDone();
+          if (malformedImageCount > 0) {
+              console.warn(`[Backup] 备份已完成，已从导出副本跳过 ${malformedImageCount} 处损坏图片`, malformedImageDiagnostics);
+              addToast(`备份已生成，已跳过 ${malformedImageCount} 处无法恢复的损坏图片；其他数据已正常保存`, 'info');
+          }
           return content;
 
       } catch (e: any) {
@@ -4692,6 +4756,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (data.chatTranslateEnabledByChar && typeof data.chatTranslateEnabledByChar === 'object') {
               for (const [charId, enabled] of Object.entries(data.chatTranslateEnabledByChar)) {
                   localStorage.setItem(`chat_translate_enabled_${charId}`, enabled ? 'true' : 'false');
+              }
+          }
+          if (data.chatTranslateExpandedByChar && typeof data.chatTranslateExpandedByChar === 'object') {
+              for (const [charId, expanded] of Object.entries(data.chatTranslateExpandedByChar)) {
+                  localStorage.setItem(`chat_translate_expanded_${charId}`, expanded ? 'true' : 'false');
               }
           }
           if (data.chatTranslateSourceLangByChar && typeof data.chatTranslateSourceLangByChar === 'object') {
