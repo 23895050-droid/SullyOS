@@ -313,7 +313,9 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '【弹窗】.as-modal 是半透明遮罩层（本来就带深色，改它的背景不是换肤）；真正要改的白卡是 .as-modal-card——设置、收藏夹、任务存档、长按菜单等每一张弹窗卡都长这样。\n\n' +
       '元素对照（容易改错的地方，照着选）：\n' +
       '· 聊天输入框 = .as-input（<input> 元素，没有 type 属性——不要用 input[type="text"] 选择器，匹配不到它）\n' +
-      '· CSS 编辑弹层的代码输入 = .as-css-editor（<textarea>）；设置里的人设也是 textarea，名字/API 输入是 input\n' +
+      '· 弹窗里的所有输入框和文字域（设置里的名字/API 三项/预设名、收藏夹里的片段名和 CSS 内容、修改消息的输入）统一 = .as-field——要统一改弹窗输入样式就写 .as-field + !important\n' +
+      '· CSS 编辑弹层的代码输入 = .as-css-editor（<textarea>）；要单独改它写 .as-css-editor\n' +
+      '· 加号面板里的模块/页面/卡片选择小胶囊按钮 = .as-chip（三行都是它）；面板底部四个入口按钮 = .as-panel-btn\n' +
       '· 要改「聊天输入框」写 .as-input，别写 textarea（那是代码编辑器）\n\n' +
       '为什么有时候改不动：这个页面大量控件用内联样式（输入框、发送键、气泡、弹窗卡片都是），普通选择器优先级打不过内联样式——不是选择器写错了，用 .as-* 类 + !important 才有效。\n' +
       '层级规则：主界面（顶栏/消息流/加号面板/输入行）包在一个独立堆叠层里，你写的 z-index 或 position:fixed 只会影响这层内部、盖不到弹窗——这是故意的，不需要也不允许用 z-index 去盖弹窗；弹窗本身永远在最上面，改弹窗外观就用 .as-modal + !important。\n' +

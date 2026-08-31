@@ -682,7 +682,7 @@ const AssistantApp: React.FC = () => {
                   <button
                     key={mod.key}
                     onClick={() => { setMode(mod.pages[0].key as PageKey); setCard('whole'); }}
-                    className="rounded-full px-3 py-1.5 transition-all active:scale-95 border-0 cursor-pointer"
+                    className="as-chip rounded-full px-3 py-1.5 transition-all active:scale-95 border-0 cursor-pointer"
                     style={chipStyle(active)}
                   >
                     {mod.label}
@@ -696,7 +696,7 @@ const AssistantApp: React.FC = () => {
                 <button
                   key={p.key}
                   onClick={() => { setMode(p.key as PageKey); setCard('whole'); }}
-                  className="rounded-full px-3 py-1.5 transition-all active:scale-95 border-0 cursor-pointer"
+                  className="as-chip rounded-full px-3 py-1.5 transition-all active:scale-95 border-0 cursor-pointer"
                   style={chipStyle(mode === p.key)}
                 >
                   {p.label}
@@ -711,7 +711,7 @@ const AssistantApp: React.FC = () => {
                 <button
                   key={c.key}
                   onClick={() => setCard(c.key)}
-                  className="rounded-full px-3 py-1 transition-all active:scale-95 border-0 cursor-pointer"
+                  className="as-chip rounded-full px-3 py-1 transition-all active:scale-95 border-0 cursor-pointer"
                   style={chipStyle(card === c.key)}
                 >
                   {c.label}
@@ -721,7 +721,7 @@ const AssistantApp: React.FC = () => {
             <div className="border-t pt-2.5 space-y-1.5" style={{ borderColor: 'rgba(201,106,142,0.12)' }}>
               <button
                 onClick={() => { setShowPlus(false); openCssEditor(); }}
-                className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all active:scale-[0.98] border-0 cursor-pointer"
+                className="as-panel-btn w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all active:scale-[0.98] border-0 cursor-pointer"
                 style={{ background: 'rgba(201,106,142,0.06)' }}
               >
                 <PaintBrush size={16} color={colors.primary} />
@@ -729,7 +729,7 @@ const AssistantApp: React.FC = () => {
               </button>
               <button
                 onClick={() => { setShowPlus(false); fileRef.current?.click(); }}
-                className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all active:scale-[0.98] border-0 cursor-pointer"
+                className="as-panel-btn w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all active:scale-[0.98] border-0 cursor-pointer"
                 style={{ background: 'rgba(201,106,142,0.06)' }}
               >
                 <ImageSquare size={16} color={colors.primary} />
@@ -737,7 +737,7 @@ const AssistantApp: React.FC = () => {
               </button>
               <button
                 onClick={() => { setShowPlus(false); setShowFavs(true); }}
-                className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all active:scale-[0.98] border-0 cursor-pointer"
+                className="as-panel-btn w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all active:scale-[0.98] border-0 cursor-pointer"
                 style={{ background: 'rgba(201,106,142,0.06)' }}
               >
                 <BookmarkSimple size={16} color={colors.primary} />
@@ -745,7 +745,7 @@ const AssistantApp: React.FC = () => {
               </button>
               <button
                 onClick={() => { setShowPlus(false); setShowSessions(true); }}
-                className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all active:scale-[0.98] border-0 cursor-pointer"
+                className="as-panel-btn w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all active:scale-[0.98] border-0 cursor-pointer"
                 style={{ background: 'rgba(201,106,142,0.06)' }}
               >
                 <FolderSimple size={16} color={colors.primary} />
@@ -988,7 +988,7 @@ const AssistantApp: React.FC = () => {
                             value={favDraft.name}
                             onChange={(e) => setFavDraft((d) => ({ ...d, name: e.target.value }))}
                             placeholder="片段名"
-                            className="w-full rounded-lg px-2.5 py-1.5 outline-none text-[11px] font-medium"
+                            className="as-field w-full rounded-lg px-2.5 py-1.5 outline-none text-[11px] font-medium"
                             style={{ color: colors.text, background: 'rgba(255,255,255,0.8)', border: '1px solid rgba(201,106,142,0.18)' }}
                           />
                           <textarea
@@ -996,7 +996,7 @@ const AssistantApp: React.FC = () => {
                             onChange={(e) => setFavDraft((d) => ({ ...d, css: e.target.value }))}
                             rows={7}
                             placeholder="在这里自由写 / 粘贴 CSS"
-                            className="w-full rounded-lg px-2.5 py-2 outline-none text-[10px] leading-relaxed"
+                            className="as-field w-full rounded-lg px-2.5 py-2 outline-none text-[10px] leading-relaxed"
                             style={{
                               fontFamily: "'SF Mono','Cascadia Code',Consolas,monospace", color: colors.text,
                               background: 'rgba(255,255,255,0.8)', border: '1px solid rgba(201,106,142,0.18)', resize: 'vertical',
@@ -1052,7 +1052,7 @@ const AssistantApp: React.FC = () => {
               value={favNameDraft}
               onChange={(e) => setFavNameDraft(e.target.value)}
               placeholder="给这段取个名字"
-              className="w-full rounded-xl px-3 py-2 outline-none text-[11px]"
+              className="as-field w-full rounded-xl px-3 py-2 outline-none text-[11px]"
               style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }}
             />
             <div className="mt-3 flex gap-2">
@@ -1132,7 +1132,7 @@ const AssistantApp: React.FC = () => {
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
               rows={3}
-              className="w-full rounded-xl px-3 py-2 outline-none text-[12px]"
+              className="as-field w-full rounded-xl px-3 py-2 outline-none text-[12px]"
               style={{ color: colors.text, resize: 'none', border: '1px solid rgba(201,106,142,0.2)' }}
             />
             <div className="mt-3 flex gap-2">
@@ -1270,7 +1270,7 @@ const AssistantApp: React.FC = () => {
                   onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
                   onBlur={() => saveAssistantProfile({ name: profileForm.name })}
                   placeholder="名字"
-                  className="flex-1 min-w-0 rounded-xl px-3 py-2 outline-none text-[11px]"
+                  className="as-field flex-1 min-w-0 rounded-xl px-3 py-2 outline-none text-[11px]"
                   style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }}
                 />
               </div>
@@ -1283,7 +1283,7 @@ const AssistantApp: React.FC = () => {
                 onChange={(e) => setProfileForm({ ...profileForm, persona: e.target.value })}
                 onBlur={() => saveAssistantProfile({ persona: profileForm.persona })}
                 rows={3}
-                className="w-full rounded-xl px-3 py-2 outline-none text-[11px] leading-relaxed"
+                className="as-field w-full rounded-xl px-3 py-2 outline-none text-[11px] leading-relaxed"
                 style={{ color: colors.text, resize: 'none', border: '1px solid rgba(201,106,142,0.2)' }}
               />
             </div>
@@ -1341,7 +1341,7 @@ const AssistantApp: React.FC = () => {
                     onChange={(e) => setPresetNameDraft(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) savePreset(); }}
                     placeholder="预设名（如 薄荷）"
-                    className="flex-1 min-w-0 rounded-full px-3 py-1.5 outline-none text-[10px]"
+                    className="as-field flex-1 min-w-0 rounded-full px-3 py-1.5 outline-none text-[10px]"
                     style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }}
                   />
                   <button
@@ -1412,11 +1412,11 @@ const AssistantApp: React.FC = () => {
               )}
               <div className="space-y-1.5">
                 <input value={apiForm.baseUrl} onChange={(e) => setApiForm({ ...apiForm, baseUrl: e.target.value })} placeholder="Base URL（已带 /v1）"
-                  className="w-full rounded-xl px-3 py-2 outline-none text-[10px]" style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }} />
+                  className="as-field w-full rounded-xl px-3 py-2 outline-none text-[10px]" style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }} />
                 <input value={apiForm.apiKey} onChange={(e) => setApiForm({ ...apiForm, apiKey: e.target.value })} placeholder="API Key"
-                  className="w-full rounded-xl px-3 py-2 outline-none text-[10px]" style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }} />
+                  className="as-field w-full rounded-xl px-3 py-2 outline-none text-[10px]" style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }} />
                 <input value={apiForm.model} onChange={(e) => setApiForm({ ...apiForm, model: e.target.value })} placeholder="模型名"
-                  className="w-full rounded-xl px-3 py-2 outline-none text-[10px]" style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }} />
+                  className="as-field w-full rounded-xl px-3 py-2 outline-none text-[10px]" style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }} />
               </div>
             </div>
 
