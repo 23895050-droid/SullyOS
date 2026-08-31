@@ -68,6 +68,14 @@ describe('MessageItem module layout', () => {
         expect(markup).not.toContain('alt="avatar"');
         expect(markup).toContain('sully-html-wrap');
         expect(markup).toContain(align === 'center' ? 'mx-auto sully-html-wrap' : 'ml-12 sully-html-wrap');
+        // #608：HTML 卡片源码留存条（折叠查看 + 一键复制完整源码）
+        expect(markup).toContain('sully-html-source-bar');
+        expect(markup).toContain('sully-html-source-toggle');
+        expect(markup).toContain('aria-expanded="false"');
+        expect(markup).toContain('aria-label="展开 HTML 源码操作"');
+        expect(markup).toContain('aria-label="复制完整 HTML 源码"');
+        expect(markup).toContain('完整源码');
+        expect(markup).toContain('复制源码');
     });
 
     it.each(moduleModes)('一起听卡片在 %s / %s 模式跟随模块位置且没有消息外侧头像', (align, avatarMode) => {
