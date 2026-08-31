@@ -27,7 +27,8 @@ const DB_NAME = 'AetherOS_Data';
 // v69：见面·剧情条目与糯米机原生预设。正文继续复用 messages 表，避免再造会话存储。
 // v70：剧场面具箱（原创人物面具）；角色面具仍只存 characterId，不复制神经链接资料。
 // v71：image_receipts 近期接收 — 生图独立备份站（与聊天消息解耦，各删各的）。
-const DB_VERSION = 71;
+// v72：xhs_owned_posts（上游 v71 同名版本号撞车，bump 一次建齐双方 store）。
+const DB_VERSION = 72;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -85,6 +86,7 @@ const STORE_STORY_THEATERS = 'story_theaters';       // 见面·剧情条目（�
 const STORE_STORY_THEATER_PRESETS = 'story_theater_presets'; // 糯米机原生剧情预设
 const STORE_STORY_THEATER_MASKS = 'story_theater_masks'; // 剧场原创人物面具
 const STORE_IMAGE_RECEIPTS = 'image_receipts'; // 近期接收 — 生图独立备份站
+const STORE_XHS_OWNED_POSTS = 'xhs_owned_posts'; // 小红书轻量版·我发布的笔记（上游 v71 store，v72 建齐）
 
 // API 调用记录：保留近 5 天，超期丢弃；再加一个硬上限防止异常情况撑爆
 const API_CALL_LOG_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
@@ -338,6 +340,12 @@ export const openDB = (): Promise<IDBDatabase> => {
       if (!db.objectStoreNames.contains(STORE_XHS_ACTIVITIES)) {
           const xhsActStore = db.createObjectStore(STORE_XHS_ACTIVITIES, { keyPath: 'id' });
           xhsActStore.createIndex('characterId', 'characterId', { unique: false });
+      }
+      // v72: 上游 v71 的 store——版本号撞车后 bump 72 建齐（结构照抄上游，功能随 feature 批次补）
+      if (!db.objectStoreNames.contains(STORE_XHS_OWNED_POSTS)) {
+          const ownedPostStore = db.createObjectStore(STORE_XHS_OWNED_POSTS, { keyPath: 'id' });
+          ownedPostStore.createIndex('characterId', 'characterId', { unique: false });
+          ownedPostStore.createIndex('noteId', 'noteId', { unique: false });
       }
 
       createStore(STORE_SONGS, { keyPath: 'id' });
@@ -1286,6 +1294,25 @@ export const DB = {
           transaction.oncomplete = () => resolve();
           transaction.onerror = () => reject(transaction.error);
           transaction.onabort = () => reject(transaction.error || new Error('deleteBlobAsset aborted'));
+      });
+  },
+
+  // 只列 blobRef 命名空间的 id（img_ 存量 / b_ SDK 新生成）。blob_assets 是混用表，
+  // GC 的世界观必须限制在自己的前缀内；今后往这张表加新 id 族时不得使用这两个前缀。
+  listBlobAssetIds: async (): Promise<string[]> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_BLOB_ASSETS)) return [];
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_BLOB_ASSETS, 'readonly');
+          const store = transaction.objectStore(STORE_BLOB_ASSETS);
+          const request = store.getAllKeys();
+          request.onsuccess = () => {
+              const keys = request.result || [];
+              resolve(keys.filter((k): k is string =>
+                  typeof k === 'string' && (k.startsWith('img_') || k.startsWith('b_'))
+              ));
+          };
+          request.onerror = () => reject(request.error);
       });
   },
 
