@@ -4,6 +4,7 @@ import { APIConfig, AppID, OSTheme, VirtualTime, CharacterProfile, CharacterGrou
 import { DB } from '../utils/db';
 import { modelRejectsSamplingParams, stripSamplingParams } from '../utils/samplingParamCompat';
 import { buildMalformedImageDiagnostics, extractImagesInPlace, deepCloneForExport, parseImageDataUrlForBackup, type BackupObjectPath, type MalformedBackupImageDiagnostic } from '../utils/backupExport';
+import { resolveBlobRefsInRequestBody } from '../utils/apiBlobRefs';
 import { isBlobRef, getBlobForRef, migrateDataUrlToRef, migrateAppearancePresetBlobRefs, resolveBlobRefsDeep, BLOBREF_PREFIX, deleteBlobRefIfUnreferenced } from '../utils/blobRef';
 import { initPwaIcon, clearPwaIcon } from '../utils/appIcon';
 import { LEGACY_DEFAULT_WALLPAPER, isLegacyDefaultWallpaper, shouldPreserveLegacyDefaultWallpaper } from '../utils/wallpaperCompat';
@@ -1102,6 +1103,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       }
                       if (body !== rawBody) sendArgs = [resource, { ...(config as RequestInit), body }];
                   } catch { /* 非 JSON body：原样放行 */ }
+              }
+
+              // 图片令牌不出门：`blobref:` 是本机存储形态，发出去对面只会看到一串读不懂的
+              // 字符，然后说「我没看到图片」——不报错也不破图，最难查（详见 utils/apiBlobRefs.ts）。
+              // safeFetchJson 那条路自己还原过一遍，这里兜的是绕开它直接用 fetch 的调用点。
+              const bodyBeforeRefs = (sendArgs[1] as RequestInit | undefined)?.body;
+              const bodyWithImages = await resolveBlobRefsInRequestBody(bodyBeforeRefs);
+              if (bodyWithImages !== bodyBeforeRefs) {
+                  sendArgs = [sendArgs[0], { ...(sendArgs[1] as RequestInit), body: bodyWithImages as BodyInit }];
               }
           }
 
