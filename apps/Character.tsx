@@ -5,7 +5,7 @@ import { AppID, CharacterProfile, CharacterExportData, UserImpression, MemoryFra
 import { SlidersHorizontal, SpeakerHigh, Books, BookOpen } from '@phosphor-icons/react';
 import Modal from '../components/os/Modal';
 import { processImage, processImageToBlob } from '../utils/file';
-import { putImageBlob, useBlobRefUrl, deleteBlobRef } from '../utils/blobRef';
+import { putImageBlob, useBlobRefUrl, deleteBlobRef, migrateDataUrlToRef } from '../utils/blobRef';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -430,7 +430,9 @@ const Character: React.FC = () => {
           try {
               setIsCompressing(true);
               const processedBase64 = await processImage(file);
-              handleChange('avatar', processedBase64);
+              // 头像存令牌，二进制单独躺在 blob_assets 里（省掉 base64 那 ~33% 的膨胀）。
+              // 同一张图之前存过就复用它的令牌；转不动时原样还回这条 data URL，图不会丢。
+              handleChange('avatar', await migrateDataUrlToRef(processedBase64));
               // 清空 URL draft, 否则用户之后再触发 URL input 的 onBlur 会用脏旧 URL
               // 把刚上传的 data URL 头像盖掉. 不走 effect 监听 avatar 的方案 —— 那会
               // 在用户正在打 URL 时吃掉 draft.

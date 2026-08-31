@@ -28,6 +28,9 @@ import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } fr
 import { UsersThree, Money, GearSix, Image as ImageIcon, ArrowsClockwise, PaintBrush, BellSimpleRinging, Code, Question } from '@phosphor-icons/react';
 import ChatHeaderShell from '../components/chat/ChatHeaderShell';
 import ChatInputArea from '../components/chat/ChatInputArea';
+import TokenImg from '../components/os/TokenImg';
+import { useBlobRefUrl, isBlobRef, getBlobForRef, migrateDataUrlToRef } from '../utils/blobRef';
+import { buildReplySnapshotContent } from '../utils/applyAssistantPostProcessing';
 import ChromeCssEditor from '../components/chat/ChromeCssEditor';
 import WhiteboxSoundEditor from '../components/chat/WhiteboxSoundEditor';
 import HtmlCard from '../components/chat/HtmlCard';
@@ -142,6 +145,9 @@ const GroupMessageItem = React.memo(({
     const avatar = isUser ? userAvatar : char?.avatar;
     const name = isUser ? '我' : char?.name || '未知成员';
 
+    // 气泡底纹画在 CSS background-image 上，拿不到 <img> 那层的自动解析，只能在顶层
+    // 无条件解析一次（hook 不能进条件分支）。挂件/头像挂件走 TokenImg，各自组件内解析。
+    const bubbleBgUrl = useBlobRefUrl(styleConfig.backgroundImage);
     // pointer-event 手势（对齐私聊 MessageItem 的方案）：600ms 长按 → 操作菜单；
     // 触屏左滑 ≤-52px → 引用回复（带位移动画）；鼠标右键 → 操作菜单
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -252,12 +258,12 @@ const GroupMessageItem = React.memo(({
                         if (selectionMode) handleClick(e);
                         else onImageClick(msg.content);
                     }}>
-                        <img src={msg.content} className="max-w-[200px] max-h-[200px] rounded-xl shadow-sm border border-black/5" loading="lazy" />
+                        <TokenImg value={msg.content} className="max-w-[200px] max-h-[200px] rounded-xl shadow-sm border border-black/5" loading="lazy" />
                     </div>
                 );
             case 'emoji':
                 // 尺寸跟随外观 → 表情包大小（--sully-emoji-size 三挡，默认 96px = 原 w-24）
-                return <img src={msg.content} className="sully-emoji-msg max-w-[var(--sully-emoji-size,96px)] max-h-[var(--sully-emoji-size,96px)] object-contain drop-shadow-sm hover:scale-110 transition-transform" />;
+                return <TokenImg value={msg.content} className="sully-emoji-msg max-w-[var(--sully-emoji-size,96px)] max-h-[var(--sully-emoji-size,96px)] object-contain drop-shadow-sm hover:scale-110 transition-transform" />;
             case 'transfer':
                 return (
                     <div onClick={(e) => { if (selectionMode) handleClick(e); }}>
@@ -288,14 +294,26 @@ const GroupMessageItem = React.memo(({
                             ...(isUser ? { borderTopRightRadius: 4 } : { borderTopLeftRadius: 4 }),
                         }}
                     >
-                        {styleConfig.backgroundImage && (
+                        {bubbleBgUrl && (
                             <div
                                 className="absolute inset-0 pointer-events-none"
                                 style={{
-                                    backgroundImage: `url(${styleConfig.backgroundImage})`,
+                                    backgroundImage: `url(${bubbleBgUrl})`,
                                     backgroundSize: 'cover',
                                     backgroundPosition: 'center',
                                     opacity: styleConfig.backgroundImageOpacity ?? 0.5,
+                                    borderRadius: 'inherit',
+                                }}
+                            />
+                        )}
+                        {styleConfig.decoration && (
+                            <TokenImg
+                                value={styleConfig.decoration}
+                                className="absolute z-10 w-8 h-8 object-contain drop-shadow-sm pointer-events-none"
+                                style={{
+                                    left: `${styleConfig.decorationX ?? (isUser ? 90 : 10)}%`,
+                                    top: `${styleConfig.decorationY ?? -10}%`,
+                                    transform: `translate(-50%, -50%) scale(${styleConfig.decorationScale ?? 1}) rotate(${styleConfig.decorationRotate ?? 0}deg)`,
                                 }}
                             />
                         )}
@@ -349,7 +367,9 @@ const GroupMessageItem = React.memo(({
                 {msg.replyTo && (
                     <div className="mb-1 text-[10px] bg-black/5 p-1.5 rounded-md border-l-2 border-slate-300 text-slate-500 flex flex-col gap-0.5 max-w-full overflow-hidden">
                         <span className="font-bold truncate">{msg.replyTo.name}</span>
-                        <span className="truncate italic">"{msg.replyTo.content.length > 10 ? msg.replyTo.content.slice(0, 10) + '...' : msg.replyTo.content}"</span>
+                        {/* 历史快照里可能原样存着令牌 / data: / 图床 URL，直接截 10 个字
+                            就成了气泡里一串 `blobref:b_`；交给写入端同一个快照函数换占位符 */}
+                        <span className="truncate italic">"{buildReplySnapshotContent({ content: msg.replyTo.content })}"</span>
                     </div>
                 )}
                 {renderContent()}
@@ -702,10 +722,12 @@ const GroupChat: React.FC = () => {
         if (!file || !activeGroup) return;
         try {
             const base64 = await processImage(file);
+            // 群头像存令牌，二进制单独躺在 blob_assets 里；转不动时原样还回 data URL，图不会丢
+            const avatar = await migrateDataUrlToRef(base64);
             // 走 context 的 updateGroup：同步内存 groups + DB，
             // 否则只改了本地 activeGroup，退出回列表/再次进群会读回旧头像（恢复默认）
-            await updateGroup(activeGroup.id, { avatar: base64 });
-            setActiveGroup({ ...activeGroup, avatar: base64 });
+            await updateGroup(activeGroup.id, { avatar });
+            setActiveGroup({ ...activeGroup, avatar });
             addToast('群头像已修改', 'success');
         } catch (err: any) {
             addToast('图片处理失败', 'error');
@@ -797,7 +819,8 @@ const GroupChat: React.FC = () => {
         if (replyTarget) {
             newMessage.replyTo = {
                 id: replyTarget.id,
-                content: replyTarget.content,
+                // 图片 / 表情走占位符，不把 blobref 令牌原样存进快照。
+                content: buildReplySnapshotContent(replyTarget),
                 name: replyTarget.role === 'user'
                     ? '我'
                     : (characters.find(c => c.id === replyTarget.charId)?.name || '成员'),
@@ -821,7 +844,9 @@ const GroupChat: React.FC = () => {
     const handleImageFile = async (file: File) => {
         try {
             const base64 = await processImage(file, { maxWidth: 600, quality: 0.7, forceJpeg: true });
-            handleSendMessage(base64, 'image');
+            // 群聊图消息存令牌，二进制单独躺在 blob_assets 里（省掉 base64 那 ~33% 的膨胀）。
+            // 同一张图之前存过就复用它的令牌；转不动时原样还回这条 data URL，图不会丢。
+            handleSendMessage(await migrateDataUrlToRef(base64), 'image');
         } catch (err) {
             addToast('图片发送失败', 'error');
         }
@@ -866,7 +891,17 @@ const GroupChat: React.FC = () => {
         setModalType('packet-detail');
     }, []);
 
-    const handleGroupImageClick = useCallback((url: string) => window.open(url, '_blank'), []);
+    // 点图看大图：新标签页只认得真正的 URL，blobref 令牌得先换成 objectURL 再开
+    // （data: 顶层导航被浏览器挡，只能走 objectURL）。开完不立刻回收——新标签页还在
+    // 用它加载；留一分钟再 revoke，图早读完了，也不至于把整张图一直挂在内存里。
+    const handleGroupImageClick = useCallback(async (url: string) => {
+        if (!isBlobRef(url)) { window.open(url, '_blank'); return; }
+        const blob = await getBlobForRef(url);
+        if (!blob) { addToast('图片数据已丢失', 'error'); return; }
+        const objectUrl = URL.createObjectURL(blob);
+        window.open(objectUrl, '_blank');
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    }, [addToast]);
     const handleGroupReply = useCallback((target: Message) => { setReplyTarget(target); trackEvent('引用回复一条群消息'); }, []);
 
     // 用户抢/收/退：updater 内重跑状态机（以库内最新 claims 判重，防与 AI 派发并发双写）
@@ -1667,7 +1702,8 @@ ${memberTimeline || '(暂无互动记录)'}
             {/* 回复预览条（对齐私聊 Chat.tsx 的样式与位置） */}
             {replyTarget && !selectionMode && (
                 <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 shrink-0 z-40">
-                    <div className="flex items-center gap-2 truncate"><span className="font-bold text-slate-700">正在回复:</span><span className="truncate max-w-[200px]">{replyTarget.content.length > 10 ? replyTarget.content.slice(0, 10) + '...' : replyTarget.content}</span></div>
+                    {/* 引用的是图片 / 表情时这里显示占位符，跟落库的快照同一口径 */}
+                    <div className="flex items-center gap-2 truncate"><span className="font-bold text-slate-700">正在回复:</span><span className="truncate max-w-[200px]">{buildReplySnapshotContent(replyTarget)}</span></div>
                     <button onClick={() => setReplyTarget(null)} className="p-1 text-slate-400 hover:text-slate-600">×</button>
                 </div>
             )}

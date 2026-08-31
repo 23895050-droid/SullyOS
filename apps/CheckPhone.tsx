@@ -15,6 +15,7 @@ import PersonaSim, { LifeLog, generatePersonaScript } from './PersonaSim';
 import { usePersonaSim, personaSimStore } from '../utils/personaSimStore';
 import { getLastInnerState } from '../utils/emotionApply';
 import { trackEvent } from '../utils/analytics';
+import { useBlobRefUrl } from '../utils/blobRef';
 import { normalizePhoneEvidence, phoneFieldToText } from '../utils/phoneEvidence';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import {
@@ -3410,8 +3411,12 @@ ${olderText}
         </div>
     );
 
+    // 桌面底图用的是角色的见面背景，字段里存的是 blobref 令牌（二进制在 IndexedDB）。
+    // 令牌塞不进 CSS url()，先在组件顶层解析成能用的地址；非令牌值原样透传。
+    const dateBackgroundUrl = useBlobRefUrl(targetChar?.dateBackground);
+
     const renderDesktop = () => {
-        const hasBg = !!targetChar?.dateBackground;
+        const hasBg = !!dateBackgroundUrl;
         const totalPages = customApps.length > 0 ? 2 : 1;
 
         const onTouchStart = (e: React.TouchEvent) => {
@@ -3437,7 +3442,7 @@ ${olderText}
                     style={{ background: 'radial-gradient(120% 80% at 50% 0%, #1a1d2b 0%, #0a0c12 55%, #060709 100%)' }} />
                 {hasBg && (
                     <div className="absolute inset-0 opacity-25 pointer-events-none"
-                        style={{ backgroundImage: `url(${targetChar!.dateBackground})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                        style={{ backgroundImage: `url("${dateBackgroundUrl}")`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
                 )}
                 <div className="absolute inset-0 pointer-events-none"
                     style={{ background: 'linear-gradient(to bottom, rgba(7,8,9,0.35) 0%, rgba(7,8,9,0.1) 30%, rgba(7,8,9,0.85) 100%)' }} />

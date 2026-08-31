@@ -21,6 +21,8 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { injectMemoryPalace } from '../utils/memoryPalace/pipeline';
+import { dataUrlToBlob, putImageBlob, resolveRefToDataUrl } from '../utils/blobRef';
+import TokenImg from './os/TokenImg';
 
 // ============================================================
 // 美术资产配置（用户填入实际 PNG URL 后生效）
@@ -1303,7 +1305,7 @@ ${answerSummary}
                                 ...existingData,
                                 score: reviewData?.finalScore ?? existingData.score ?? 0,
                             }),
-                            image: base64,
+                            image: await putImageBlob(dataUrlToBlob(base64)),
                             timestamp: Date.now(),
                             source: 'generated',
                         },
@@ -1995,7 +1997,10 @@ ${answerSummary}
             setIsExporting(true);
             try {
                 const fileName = `whiteday_${char?.name || 'chocolate'}_2026.png`;
-                await downloadOrShare(savedImage, fileName, '白色情人节巧克力');
+                // a.download / fetch / Filesystem 都只认真的 data URL，令牌得先还原回来
+                const dataUrl = await resolveRefToDataUrl(savedImage);
+                if (!dataUrl) { addToast('明信片图片已丢失', 'error'); return; }
+                await downloadOrShare(dataUrl, fileName, '白色情人节巧克力');
                 addToast('导出成功！', 'success');
             } catch (e: any) {
                 if (e?.name !== 'AbortError') addToast('导出失败', 'error');
@@ -2019,7 +2024,7 @@ ${answerSummary}
                     {/* 明信片 */}
                     {savedImage ? (
                         <div className="flex flex-col items-center gap-2">
-                            <img src={savedImage} className="w-full max-w-[320px] rounded-2xl shadow-md border border-amber-200" alt="白色情人节明信片" />
+                            <TokenImg value={savedImage} className="w-full max-w-[320px] rounded-2xl shadow-md border border-amber-200" alt="白色情人节明信片" />
                             <button
                                 onClick={handleReExport}
                                 disabled={isExporting}

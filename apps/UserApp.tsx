@@ -5,6 +5,7 @@ import { processImage } from '../utils/file';
 import LifeRecordPanel from '../components/lifeRecord/LifeRecordPanel';
 import PerCharAvatarPicker from '../components/user/PerCharAvatarPicker';
 import { trackEvent } from '../utils/analytics';
+import { migrateDataUrlToRef } from '../utils/blobRef';
 
 const UserApp: React.FC = () => {
     const { closeApp, userProfile, updateUserProfile, addToast } = useOS();
@@ -16,7 +17,9 @@ const UserApp: React.FC = () => {
         if (file) {
             try {
                 const base64 = await processImage(file);
-                updateUserProfile({ avatar: base64 });
+                // 头像存令牌，二进制单独躺在 blob_assets 里（省掉 base64 那 ~33% 的膨胀）。
+                // 同一张图之前存过就复用它的令牌；转不动时原样还回这条 data URL，图不会丢。
+                updateUserProfile({ avatar: await migrateDataUrlToRef(base64) });
                 addToast('头像已更新', 'success');
             } catch (err: any) {
                 addToast(err.message, 'error');

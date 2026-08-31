@@ -4,7 +4,9 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { CharacterProfile, SocialPost, SocialComment, SubAccount, SocialAppProfile } from '../types';
 import { ContextBuilder } from '../utils/context';
-import { processImage } from '../utils/file';
+import { processImageToBlob } from '../utils/file';
+import { putImageBlob } from '../utils/blobRef';
+import TokenImg from '../components/os/TokenImg';
 import Modal from '../components/os/Modal';
 import { safeResponseJson } from '../utils/safeApi';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
@@ -361,10 +363,13 @@ const SocialApp: React.FC = () => {
         const file = e.target.files?.[0];
         if (file) {
             try {
-                const base64 = await processImage(file, { skipCompression: true });
-                setUserBgImage(base64);
+                // 背景图存二进制：assets 行里只留 blobref 令牌，渲染走 TokenImg。
+                // 旧令牌不主动删（同一张图可能被别处引用），交给孤儿 GC。
+                const blob = await processImageToBlob(file, { skipCompression: true });
+                const ref = await putImageBlob(blob);
+                setUserBgImage(ref);
                 // Save to DB Assets
-                await DB.saveAsset('spark_user_bg', base64);
+                await DB.saveAsset('spark_user_bg', ref);
                 addToast('背景图已更新', 'success');
             } catch (err) {
                 addToast('图片处理失败', 'error');
@@ -376,8 +381,11 @@ const SocialApp: React.FC = () => {
         const file = e.target.files?.[0];
         if (file) {
             try {
-                const base64 = await processImage(file);
-                setSocialProfile(prev => ({ ...prev, avatar: base64 }));
+                // 头像同样只存令牌；这里改的是 socialProfile 内存态，
+                // 落库在 saveUserProfileChanges（点「保存资料」时整个 JSON 写回）。
+                const blob = await processImageToBlob(file);
+                const ref = await putImageBlob(blob);
+                setSocialProfile(prev => ({ ...prev, avatar: ref }));
                 trackEvent('更换 Spark 头像');
             } catch (err: any) {
                 addToast(err.message, 'error');
@@ -387,7 +395,7 @@ const SocialApp: React.FC = () => {
 
     const saveUserProfileChanges = async () => {
         localStorage.setItem('spark_user_id', userSparkId);
-        // Save Profile to DB Assets (contains base64 avatar)
+        // Save Profile to DB Assets（avatar 是 blobref 令牌，二进制在 IndexedDB）
         await DB.saveAsset('spark_social_profile', JSON.stringify(socialProfile));
         setIsEditingId(false);
         addToast('主页资料已保存 (仅在 Spark 生效)', 'success');
@@ -901,7 +909,7 @@ ${identityMap}
             <div className="p-3">
                 <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2 min-w-0">
-                        <img src={post.authorAvatar} className="w-5 h-5 rounded-full object-cover shrink-0 ring-1 ring-white/50" />
+                        <TokenImg value={post.authorAvatar} className="w-5 h-5 rounded-full object-cover shrink-0 ring-1 ring-white/50" />
                         <span className="text-[11px] text-slate-700 truncate font-medium">{post.authorName}</span>
                     </div>
                     <div className="flex items-center gap-1 text-slate-400 group-hover:text-slate-600 transition-colors">
@@ -1196,7 +1204,7 @@ ${identityMap}
                             <div className="relative group">
                                 <div className="h-40 w-full overflow-hidden bg-slate-200 relative cursor-pointer" onClick={() => userBgInputRef.current?.click()}>
                                     {userBgImage ? (
-                                        <img src={userBgImage} className="w-full h-full object-cover" />
+                                        <TokenImg value={userBgImage} className="w-full h-full object-cover" />
                                     ) : (
                                         <img src={userProfile.avatar} className="w-full h-full object-cover blur-2xl opacity-60 scale-125" />
                                     )}
@@ -1209,7 +1217,7 @@ ${identityMap}
                                 <div className="px-6 relative -mt-12 flex justify-between items-end">
                                     {/* Social Avatar - Clickable to change */}
                                     <div className="w-24 h-24 rounded-full p-1 bg-white/90 backdrop-blur-md shadow-lg relative group cursor-pointer" onClick={() => socialAvatarInputRef.current?.click()}>
-                                        <img src={socialProfile.avatar} className="w-full h-full rounded-full object-cover" />
+                                        <TokenImg value={socialProfile.avatar} className="w-full h-full rounded-full object-cover" />
                                         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 rounded-full">
                                             <span className="text-white text-[10px] font-bold">更换</span>
                                         </div>
@@ -1282,7 +1290,7 @@ ${identityMap}
                                             <div className="p-3">
                                                 <h4 className="text-xs font-bold text-slate-800 line-clamp-2 leading-tight">{post.title}</h4>
                                                 <div className="flex justify-between items-center mt-2">
-                                                    <div className="flex items-center gap-1"><img src={post.authorAvatar} className="w-3 h-3 rounded-full" /><span className="text-[9px] text-slate-400 truncate w-12">{post.authorName}</span></div>
+                                                    <div className="flex items-center gap-1"><TokenImg value={post.authorAvatar} className="w-3 h-3 rounded-full" /><span className="text-[9px] text-slate-400 truncate w-12">{post.authorName}</span></div>
                                                     <div className="flex items-center gap-0.5 text-slate-400"><Icons.Heart filled={post.isLiked} className="w-3 h-3" /><span className="text-[9px]">{post.likes}</span></div>
                                                 </div>
                                             </div>
