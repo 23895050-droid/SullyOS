@@ -671,7 +671,8 @@ const AssistantApp: React.FC = () => {
       {/* 加号面板（2026-08-30 改）：内联在输入行上方展开，不遮全屏——正常聊天软件点加号怎么弹就这么弹 */}
       {showPlus && (
         <div className="as-plus-panel shrink-0 px-3 pb-2 pt-0 relative z-10">
-          <div className="rounded-2xl p-3"
+          {/* as-plus-card = 真正的白色面板卡（inline 白底在这），改面板配色认准它；as-plus-panel 只是外层容器 */}
+          <div className="as-plus-card rounded-2xl p-3"
             style={{ background: 'rgba(255,255,255,0.97)', border: `1px solid rgba(201,106,142,0.16)`, boxShadow: '0 -4px 20px rgba(201,106,142,0.08)' }}>
             <div className="text-[9px] mb-1.5 tracking-wider font-semibold" style={{ color: colors.muted }}>模块</div>
             <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
@@ -841,12 +842,13 @@ const AssistantApp: React.FC = () => {
             >
               <Plus size={17} weight="bold" />
             </button>
+            {/* as-input = 聊天输入框（<input> 无 type 属性——别用 input[type="text"] 选择器，匹配不到） */}
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(); }}
               placeholder={`想让 ${pageInfo.label} 变成什么样？`}
-              className="flex-1 min-w-0 rounded-full px-4 py-2.5 outline-none text-[12px]"
+              className="as-input flex-1 min-w-0 rounded-full px-4 py-2.5 outline-none text-[12px]"
               style={{ color: colors.text, background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(201,106,142,0.18)' }}
             />
             <button
@@ -875,7 +877,7 @@ const AssistantApp: React.FC = () => {
       {/* 白框 CSS 编辑弹层（2026-08-30：对标主聊天「白框自定义」——底部白卡，边写边生效） */}
       {showCssEditor && (
         <div className="as-modal fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(60,30,44,0.3)' }} onClick={() => setShowCssEditor(false)}>
-          <div className="w-full max-h-[72vh] overflow-y-auto rounded-t-3xl p-4"
+          <div className="as-modal-card w-full max-h-[72vh] overflow-y-auto rounded-t-3xl p-4"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 -12px 40px rgba(0,0,0,0.18)', paddingBottom: 'calc(1rem + var(--safe-bottom))' }}
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-1.5">
@@ -887,11 +889,12 @@ const AssistantApp: React.FC = () => {
               </div>
               <button onClick={() => setShowCssEditor(false)} className="px-2 text-lg leading-none border-0 cursor-pointer" style={{ color: colors.muted }}>×</button>
             </div>
+            {/* as-css-editor = CSS 编辑弹层的代码 textarea（和聊天输入框 .as-input 不是同一个） */}
             <textarea
               value={cssDraft}
               onChange={(e) => { setCssDraft(e.target.value); slotSave(e.target.value); }}
               rows={10}
-              className="w-full rounded-xl px-3 py-2 outline-none text-[11px]"
+              className="as-css-editor w-full rounded-xl px-3 py-2 outline-none text-[11px]"
               style={{
                 fontFamily: 'monospace', color: colors.text, background: 'rgba(249,236,242,0.6)',
                 border: '1px solid rgba(201,106,142,0.2)', resize: 'vertical',
@@ -921,7 +924,7 @@ const AssistantApp: React.FC = () => {
       {/* 收藏夹弹层（2026-08-31 她要求改）：点开单独看代码，代码区自由输入保存 */}
       {showFavs && (
         <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-6" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowFavs(false)}>
-          <div className="w-full max-w-[340px] rounded-2xl p-4 space-y-2 max-h-[75%] flex flex-col"
+          <div className="as-modal-card w-full max-w-[340px] rounded-2xl p-4 space-y-2 max-h-[75%] flex flex-col"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
@@ -1043,7 +1046,7 @@ const AssistantApp: React.FC = () => {
       {/* 收藏命名弹层 */}
       {favTarget && (
         <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-7" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setFavTarget(null)}>
-          <div className="w-full max-w-[280px] rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="as-modal-card w-full max-w-[280px] rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
             <div className="text-[12px] font-semibold mb-2" style={{ color: colors.text }}>收进收藏夹</div>
             <input
               value={favNameDraft}
@@ -1072,7 +1075,7 @@ const AssistantApp: React.FC = () => {
       {/* 长按操作面板（2026-08-30 加多选入口） */}
       {menuMsg && (
         <div className="as-modal absolute inset-0 z-40 flex items-end" style={{ background: 'rgba(60,30,44,0.35)' }} onClick={() => setMenuMsg(null)}>
-          <div className="w-full rounded-t-2xl p-3 pb-5" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="as-modal-card w-full rounded-t-2xl p-3 pb-5" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
             <div className="text-center text-[9px] mb-2 truncate px-6" style={{ color: colors.faint }}>
               {menuMsg.content.slice(0, 40) || '（图片消息）'}
             </div>
@@ -1123,7 +1126,7 @@ const AssistantApp: React.FC = () => {
       {/* 编辑弹层 */}
       {editMsg && (
         <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-7" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setEditMsg(null)}>
-          <div className="w-full max-w-[280px] rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="as-modal-card w-full max-w-[280px] rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
             <div className="text-[12px] font-semibold mb-2" style={{ color: colors.text }}>修改消息</div>
             <textarea
               value={editText}
@@ -1152,7 +1155,7 @@ const AssistantApp: React.FC = () => {
       {/* 任务存档弹层（2026-08-30）：新建/切换/删除——做完一个活就新建，不用删聊天记录 */}
       {showSessions && (
         <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-6" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowSessions(false)}>
-          <div className="w-full max-w-[320px] rounded-2xl p-4 space-y-2 max-h-[70%] flex flex-col"
+          <div className="as-modal-card w-full max-w-[320px] rounded-2xl p-4 space-y-2 max-h-[70%] flex flex-col"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
@@ -1227,7 +1230,7 @@ const AssistantApp: React.FC = () => {
       {/* 设置弹层：名字头像人设 + 调色台 + API + 美化提示词 + 清空 */}
       {showSettings && (
         <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-5" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowSettings(false)}>
-          <div className="w-full max-w-[360px] rounded-2xl p-4 space-y-3 max-h-[85%] overflow-y-auto"
+          <div className="as-modal-card w-full max-w-[360px] rounded-2xl p-4 space-y-3 max-h-[85%] overflow-y-auto"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
