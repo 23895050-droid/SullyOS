@@ -27,6 +27,7 @@ import { getLocalDateKey } from './localDate';
 import { getDailyScheduleForChar } from './dailySchedule';
 import { formatRelativeAge } from './groupChat/relativeTime';
 import { voiceLanguagePromptLabel } from './voiceLanguage';
+import { isBlobRef } from './blobRef';
 
 // 语音格式指导按当前 TTS 服务商二选一：用 MiniMax 才注入 MiniMax 那套（含 <#秒#> 停顿标记），
 // 用鱼声则注入鱼声版（去掉 MiniMax 专属标记，改用标点 / 省略号控制停顿）。
@@ -36,6 +37,19 @@ const voiceActingGuide = (): string => {
   const custom = getVoicePromptOverride(provider);
   if (custom) return custom;
   return provider === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE;
+};
+
+/**
+ * 这个值是「一张图 / 一段媒体」而不是正文吗？认三种形态：内嵌 data URL、http(s) 外链、
+ * blobref 令牌。按长度截断的兜底拦不住 data URL（截 60 字照样切出一段 base64 碎片），
+ * 令牌更是只有 ~28 字、任何截断都拦不住它整条溜进 prompt；而发请求时网络出口那层
+ * （utils/apiBlobRefs.ts）会把请求体里的令牌统一还原成完整 data URL——
+ * 于是一个短短的令牌到了对面就是几 MB 的 base64，而且每轮对话重发一次。
+ */
+const isMediaValue = (value: unknown): boolean => {
+    if (typeof value !== 'string') return false;
+    const trimmed = value.trim();
+    return /^(data:|https?:\/\/)/i.test(trimmed) || isBlobRef(trimmed);
 };
 
 // 群活动注入专用：把一条群消息压成"适合塞进别人私聊背景"的短文本。
@@ -1192,7 +1206,12 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
                         .replace(/<翻译>\s*<原文>([\s\S]*?)<\/原文>\s*<译文>[\s\S]*?<\/译文>\s*<\/翻译>/g, '$1')
                         .replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '')
                         .trim();
-                    const quoted = rawQuote.length > 60 ? rawQuote.slice(0, 60) + '…' : rawQuote;
+                    // 被引用的可能本来就是一条图片消息 —— 此时 rawQuote 是 data URL / 外链 / blobref
+                    // 令牌，截 60 字只会切出一段没意义的 base64 碎片，令牌更是整条活着进 prompt。
+                    // 一律换成占位符：模型知道"引用的是张图"就够了。
+                    const quoted = isMediaValue(rawQuote)
+                        ? '[图片]'
+                        : (rawQuote.length > 60 ? rawQuote.slice(0, 60) + '…' : rawQuote);
                     // name 记的是被引用消息的说话人：char.name = 用户在回复 char 本人之前的话；'我' = 用户引用自己。
                     const whose = m.replyTo.name === char.name ? '你之前说的' : (m.replyTo.name === '我' ? '自己说的' : (m.replyTo.name || '对方') + '说的');
                     const speaker = m.role === 'user' ? '用户' : '你';

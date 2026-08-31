@@ -73,3 +73,59 @@ describe('buildMessageHistory 引用双语消息', () => {
         expect(content).not.toContain('<译文>');
     });
 });
+
+// 钉住「图片值不许当正文进 prompt」这条线（2026-09-01 存储重构 C1 引用预览）。
+// 被引用的可能本来就是一条图片消息——此时 replyTo.content 是 data URL / 外链 / blobref
+// 令牌，按长度截断会切出没意义的 base64 碎片，令牌更是整条活着进 prompt（出门时还被
+// apiBlobRefs 还原成几 MB 的 data URL，每轮重发）。必须整段换成 [图片] 占位符。
+describe('buildMessageHistory 引用图片消息', () => {
+    const BLOB_TOKEN = 'blobref:b_abcdef0123456789';
+    const DATA_URL = 'data:image/jpeg;base64,' + 'A'.repeat(600);
+
+    /** 用户引用了一条图片消息，然后回了一句话。 */
+    const replyToMediaMessage = (mediaValue: string) => ([
+        {
+            id: 2, charId: 'c1', role: 'user', type: 'text',
+            content: '这张图好可爱',
+            timestamp: t0 + 1000,
+            replyTo: { id: 1, content: mediaValue, name: '小角色' },
+        },
+    ] as any[]);
+
+    it('引用 blobref 令牌图片时，令牌不进 prompt', () => {
+        const { apiMessages } = ChatPrompts.buildMessageHistory(
+            replyToMediaMessage(BLOB_TOKEN), 10, char, userProfile, [],
+        );
+        const payload = JSON.stringify(apiMessages);
+        expect(payload).not.toContain('blobref:');
+        expect(payload).toContain('这张图好可爱');
+    });
+
+    it('引用 data URL 图片时，base64 不进 prompt', () => {
+        const { apiMessages } = ChatPrompts.buildMessageHistory(
+            replyToMediaMessage(DATA_URL), 10, char, userProfile, [],
+        );
+        const payload = JSON.stringify(apiMessages);
+        expect(payload).not.toContain('data:image');
+        expect(payload).not.toContain('AAAA');
+        expect(payload).toContain('这张图好可爱');
+    });
+
+    it('引用 http 外链图片时，链接不进 prompt', () => {
+        const { apiMessages } = ChatPrompts.buildMessageHistory(
+            replyToMediaMessage('https://example.com/pic/very-long-name.png'), 10, char, userProfile, [],
+        );
+        const payload = JSON.stringify(apiMessages);
+        expect(payload).not.toContain('example.com');
+    });
+
+    it('引用普通文字消息时仍按原样摘要（不误伤正文）', () => {
+        const longText = '这是一段很长的普通文字'.repeat(20);
+        const { apiMessages } = ChatPrompts.buildMessageHistory(
+            replyToMediaMessage(longText), 10, char, userProfile, [],
+        );
+        const payload = JSON.stringify(apiMessages);
+        expect(payload).toContain('这是一段很长的普通文字');
+        expect(payload).toContain('…');
+    });
+});
