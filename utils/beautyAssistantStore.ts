@@ -5,12 +5,20 @@
 import { useSyncExternalStore } from 'react';
 import { deleteBlobRef } from './blobRef';
 
+/** 用户消息附件（2026-08-31 附件化，学主流 AI 聊天）：
+ *  图片 = 参考图（blobRef）；文件 = 引用某个交付文件的完整代码（按消息 id + 代码块序号精确定位，不靠名字猜） */
+export type AssistantAttachment =
+  | { kind: 'image'; ref: string }
+  | { kind: 'file'; messageId: string; ordinal: number; name: string };
+
 export interface AssistantMsg {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  /** 用户消息可带图（blobRef，发给他看的多模态参考图） */
+  /** @deprecated 2026-08-31 附件化前的老字段；新数据用 attachments，旧数据 load 时自动迁移 */
   imageRef?: string;
+  /** 用户消息附件（图片/引用的交付文件），发送前在附件条里攒好 */
+  attachments?: AssistantAttachment[];
   /** 所属任务；旧数据迁移时补齐，此后每条都有 */
   sessionId?: string;
   at: string;
@@ -132,6 +140,12 @@ const load = (): AssistantV1 => {
     if (!base.codeFold || typeof base.codeFold !== 'object') base.codeFold = {};
     // 旧数据没有 themePresets → 补空数组
     if (!Array.isArray(base.themePresets)) base.themePresets = [];
+    // 附件化迁移（2026-08-31）：旧单图 imageRef → attachments 数组（imageRef 清掉，附件是唯一真相来源）
+    base.messages = base.messages.map((m) =>
+      !m.attachments && m.imageRef
+        ? { ...m, attachments: [{ kind: 'image', ref: m.imageRef }], imageRef: undefined }
+        : m,
+    );
     return migrateSessions(base);
   } catch {
     return DEFAULT;
@@ -254,11 +268,16 @@ export const clearAssistantMessages = () =>
     updatedAt: isoNow(),
   }));
 
+/** 删消息前清它的图片附件 blobRef（文件附件只是引用，无独立存储） */
+const cleanupAttachments = (m: AssistantMsg) => {
+  m.attachments?.forEach((a) => { if (a.kind === 'image') void deleteBlobRef(a.ref); });
+};
+
 /** 批量删除（2026-08-30 多选）：连图清 blobRef */
 export const deleteAssistantMessages = (ids: string[]) =>
   patch((s) => {
     const idSet = new Set(ids);
-    s.messages.filter((m) => idSet.has(m.id)).forEach((m) => { if (m.imageRef) void deleteBlobRef(m.imageRef); });
+    s.messages.filter((m) => idSet.has(m.id)).forEach(cleanupAttachments);
     return { ...s, messages: s.messages.filter((m) => !idSet.has(m.id)), codeFold: pruneCodeFold(s.codeFold, idSet), updatedAt: isoNow() };
   });
 
@@ -297,7 +316,7 @@ export const deleteAssistantSession = (id: string) =>
     const target = s.sessions.find((x) => x.id === id);
     if (!target) return s;
     // 清这个任务的图（blobRef），消息一起删
-    s.messages.filter((m) => m.sessionId === id).forEach((m) => { if (m.imageRef) void deleteBlobRef(m.imageRef); });
+    s.messages.filter((m) => m.sessionId === id).forEach(cleanupAttachments);
     const droppedIds = new Set(s.messages.filter((m) => m.sessionId === id).map((m) => m.id));
     const sessions = s.sessions.filter((x) => x.id !== id);
     const nextActive = s.activeSessionId === id

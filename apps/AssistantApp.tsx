@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, GearSix, PaperPlaneTilt, Copy, PaintBrush, Trash, Plus, PencilSimple,
   ImageSquare, BookmarkSimple, DownloadSimple, X, CaretDown, CheckSquare, FolderSimple, Stop,
-  FileText, CaretRight,
+  FileText, CaretRight, Paperclip,
 } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
 import { getPrompt, savePrompt, resetPrompt, isPromptOverridden, getPromptEntries } from '../utils/promptRegistry';
@@ -19,6 +19,9 @@ import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '
 import type { ApiPreset } from '../types';
 import { setCssGlobal, setCssPage, getMusicStore } from './couple/musicStore';
 import {
+  splitCodeBlocks, codeFileName, foldFoldedCodeBlocks, buildAssistantUserParts,
+} from '../utils/assistantContext';
+import {
   useAssistant, getAssistant, appendAssistantMessages, editAssistantMessage, deleteAssistantMessage,
   deleteAssistantMessages, clearAssistantMessages, saveAssistantApi, saveAssistantProfile,
   saveAssistantTheme, resetAssistantTheme, saveAssistantCssSelf,
@@ -26,7 +29,7 @@ import {
   ensureAssistantSession, newAssistantSession, switchAssistantSession, deleteAssistantSession,
   setAssistantCodeFold,
   saveAssistantThemePreset, loadAssistantThemePreset, deleteAssistantThemePreset,
-  type AssistantMsg,
+  type AssistantMsg, type AssistantAttachment,
 } from '../utils/beautyAssistantStore';
 
 // ── 工作模式树（2026-08-30 重构）：模块 → 页面 → 卡片。
@@ -102,38 +105,6 @@ const buildColors = (theme?: { primary?: string; accent?: string; text?: string 
   };
 };
 
-/** 把回复文本拆成 文本/代码块 片段 */
-const splitCodeBlocks = (text: string): Array<{ type: 'text' | 'code'; content: string }> => {
-  const parts: Array<{ type: 'text' | 'code'; content: string }> = [];
-  const re = /```([a-zA-Z+]*)\n?([\s\S]*?)```/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) {
-      const t = text.slice(last, m.index).trim();
-      if (t) parts.push({ type: 'text', content: t });
-    }
-    if (m[2].trim()) parts.push({ type: 'code', content: m[2].trim() });
-    last = re.lastIndex;
-  }
-  if (last < text.length) {
-    const t = text.slice(last).trim();
-    if (t) parts.push({ type: 'text', content: t });
-  }
-  return parts;
-};
-
-/** 代码块折叠后的文件名（2026-08-31 学上游工作台交付文件）：
- *  取最后一行 /* 改：xxx *\/ 注释里的 xxx（交付规矩已要求这行）；没有就 代码片段 N。 */
-const codeFileName = (content: string, ordinal: number): string => {
-  const lines = content.split('\n');
-  const last = lines[lines.length - 1] ?? '';
-  const m = last.match(/\/\*\s*改\s*[:：]\s*(.+?)\s*\*\//);
-  const raw = m ? m[1].trim() : '';
-  const safe = raw.replace(/[\\/:*?"<>|]/g, '').trim();
-  return (safe || `代码片段 ${ordinal + 1}`).slice(0, 30);
-};
-
 const useLongPress = (onLong: () => void) => {
   const timer = useRef<number | null>(null);
   const clear = () => { if (timer.current) { window.clearTimeout(timer.current); timer.current = null; } };
@@ -174,6 +145,9 @@ const AssistantApp: React.FC = () => {
   // 调色台预设（2026-08-31 她要求）：存命名预设，随时换回来
   const [showPresetSave, setShowPresetSave] = useState(false);
   const [presetNameDraft, setPresetNameDraft] = useState('');
+  // 附件草稿（2026-08-31 她要求，学主流 AI 聊天）：选图/引用文件先进附件条，不自动发；
+  // 攒齐了、文字编辑好，点发送才一起走。发送时清空。
+  const [draftAttachments, setDraftAttachments] = useState<AssistantAttachment[]>([]);
 
   // API 预设池联通（她 2026-08-30 要求）：和原版设置页一样——点预设胶囊填表，点「保存」后生效，
   // 不用每次手填。以后凡是要填 API 的地方都接预设池。
@@ -296,6 +270,25 @@ const AssistantApp: React.FC = () => {
     addToast(`配色「${name}」已存为预设`, 'success');
   };
 
+  /** 移除附件草稿（2026-08-31）：图片附件清 blobRef，文件附件只是引用无独立存储 */
+  const removeDraftAttachment = (i: number) => {
+    setDraftAttachments((prev) => {
+      const removed = prev[i];
+      if (removed?.kind === 'image') void deleteBlobRef(removed.ref);
+      return prev.filter((_, idx) => idx !== i);
+    });
+  };
+
+  /** 把折叠交付文件挂到附件（2026-08-31）：按「消息 id + 代码块序号」精确定位，不靠名字猜 */
+  const addDraftFile = (messageId: string, ordinal: number, name: string) => {
+    const exists = draftAttachments.some(
+      (a) => a.kind === 'file' && a.messageId === messageId && a.ordinal === ordinal,
+    );
+    if (exists) { addToast('这个文件已经在附件里了', 'info'); return; }
+    setDraftAttachments((prev) => [...prev, { kind: 'file', messageId, ordinal, name }]);
+    addToast(`已把 ${name}.txt 挂到附件`, 'info');
+  };
+
   const buildSystemPrompt = (): string => {
     const pagePrompt = getPrompt(pageInfo.promptLabel)
       .replace(/\{\{\s*user\s*\}\}/gi, userName);
@@ -312,15 +305,17 @@ const AssistantApp: React.FC = () => {
       `你是${store.name}，${userName}的私人小助手。\n${store.persona}`,
       `【当前工作】${moduleInfo.label} · ${pageInfo.label}（${pageInfo.desc}）\n${focus}`,
       '【交付规矩】回复 = 一两句说明 + 一个完整可直接应用的 ```css 代码块；不要只给思路不给代码；代码里不要省略号、不要「其它样式不变」这类注释占位；最后一行用注释简述这次改了哪里（如 /* 改：气泡圆角 16px，主色换暖棕 */）。\n' +
+      '【附件规则】用户消息可能挂附件：图片附件 = 参考图（看它）；文件附件 = 某个交付文件的完整代码，以 [附件：xxx.txt] 开头，后面就是完整代码块——附件里的代码是最新依据，按它改，别凭记忆重写。历史消息里出现 [交付文件 xxx.txt 已折叠] 表示那段代码只有文件名可见；如果你需要它的完整代码，就请用户点那个文件卡上的「引用」把文件挂成附件，不要猜内容。\n' +
       '【CSS 铁律】不要写 position:fixed / position:sticky；不要写 z-index（会把设置、收藏夹等弹窗卡片盖住）；只改已有元素的外观，不新增覆盖层或浮层。改顶栏时只调整已有元素（返回钮、头像、名字、状态 chip、齿轮）的间距/颜色/字号，保持一行排齐，不重排位置。',
       `【这份工作的知识与工具】\n${pagePrompt}${cssState}`,
     ].join('\n\n');
   };
 
-  /** 发消息（文本 / 带图）；图片 = 截图或参考图，给他看的 */
-  const send = (text?: string, imageRef?: string) => {
+  /** 发消息：文字 + 附件条里攒好的附件一起走（2026-08-31 附件化，不自动发了） */
+  const send = (text?: string) => {
     const content = (text ?? input).trim();
-    if ((!content && !imageRef) || busyRef.current) return;
+    const attachments = [...draftAttachments];
+    if ((!content && attachments.length === 0) || busyRef.current) return;
     const api = getAssistant().api;
     if (!api?.baseUrl || !api.apiKey || !api.model) {
       addToast('先给小助手配一个专属 API（齿轮里）', 'info');
@@ -329,32 +324,33 @@ const AssistantApp: React.FC = () => {
     }
     setInput('');
     setShowPlus(false);
+    setDraftAttachments([]);
     busyRef.current = true;
     setBusy(true);
     setStreaming('');
 
     // 任务存档：没有任务就现建一个，消息只进当前任务
     const sessionId = ensureAssistantSession();
-    const userMsg: AssistantMsg = { id: `as-${Date.now()}-u`, role: 'user', content, imageRef, at: new Date().toISOString() };
+    const userMsg: AssistantMsg = {
+      id: `as-${Date.now()}-u`, role: 'user', content,
+      attachments: attachments.length > 0 ? attachments : undefined,
+      at: new Date().toISOString(),
+    };
     appendAssistantMessages([userMsg]);
 
-    // 上下文只看当前任务的对话（任务之间互不共享，和上游工作台同款隔离）
-    const history = getAssistant().messages.filter((m) => m.sessionId === sessionId);
+    // 上下文只看当前任务的对话（任务之间互不共享，和上游工作台同款隔离）。
+    // 附件化规则（2026-08-31）：历史 AI 消息里已折叠的代码块只留文件名占位；
+    // 用户挂的文件附件按「消息 id + 序号」注入完整代码；图片附件转 image_url。
+    const all = getAssistant().messages;
+    const history = all.filter((m) => m.sessionId === sessionId);
+    const codeFold = getAssistant().codeFold;
     const apiMessages = [
       { role: 'system' as const, content: buildSystemPrompt() },
-      ...history.slice(-30).map((m) => {
-        if (m.role === 'user' && m.imageRef) {
-          // 多模态：文字 + 图片一起给他
-          return {
-            role: 'user' as const,
-            content: [
-              { type: 'text' as const, text: m.content || '（看这张图）' },
-              { type: 'image_url' as const, image_url: { url: m.imageRef } },
-            ],
-          };
-        }
-        return { role: m.role as 'user' | 'assistant', content: m.content };
-      }),
+      ...history.slice(-30).map((m) =>
+        m.role === 'user'
+          ? { role: 'user' as const, content: buildAssistantUserParts(m, all) }
+          : { role: 'assistant' as const, content: foldFoldedCodeBlocks(m.content, m.id, codeFold) },
+      ),
     ];
 
     abortRef.current?.abort();
@@ -423,10 +419,11 @@ const AssistantApp: React.FC = () => {
     })();
   };
 
+  /** 选图 → 进附件条（2026-08-31 附件化：不自动发送，攒齐了点发送才走） */
   const pickImage = async (file: File) => {
     try {
       const ref = await putImageBlob(file);
-      send(input, ref);
+      setDraftAttachments((prev) => [...prev, { kind: 'image', ref }]);
     } catch {
       addToast('图片保存失败', 'error');
     }
@@ -519,6 +516,13 @@ const AssistantApp: React.FC = () => {
                     style={{ color: colors.primary, border: '1px solid rgba(201,106,142,0.25)' }}
                   >
                     <DownloadSimple size={9} /> 下载 txt
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); addDraftFile(keyPrefix, ordinal, name); }}
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] shrink-0 transition-all active:scale-95 border-0 cursor-pointer"
+                    style={{ color: colors.muted, border: '1px solid rgba(201,106,142,0.2)' }}
+                  >
+                    <Paperclip size={9} /> 引用
                   </button>
                   <CaretRight size={12} style={{ color: colors.muted, flexShrink: 0 }} />
                 </div>
@@ -794,6 +798,40 @@ const AssistantApp: React.FC = () => {
       ) : (
         /* 输入行 + 加号 */
         <div className="as-input-row shrink-0 px-3 pb-3 pt-1.5 relative z-10">
+          {/* 附件条（2026-08-31 她要求，学主流 AI 聊天）：选好的图/引用文件在这里攒着，
+              X 删、虚线加号续加图；编辑好文字点发送才一起走 */}
+          {draftAttachments.length > 0 && (
+            <div className="as-attach-bar flex items-center gap-1.5 overflow-x-auto pb-2">
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="as-attach-add w-9 h-9 shrink-0 rounded-xl flex items-center justify-center border-0 cursor-pointer"
+                style={{ border: '1px dashed rgba(201,106,142,0.4)', color: colors.primary, background: 'rgba(255,255,255,0.6)' }}
+                aria-label="继续加图片"
+              >
+                <Plus size={13} />
+              </button>
+              {draftAttachments.map((a, i) =>
+                a.kind === 'image' ? (
+                  <DraftImageThumb key={`img-${i}-${a.ref}`} ref0={a.ref} onRemove={() => removeDraftAttachment(i)} />
+                ) : (
+                  <span key={`file-${i}-${a.messageId}-${a.ordinal}`}
+                    className="as-attach-chip flex items-center gap-1 rounded-xl px-2 py-1.5 shrink-0"
+                    style={{ background: 'rgba(201,106,142,0.08)', border: '1px solid rgba(201,106,142,0.18)' }}>
+                    <FileText size={11} style={{ color: colors.primary }} />
+                    <span className="text-[9px] max-w-[110px] truncate" style={{ color: colors.text }}>{a.name}.txt</span>
+                    <button
+                      onClick={() => removeDraftAttachment(i)}
+                      className="p-0 border-0 bg-transparent cursor-pointer"
+                      style={{ color: colors.faint }}
+                      aria-label={`移除附件 ${a.name}`}
+                    >
+                      <X size={9} />
+                    </button>
+                  </span>
+                ),
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowPlus((v) => !v)}
@@ -836,7 +874,7 @@ const AssistantApp: React.FC = () => {
 
       {/* 白框 CSS 编辑弹层（2026-08-30：对标主聊天「白框自定义」——底部白卡，边写边生效） */}
       {showCssEditor && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(60,30,44,0.3)' }} onClick={() => setShowCssEditor(false)}>
+        <div className="as-modal fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(60,30,44,0.3)' }} onClick={() => setShowCssEditor(false)}>
           <div className="w-full max-h-[72vh] overflow-y-auto rounded-t-3xl p-4"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 -12px 40px rgba(0,0,0,0.18)', paddingBottom: 'calc(1rem + var(--safe-bottom))' }}
             onClick={(e) => e.stopPropagation()}>
@@ -882,7 +920,7 @@ const AssistantApp: React.FC = () => {
 
       {/* 收藏夹弹层（2026-08-31 她要求改）：点开单独看代码，代码区自由输入保存 */}
       {showFavs && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center px-6" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowFavs(false)}>
+        <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-6" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowFavs(false)}>
           <div className="w-full max-w-[340px] rounded-2xl p-4 space-y-2 max-h-[75%] flex flex-col"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
             onClick={(e) => e.stopPropagation()}>
@@ -1004,7 +1042,7 @@ const AssistantApp: React.FC = () => {
 
       {/* 收藏命名弹层 */}
       {favTarget && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center px-7" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setFavTarget(null)}>
+        <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-7" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setFavTarget(null)}>
           <div className="w-full max-w-[280px] rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
             <div className="text-[12px] font-semibold mb-2" style={{ color: colors.text }}>收进收藏夹</div>
             <input
@@ -1033,7 +1071,7 @@ const AssistantApp: React.FC = () => {
 
       {/* 长按操作面板（2026-08-30 加多选入口） */}
       {menuMsg && (
-        <div className="absolute inset-0 z-40 flex items-end" style={{ background: 'rgba(60,30,44,0.35)' }} onClick={() => setMenuMsg(null)}>
+        <div className="as-modal absolute inset-0 z-40 flex items-end" style={{ background: 'rgba(60,30,44,0.35)' }} onClick={() => setMenuMsg(null)}>
           <div className="w-full rounded-t-2xl p-3 pb-5" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
             <div className="text-center text-[9px] mb-2 truncate px-6" style={{ color: colors.faint }}>
               {menuMsg.content.slice(0, 40) || '（图片消息）'}
@@ -1057,7 +1095,7 @@ const AssistantApp: React.FC = () => {
               )}
               <button
                 onClick={() => {
-                  if (menuMsg.imageRef) void deleteBlobRef(menuMsg.imageRef);
+                  (menuMsg.attachments ?? []).forEach((a) => { if (a.kind === 'image') void deleteBlobRef(a.ref); });
                   deleteAssistantMessage(menuMsg.id);
                   setMenuMsg(null);
                   addToast('已删除', 'info');
@@ -1084,7 +1122,7 @@ const AssistantApp: React.FC = () => {
 
       {/* 编辑弹层 */}
       {editMsg && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center px-7" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setEditMsg(null)}>
+        <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-7" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setEditMsg(null)}>
           <div className="w-full max-w-[280px] rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.97)' }} onClick={(e) => e.stopPropagation()}>
             <div className="text-[12px] font-semibold mb-2" style={{ color: colors.text }}>修改消息</div>
             <textarea
@@ -1113,7 +1151,7 @@ const AssistantApp: React.FC = () => {
 
       {/* 任务存档弹层（2026-08-30）：新建/切换/删除——做完一个活就新建，不用删聊天记录 */}
       {showSessions && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center px-6" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowSessions(false)}>
+        <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-6" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowSessions(false)}>
           <div className="w-full max-w-[320px] rounded-2xl p-4 space-y-2 max-h-[70%] flex flex-col"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
             onClick={(e) => e.stopPropagation()}>
@@ -1188,7 +1226,7 @@ const AssistantApp: React.FC = () => {
 
       {/* 设置弹层：名字头像人设 + 调色台 + API + 美化提示词 + 清空 */}
       {showSettings && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center px-5" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowSettings(false)}>
+        <div className="as-modal absolute inset-0 z-40 flex items-center justify-center px-5" style={{ background: 'rgba(60,30,44,0.4)' }} onClick={() => setShowSettings(false)}>
           <div className="w-full max-w-[360px] rounded-2xl p-4 space-y-3 max-h-[85%] overflow-y-auto"
             style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
             onClick={(e) => e.stopPropagation()}>
@@ -1417,6 +1455,28 @@ const UserImage: React.FC<{ ref0: string }> = ({ ref0 }) => {
   return <img src={url} alt="" className="w-full max-w-[200px] rounded-xl mb-1.5 object-cover" />;
 };
 
+/** 附件条里的图片缩略图（2026-08-31 附件化）：右上角小 X 移除 */
+const DraftImageThumb: React.FC<{ ref0: string; onRemove: () => void }> = ({ ref0, onRemove }) => {
+  const url = useBlobRefUrl(ref0);
+  return (
+    <span className="relative shrink-0">
+      {url ? (
+        <img src={url} alt="" className="w-9 h-9 rounded-xl object-cover" style={{ border: '1px solid rgba(201,106,142,0.25)' }} />
+      ) : (
+        <span className="w-9 h-9 rounded-xl block" style={{ background: 'rgba(201,106,142,0.1)' }} />
+      )}
+      <button
+        onClick={onRemove}
+        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center border-0 cursor-pointer"
+        style={{ background: '#3d3340', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }}
+        aria-label="移除图片附件"
+      >
+        <X size={9} color="#fff" />
+      </button>
+    </span>
+  );
+};
+
 /** 单条消息气泡（抽子组件：useLongPress 不能进 map；多选模式下点按=选中） */
 const AssistantBubble: React.FC<{
   m: AssistantMsg;
@@ -1447,7 +1507,21 @@ const AssistantBubble: React.FC<{
               ✓
             </span>
           )}
-          {m.imageRef && <UserImage ref0={m.imageRef} />}
+          {m.attachments && m.attachments.length > 0 && (
+            <div className="mb-1.5 space-y-1">
+              {m.attachments.map((a, i) =>
+                a.kind === 'image' ? (
+                  <UserImage key={`img-${i}`} ref0={a.ref} />
+                ) : (
+                  <div key={`file-${i}`} className="flex items-center gap-1 rounded-lg px-2 py-1"
+                    style={{ background: 'rgba(255,255,255,0.25)' }}>
+                    <FileText size={11} />
+                    <span className="text-[10px]">{a.name}.txt</span>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
           {m.content}
         </div>
       </div>

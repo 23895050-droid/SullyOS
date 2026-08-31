@@ -164,6 +164,24 @@ describe('代码块折叠', () => {
   });
 });
 
+// ── 附件化迁移（2026-08-31：旧单图 imageRef → attachments 数组，附件是唯一真相来源）──
+describe('附件化迁移', () => {
+  it('旧数据 imageRef 迁移成 attachments 图片附件', () => {
+    localStorage.setItem('assistant_v1', JSON.stringify({
+      version: 1,
+      name: '小助手',
+      persona: 'test',
+      messages: [{ id: 'm1', role: 'user', content: '看这张', imageRef: 'blobref:x', at: '2026-08-30T00:00:00.000Z' }],
+      favorites: [],
+      cssSelf: '',
+    }));
+    __reloadAssistantForTest();
+    const m = getAssistant().messages[0];
+    expect(m.attachments).toEqual([{ kind: 'image', ref: 'blobref:x' }]);
+    expect(m.imageRef).toBeUndefined();
+  });
+});
+
 // ── 调色台命名预设（2026-08-31 她要求：调完存下来，随时一键换回）──
 describe('调色台预设', () => {
   it('存预设 → 换色 → 载入恢复；删除后不再有', () => {
