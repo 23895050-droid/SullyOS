@@ -10,6 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, GearSix, PaperPlaneTilt, Copy, PaintBrush, Trash, Plus, PencilSimple,
   ImageSquare, BookmarkSimple, DownloadSimple, X, CaretDown, CheckSquare, FolderSimple, Stop,
+  FileText, CaretRight,
 } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
 import { getPrompt, savePrompt, resetPrompt, isPromptOverridden, getPromptEntries } from '../utils/promptRegistry';
@@ -23,6 +24,7 @@ import {
   saveAssistantTheme, resetAssistantTheme, saveAssistantCssSelf,
   addAssistantFavorite, renameAssistantFavorite, updateAssistantFavoriteCss, deleteAssistantFavorite, buildFavoritesExportText,
   ensureAssistantSession, newAssistantSession, switchAssistantSession, deleteAssistantSession,
+  setAssistantCodeFold,
   type AssistantMsg,
 } from '../utils/beautyAssistantStore';
 
@@ -118,6 +120,17 @@ const splitCodeBlocks = (text: string): Array<{ type: 'text' | 'code'; content: 
     if (t) parts.push({ type: 'text', content: t });
   }
   return parts;
+};
+
+/** 代码块折叠后的文件名（2026-08-31 学上游工作台交付文件）：
+ *  取最后一行 /* 改：xxx *\/ 注释里的 xxx（交付规矩已要求这行）；没有就 代码片段 N。 */
+const codeFileName = (content: string, ordinal: number): string => {
+  const lines = content.split('\n');
+  const last = lines[lines.length - 1] ?? '';
+  const m = last.match(/\/\*\s*改\s*[:：]\s*(.+?)\s*\*\//);
+  const raw = m ? m[1].trim() : '';
+  const safe = raw.replace(/[\\/:*?"<>|]/g, '').trim();
+  return (safe || `代码片段 ${ordinal + 1}`).slice(0, 30);
 };
 
 const useLongPress = (onLong: () => void) => {
@@ -420,6 +433,17 @@ const AssistantApp: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  /** 折叠文件的下载（2026-08-31）：与导出收藏夹同款 Blob + a.download */
+  const downloadTextFile = (name: string, text: string) => {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const openCssEditor = () => {
     setCssDraft(slotValue());
     setShowCssEditor(true);
@@ -445,52 +469,98 @@ const AssistantApp: React.FC = () => {
   };
   const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
 
-  const renderAssistantContent = (content: string, keyPrefix: string) => (
-    <div className="space-y-2">
-      {splitCodeBlocks(content).map((part, i) =>
-        part.type === 'text' ? (
-          <div key={`${keyPrefix}-t${i}`} className="text-[12px] leading-relaxed whitespace-pre-wrap" style={{ color: colors.text }}>
-            {part.content}
-          </div>
-        ) : (
-          <div key={`${keyPrefix}-c${i}`} className="as-code rounded-xl overflow-hidden"
-            style={{ border: `1px solid rgba(201,106,142,0.18)`, background: 'rgba(255,255,255,0.65)' }}>
-            <div className="flex items-center justify-between px-2 py-1"
-              style={{ background: `rgba(227,164,188,0.14)` }}>
-              <span className="text-[8px] tracking-[0.18em] uppercase" style={{ color: colors.muted }}>css</span>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => void copyText(part.content)}
-                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] transition-all active:scale-95"
-                  style={{ color: colors.primary, border: `1px solid rgba(201,106,142,0.25)` }}
-                >
-                  <Copy size={9} /> 复制
-                </button>
-                <button
-                  onClick={() => { setFavTarget(part.content); setFavNameDraft(`${pageInfo.label}片段 ${store.favorites.length + 1}`); }}
-                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] transition-all active:scale-95"
-                  style={{ color: colors.muted, border: `1px solid rgba(201,106,142,0.2)` }}
-                >
-                  <BookmarkSimple size={9} /> 收藏
-                </button>
-                <button
-                  onClick={() => applyCss(part.content)}
-                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold text-white transition-all active:scale-95"
-                  style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
-                >
-                  <PaintBrush size={9} /> 应用到{pageInfo.label}
-                </button>
+  const renderAssistantContent = (content: string, keyPrefix: string) => {
+    const parts = splitCodeBlocks(content);
+    const isStream = keyPrefix === 'stream';
+    return (
+      <div className="space-y-2">
+        {parts.map((part, i) => {
+          if (part.type === 'text') {
+            return (
+              <div key={`${keyPrefix}-t${i}`} className="text-[12px] leading-relaxed whitespace-pre-wrap" style={{ color: colors.text }}>
+                {part.content}
               </div>
+            );
+          }
+          // 代码块序号（消息里第几个代码块）——折叠状态 key 用它，比数组下标稳（中间插文本不改号）
+          const ordinal = parts.slice(0, i).filter((p) => p.type === 'code').length;
+          const foldKey = `${keyPrefix}:${ordinal}`;
+          const folded = !isStream && !!store.codeFold[foldKey];
+          // 折叠态 = 交付文件卡（2026-08-31 学上游工作台）：留在消息流原位，点开展开，可下载 txt
+          if (folded) {
+            const name = codeFileName(part.content, ordinal);
+            return (
+              <div key={`${keyPrefix}-c${i}`} className="as-code-file rounded-xl"
+                style={{ border: '1px solid rgba(201,106,142,0.25)', background: 'rgba(255,255,255,0.75)' }}>
+                <div className="flex items-center gap-2 px-3 py-2 cursor-pointer"
+                  onClick={() => { if (!selectMode) setAssistantCodeFold(foldKey, false); }}>
+                  <FileText size={14} style={{ color: colors.primary, flexShrink: 0 }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] font-semibold truncate" style={{ color: colors.text }}>{name}.txt</div>
+                    <div className="text-[9px]" style={{ color: colors.faint }}>交付文件 · {part.content.length} 字符 · 点开展开</div>
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); downloadTextFile(name, part.content); }}
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] shrink-0 transition-all active:scale-95 border-0 cursor-pointer"
+                    style={{ color: colors.primary, border: '1px solid rgba(201,106,142,0.25)' }}
+                  >
+                    <DownloadSimple size={9} /> 下载 txt
+                  </button>
+                  <CaretRight size={12} style={{ color: colors.muted, flexShrink: 0 }} />
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={`${keyPrefix}-c${i}`} className="as-code rounded-xl overflow-hidden"
+              style={{ border: `1px solid rgba(201,106,142,0.18)`, background: 'rgba(255,255,255,0.65)' }}>
+              <div className="flex items-center justify-between px-2 py-1"
+                style={{ background: `rgba(227,164,188,0.14)` }}>
+                <span className="text-[8px] tracking-[0.18em] uppercase" style={{ color: colors.muted }}>css</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => void copyText(part.content)}
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] transition-all active:scale-95"
+                    style={{ color: colors.primary, border: `1px solid rgba(201,106,142,0.25)` }}
+                  >
+                    <Copy size={9} /> 复制
+                  </button>
+                  <button
+                    onClick={() => { setFavTarget(part.content); setFavNameDraft(`${pageInfo.label}片段 ${store.favorites.length + 1}`); }}
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] transition-all active:scale-95"
+                    style={{ color: colors.muted, border: `1px solid rgba(201,106,142,0.2)` }}
+                  >
+                    <BookmarkSimple size={9} /> 收藏
+                  </button>
+                  <button
+                    onClick={() => applyCss(part.content)}
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold text-white transition-all active:scale-95"
+                    style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
+                  >
+                    <PaintBrush size={9} /> 应用到{pageInfo.label}
+                  </button>
+                  {/* 流式中的代码块 key 不稳，不给折叠；只对已落库消息生效 */}
+                  {!isStream && (
+                    <button
+                      onClick={() => setAssistantCodeFold(foldKey, true)}
+                      className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] transition-all active:scale-95 border-0 cursor-pointer"
+                      style={{ color: colors.muted, border: '1px solid rgba(201,106,142,0.2)' }}
+                    >
+                      <FileText size={9} /> 折叠
+                    </button>
+                  )}
+                </div>
+              </div>
+              <pre className="px-2.5 py-2 overflow-x-auto text-[10px] leading-relaxed"
+                style={{ color: colors.text, fontFamily: `'SF Mono','Cascadia Code',Consolas,monospace`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {part.content}
+              </pre>
             </div>
-            <pre className="px-2.5 py-2 overflow-x-auto text-[10px] leading-relaxed"
-              style={{ color: colors.text, fontFamily: `'SF Mono','Cascadia Code',Consolas,monospace`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {part.content}
-            </pre>
-          </div>
-        ),
-      )}
-    </div>
-  );
+          );
+        })}
+      </div>
+    );
+  };
 
   const bubbleStyle = (user: boolean): React.CSSProperties =>
     user

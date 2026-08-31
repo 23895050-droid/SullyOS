@@ -47,6 +47,8 @@ export interface AssistantV1 {
   /** 任务存档（2026-08-30）：上限 30 个，超了丢最久没动的任务（连消息一起） */
   sessions: AssistantSession[];
   activeSessionId: string | null;
+  /** 代码块折叠（2026-08-31 学上游工作台「交付文件」）：key = `${messageId}:${代码块序号}`，true = 折叠成文件卡 */
+  codeFold: Record<string, boolean>;
 }
 
 const KEY = 'assistant_v1';
@@ -73,6 +75,7 @@ const DEFAULT: AssistantV1 = {
   cssSelf: '',
   sessions: [],
   activeSessionId: null,
+  codeFold: {},
 };
 
 /** 旧数据迁移：把任务存档之前的消息收进一个「默认任务」，保证升级无缝。 */
@@ -114,6 +117,8 @@ const load = (): AssistantV1 => {
     if (!raw) return DEFAULT;
     const parsed = JSON.parse(raw) as Partial<AssistantV1>;
     const base = { ...DEFAULT, ...parsed };
+    // 旧数据没有 codeFold 字段 → 补空对象（折叠状态从零开始）
+    if (!base.codeFold || typeof base.codeFold !== 'object') base.codeFold = {};
     return migrateSessions(base);
   } catch {
     return DEFAULT;
@@ -223,6 +228,7 @@ export const deleteAssistantMessage = (id: string) =>
   patch((s) => ({
     ...s,
     messages: s.messages.filter((m) => m.id !== id),
+    codeFold: pruneCodeFold(s.codeFold, new Set([id])),
     updatedAt: isoNow(),
   }));
 
@@ -231,6 +237,7 @@ export const clearAssistantMessages = () =>
   patch((s) => ({
     ...s,
     messages: s.messages.filter((m) => m.sessionId !== s.activeSessionId),
+    codeFold: pruneCodeFold(s.codeFold, new Set(s.messages.filter((m) => m.sessionId === s.activeSessionId).map((m) => m.id))),
     updatedAt: isoNow(),
   }));
 
@@ -239,7 +246,7 @@ export const deleteAssistantMessages = (ids: string[]) =>
   patch((s) => {
     const idSet = new Set(ids);
     s.messages.filter((m) => idSet.has(m.id)).forEach((m) => { if (m.imageRef) void deleteBlobRef(m.imageRef); });
-    return { ...s, messages: s.messages.filter((m) => !idSet.has(m.id)), updatedAt: isoNow() };
+    return { ...s, messages: s.messages.filter((m) => !idSet.has(m.id)), codeFold: pruneCodeFold(s.codeFold, idSet), updatedAt: isoNow() };
   });
 
 // ── 任务存档（2026-08-30）：新建 / 切换 / 删除 ──
@@ -261,6 +268,7 @@ export const newAssistantSession = () => {
         sessions,
         activeSessionId: session.id,
         messages: s.messages.filter((m) => !droppedIds.has(m.sessionId ?? '')),
+        codeFold: pruneCodeFold(s.codeFold, droppedIds),
         updatedAt: now,
       };
     }
@@ -277,6 +285,7 @@ export const deleteAssistantSession = (id: string) =>
     if (!target) return s;
     // 清这个任务的图（blobRef），消息一起删
     s.messages.filter((m) => m.sessionId === id).forEach((m) => { if (m.imageRef) void deleteBlobRef(m.imageRef); });
+    const droppedIds = new Set(s.messages.filter((m) => m.sessionId === id).map((m) => m.id));
     const sessions = s.sessions.filter((x) => x.id !== id);
     const nextActive = s.activeSessionId === id
       ? (sessions[sessions.length - 1]?.id ?? null)
@@ -286,6 +295,7 @@ export const deleteAssistantSession = (id: string) =>
       sessions,
       activeSessionId: nextActive,
       messages: s.messages.filter((m) => m.sessionId !== id),
+      codeFold: pruneCodeFold(s.codeFold, droppedIds),
       updatedAt: isoNow(),
     };
   });
@@ -300,6 +310,14 @@ export const resetAssistantTheme = () =>
 /** 小助手自己页面的 CSS（2026-08-30）：追加式 */
 export const saveAssistantCssSelf = (css: string) =>
   patch((s) => ({ ...s, cssSelf: css, updatedAt: isoNow() }));
+
+/** 代码块折叠（2026-08-31 学上游工作台）：true = 该代码块在消息流里以「交付文件」形态显示，重启后还在 */
+export const setAssistantCodeFold = (key: string, folded: boolean) =>
+  patch((s) => ({ ...s, codeFold: { ...s.codeFold, [key]: folded }, updatedAt: isoNow() }));
+
+/** 删消息时顺手清掉它名下的 codeFold key（key = `${messageId}:${序号}`；孤儿 key 无害，这里顺手做掉） */
+const pruneCodeFold = (fold: Record<string, boolean>, msgIds: Set<string>): Record<string, boolean> =>
+  Object.fromEntries(Object.entries(fold).filter(([k]) => !msgIds.has(k.slice(0, k.indexOf(':')))));
 
 /** 收藏夹（CSS 片段）：id 自动生成；返回新建对象方便 UI 直接展开它 */
 export const addAssistantFavorite = (name: string, css: string): AssistantFavorite => {

@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   __resetAssistantForTest, __reloadAssistantForTest, getAssistant, appendAssistantMessages,
   ensureAssistantSession, newAssistantSession, switchAssistantSession, deleteAssistantSession,
-  clearAssistantMessages, addAssistantFavorite, renameAssistantFavorite, updateAssistantFavoriteCss,
-  deleteAssistantFavorite, buildFavoritesExportText, type AssistantMsg,
+  clearAssistantMessages, deleteAssistantMessage, addAssistantFavorite, renameAssistantFavorite, updateAssistantFavoriteCss,
+  deleteAssistantFavorite, buildFavoritesExportText, setAssistantCodeFold, type AssistantMsg,
 } from './beautyAssistantStore';
 
 const msg = (id: string, role: 'user' | 'assistant', content: string): AssistantMsg =>
@@ -125,5 +125,38 @@ describe('收藏夹', () => {
     const text = buildFavoritesExportText();
     expect(text).not.toContain('.a{}');
     expect(text).toContain('.b{}');
+  });
+});
+
+// ── 代码块折叠（2026-08-31 学上游工作台交付文件：可展开/下载 txt 的文件形态，状态持久化）──
+describe('代码块折叠', () => {
+  it('setAssistantCodeFold 写 key 并持久化，重载后还在', () => {
+    setAssistantCodeFold('m1:0', true);
+    expect(getAssistant().codeFold).toEqual({ 'm1:0': true });
+    __reloadAssistantForTest();
+    expect(getAssistant().codeFold).toEqual({ 'm1:0': true });
+  });
+
+  it('删消息顺手清掉它名下的 codeFold，别的消息不受影响', () => {
+    ensureAssistantSession();
+    appendAssistantMessages([msg('m1', 'user', '一'), msg('m2', 'user', '二')]);
+    setAssistantCodeFold('m1:0', true);
+    setAssistantCodeFold('m1:3', true);
+    setAssistantCodeFold('m2:0', true);
+    deleteAssistantMessage('m1');
+    expect(getAssistant().codeFold).toEqual({ 'm2:0': true });
+  });
+
+  it('旧数据没有 codeFold 字段：迁移自动补空对象', () => {
+    localStorage.setItem('assistant_v1', JSON.stringify({
+      version: 1,
+      name: '小助手',
+      persona: 'test',
+      messages: [],
+      favorites: [],
+      cssSelf: '',
+    }));
+    __reloadAssistantForTest();
+    expect(getAssistant().codeFold).toEqual({});
   });
 });
