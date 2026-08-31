@@ -313,6 +313,8 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '【弹窗】.as-modal 是半透明遮罩层（本来就带深色，改它的背景不是换肤）；真正要改的白卡是 .as-modal-card——设置、收藏夹、任务存档、长按菜单等每一张弹窗卡都长这样。\n\n' +
       '元素对照（容易改错的地方，照着选）：\n' +
       '· 聊天输入框 = .as-input（<input> 元素，没有 type 属性——不要用 input[type="text"] 选择器，匹配不到它）\n' +
+      '· AI 消息的正文文字 = .as-ai-text（12px 字号写在这个内层 div 上——只改 .as-bubble-ai 的字号改不到正文，继承会被内层显式字号挡住）；用户消息的文字直接写在 .as-bubble-user 上。想把字整体调大就两个一起写 + !important\n' +
+      '· 代码块正文 pre = .as-code-text（10px 字号在它上面）\n' +
       '· 弹窗里的所有输入框和文字域（设置里的名字/API 三项/预设名、收藏夹里的片段名和 CSS 内容、修改消息的输入）统一 = .as-field——要统一改弹窗输入样式就写 .as-field + !important\n' +
       '· CSS 编辑弹层的代码输入 = .as-css-editor（<textarea>）；要单独改它写 .as-css-editor\n' +
       '· 加号面板里的模块/页面/卡片选择小胶囊按钮 = .as-chip（三行都是它）；面板底部四个入口按钮 = .as-panel-btn\n' +

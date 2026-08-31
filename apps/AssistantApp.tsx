@@ -488,7 +488,8 @@ const AssistantApp: React.FC = () => {
         {parts.map((part, i) => {
           if (part.type === 'text') {
             return (
-              <div key={`${keyPrefix}-t${i}`} className="text-[12px] leading-relaxed whitespace-pre-wrap" style={{ color: colors.text }}>
+              /* as-ai-text = AI 正文文字层（12px 字号在这上面，改气泡字号认准它） */
+              <div key={`${keyPrefix}-t${i}`} className="as-ai-text text-[12px] leading-relaxed whitespace-pre-wrap" style={{ color: colors.text }}>
                 {part.content}
               </div>
             );
@@ -569,7 +570,7 @@ const AssistantApp: React.FC = () => {
                   )}
                 </div>
               </div>
-              <pre className="px-2.5 py-2 overflow-x-auto text-[10px] leading-relaxed"
+              <pre className="as-code-text px-2.5 py-2 overflow-x-auto text-[10px] leading-relaxed"
                 style={{ color: colors.text, fontFamily: `'SF Mono','Cascadia Code',Consolas,monospace`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {part.content}
               </pre>
