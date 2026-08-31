@@ -5,7 +5,9 @@ import {
   __resetAssistantForTest, __reloadAssistantForTest, getAssistant, appendAssistantMessages,
   ensureAssistantSession, newAssistantSession, switchAssistantSession, deleteAssistantSession,
   clearAssistantMessages, deleteAssistantMessage, addAssistantFavorite, renameAssistantFavorite, updateAssistantFavoriteCss,
-  deleteAssistantFavorite, buildFavoritesExportText, setAssistantCodeFold, type AssistantMsg,
+  deleteAssistantFavorite, buildFavoritesExportText, setAssistantCodeFold,
+  saveAssistantTheme, saveAssistantThemePreset, loadAssistantThemePreset, deleteAssistantThemePreset,
+  type AssistantMsg,
 } from './beautyAssistantStore';
 
 const msg = (id: string, role: 'user' | 'assistant', content: string): AssistantMsg =>
@@ -158,5 +160,37 @@ describe('代码块折叠', () => {
     }));
     __reloadAssistantForTest();
     expect(getAssistant().codeFold).toEqual({});
+    expect(getAssistant().themePresets).toEqual([]);
+  });
+});
+
+// ── 调色台命名预设（2026-08-31 她要求：调完存下来，随时一键换回）──
+describe('调色台预设', () => {
+  it('存预设 → 换色 → 载入恢复；删除后不再有', () => {
+    saveAssistantTheme({ primary: '#111111' });
+    saveAssistantThemePreset('深色');
+    saveAssistantTheme({ primary: '#222222', accent: '#333333', text: '#444444' });
+    loadAssistantThemePreset('深色');
+    expect(getAssistant().theme?.primary).toBe('#111111');
+    deleteAssistantThemePreset('深色');
+    expect(getAssistant().themePresets).toHaveLength(0);
+  });
+
+  it('同名覆盖：同一个名字再存一次替换颜色，不留两份', () => {
+    saveAssistantTheme({ primary: '#aa0000' });
+    saveAssistantThemePreset('红');
+    saveAssistantTheme({ primary: '#00aa00' });
+    saveAssistantThemePreset('红');
+    const presets = getAssistant().themePresets;
+    expect(presets).toHaveLength(1);
+    expect(presets[0].colors.primary).toBe('#00aa00');
+  });
+
+  it('上限 12 丢最旧；空名拒绝保存', () => {
+    for (let i = 0; i < 13; i++) saveAssistantThemePreset(`预设${i}`);
+    const presets = getAssistant().themePresets;
+    expect(presets).toHaveLength(12);
+    expect(presets[0].name).toBe('预设1'); // 预设0 被挤掉
+    expect(saveAssistantThemePreset('   ')).toBe(false);
   });
 });

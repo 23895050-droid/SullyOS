@@ -25,6 +25,7 @@ import {
   addAssistantFavorite, renameAssistantFavorite, updateAssistantFavoriteCss, deleteAssistantFavorite, buildFavoritesExportText,
   ensureAssistantSession, newAssistantSession, switchAssistantSession, deleteAssistantSession,
   setAssistantCodeFold,
+  saveAssistantThemePreset, loadAssistantThemePreset, deleteAssistantThemePreset,
   type AssistantMsg,
 } from '../utils/beautyAssistantStore';
 
@@ -170,6 +171,9 @@ const AssistantApp: React.FC = () => {
   const [profileForm, setProfileForm] = useState({ name: store.name, persona: store.persona });
   const [apiForm, setApiForm] = useState({ baseUrl: store.api?.baseUrl ?? '', apiKey: store.api?.apiKey ?? '', model: store.api?.model ?? '' });
   const [apiPresetId, setApiPresetId] = useState<string | null>(null);
+  // 调色台预设（2026-08-31 她要求）：存命名预设，随时换回来
+  const [showPresetSave, setShowPresetSave] = useState(false);
+  const [presetNameDraft, setPresetNameDraft] = useState('');
 
   // API 预设池联通（她 2026-08-30 要求）：和原版设置页一样——点预设胶囊填表，点「保存」后生效，
   // 不用每次手填。以后凡是要填 API 的地方都接预设池。
@@ -280,6 +284,16 @@ const AssistantApp: React.FC = () => {
     const prev = slotValue();
     slotSave(prev ? `${prev}\n${css}` : css);
     addToast(`已应用到「${pageInfo.label}」`, 'success');
+  };
+
+  /** 当前调色存成命名预设（2026-08-31） */
+  const savePreset = () => {
+    const name = presetNameDraft.trim();
+    if (!name) { addToast('先给配色起个名字', 'info'); return; }
+    saveAssistantThemePreset(name);
+    setPresetNameDraft('');
+    setShowPresetSave(false);
+    addToast(`配色「${name}」已存为预设`, 'success');
   };
 
   const buildSystemPrompt = (): string => {
@@ -1268,6 +1282,66 @@ const AssistantApp: React.FC = () => {
               <div className="text-[9px] mt-1" style={{ color: colors.faint }}>
                 主色/辅色拼成渐变（气泡、按钮、状态 chip 都吃这个渐变）；文字色管正文。
               </div>
+              {/* 配色预设（2026-08-31 她要求）：调完存命名预设，随时一键换回来 */}
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <button
+                  onClick={() => setShowPresetSave((v) => !v)}
+                  className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-semibold border-0 cursor-pointer"
+                  style={{ color: colors.primary, border: '1px solid rgba(201,106,142,0.25)' }}
+                >
+                  <BookmarkSimple size={10} /> 存为预设
+                </button>
+                <span className="text-[9px]" style={{ color: colors.faint }}>{store.themePresets.length}/12</span>
+              </div>
+              {showPresetSave && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <input
+                    value={presetNameDraft}
+                    onChange={(e) => setPresetNameDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) savePreset(); }}
+                    placeholder="预设名（如 薄荷）"
+                    className="flex-1 min-w-0 rounded-full px-3 py-1.5 outline-none text-[10px]"
+                    style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }}
+                  />
+                  <button
+                    onClick={savePreset}
+                    className="rounded-full px-3 py-1.5 text-[10px] font-semibold text-white border-0 cursor-pointer"
+                    style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
+                  >
+                    保存
+                  </button>
+                </div>
+              )}
+              {store.themePresets.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {store.themePresets.map((p) => (
+                    <div key={p.name} className="flex items-center gap-1 rounded-full pl-1.5 py-0.5"
+                      style={{ background: 'rgba(201,106,142,0.06)', border: '1px solid rgba(201,106,142,0.14)' }}>
+                      {/* 三色圆点预览 */}
+                      <span className="flex -space-x-1">
+                        {[p.colors.primary, p.colors.accent, p.colors.text].map((c, ci) => (
+                          <span key={ci} className="w-3 h-3 rounded-full" style={{ background: c, border: '1px solid rgba(255,255,255,0.8)' }} />
+                        ))}
+                      </span>
+                      <button
+                        onClick={() => { loadAssistantThemePreset(p.name); addToast(`已应用配色「${p.name}」`, 'success'); }}
+                        className="text-[10px] font-medium border-0 bg-transparent cursor-pointer"
+                        style={{ color: colors.text }}
+                      >
+                        {p.name}
+                      </button>
+                      <button
+                        onClick={() => deleteAssistantThemePreset(p.name)}
+                        className="p-0.5 mr-0.5 border-0 bg-transparent cursor-pointer"
+                        style={{ color: colors.faint }}
+                        aria-label={`删除预设 ${p.name}`}
+                      >
+                        <X size={9} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* API */}

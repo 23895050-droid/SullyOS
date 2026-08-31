@@ -31,6 +31,13 @@ export interface AssistantFavorite {
   at: string;
 }
 
+/** 调色台命名预设（2026-08-31 她要求）：当前三色存起来，随时一键换回 */
+export interface AssistantThemePreset {
+  name: string;
+  colors: { primary: string; accent: string; text: string };
+  savedAt: string;
+}
+
 export interface AssistantV1 {
   version: 1;
   updatedAt: string;
@@ -42,6 +49,8 @@ export interface AssistantV1 {
   favorites: AssistantFavorite[]; // 收藏夹：挑中的 CSS 片段，可导出 txt
   /** 调色台（2026-08-30 她要求：紫色受不了）：主色/辅色/文字色，缺省用内置粉紫 */
   theme?: { primary?: string; accent?: string; text?: string };
+  /** 调色台命名预设（2026-08-31）：上限 12 套，超了丢最旧 */
+  themePresets: AssistantThemePreset[];
   /** 小助手自己页面的 CSS（2026-08-30）：美化他自己 */
   cssSelf: string;
   /** 任务存档（2026-08-30）：上限 30 个，超了丢最久没动的任务（连消息一起） */
@@ -55,6 +64,7 @@ const KEY = 'assistant_v1';
 const MESSAGE_CAP = 400;      // 跨任务全局上限
 const SESSION_CAP = 30;
 const SESSION_MESSAGE_CAP = 120; // 单任务上限
+const THEME_PRESET_CAP = 12; // 调色台预设上限
 const NEW_TASK_TITLE = '新任务';
 const isoNow = () => new Date().toISOString();
 // 与 couple stores 同款：randomUUID 优先，老 WebView 回退时间戳+随机数（同毫秒建两个任务也不撞 id）
@@ -76,6 +86,7 @@ const DEFAULT: AssistantV1 = {
   sessions: [],
   activeSessionId: null,
   codeFold: {},
+  themePresets: [],
 };
 
 /** 旧数据迁移：把任务存档之前的消息收进一个「默认任务」，保证升级无缝。 */
@@ -119,6 +130,8 @@ const load = (): AssistantV1 => {
     const base = { ...DEFAULT, ...parsed };
     // 旧数据没有 codeFold 字段 → 补空对象（折叠状态从零开始）
     if (!base.codeFold || typeof base.codeFold !== 'object') base.codeFold = {};
+    // 旧数据没有 themePresets → 补空数组
+    if (!Array.isArray(base.themePresets)) base.themePresets = [];
     return migrateSessions(base);
   } catch {
     return DEFAULT;
@@ -306,6 +319,36 @@ export const saveAssistantTheme = (theme: { primary?: string; accent?: string; t
 
 export const resetAssistantTheme = () =>
   patch((s) => ({ ...s, theme: undefined, updatedAt: isoNow() }));
+
+// ── 调色台命名预设（2026-08-31 她要求，仿情侣页 couplePaletteStore）──
+
+/** 当前三色存成命名预设：同名覆盖（和情侣页调色台一致）；缺色补默认；上限 12 丢最旧。返回是否成功 */
+export const saveAssistantThemePreset = (name: string): boolean => {
+  const n = name.trim();
+  if (!n) return false;
+  const t = state.theme;
+  const preset: AssistantThemePreset = {
+    name: n,
+    colors: { primary: t?.primary ?? '#c96a8e', accent: t?.accent ?? '#e3a4bc', text: t?.text ?? '#3d3340' },
+    savedAt: isoNow(),
+  };
+  patch((s) => ({
+    ...s,
+    themePresets: [...s.themePresets.filter((p) => p.name !== n), preset].slice(-THEME_PRESET_CAP),
+    updatedAt: isoNow(),
+  }));
+  return true;
+};
+
+/** 预设写回调色台（找不到就什么都不做） */
+export const loadAssistantThemePreset = (name: string) =>
+  patch((s) => {
+    const p = s.themePresets.find((x) => x.name === name);
+    return p ? { ...s, theme: { ...p.colors }, updatedAt: isoNow() } : s;
+  });
+
+export const deleteAssistantThemePreset = (name: string) =>
+  patch((s) => ({ ...s, themePresets: s.themePresets.filter((x) => x.name !== name), updatedAt: isoNow() }));
 
 /** 小助手自己页面的 CSS（2026-08-30）：追加式 */
 export const saveAssistantCssSelf = (css: string) =>
