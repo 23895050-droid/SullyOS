@@ -9,10 +9,12 @@ import { extractObservation, hasObservation } from '../../utils/datePrompts';
 import { useBlobRefUrl } from '../../utils/blobRef';
 import TokenImg from '../os/TokenImg';
 import { clearDateResumeAttempt } from '../../utils/dateSessionRecovery';
-import { cleanTextForTts, VALID_EMOTIONS } from '../../utils/minimaxTts';
-import { synthesizeSpeech, characterHasVoice } from '../../utils/ttsRouter';
-import { resolveTtsProvider } from '../../utils/ttsProvider';
-import { cleanTextForTtsFish } from '../../utils/fishAudioTts';
+import { VALID_EMOTIONS } from '../../utils/minimaxTts';
+import {
+    canSynthesizeSpeech,
+    cleanTextForTtsProvider,
+    synthesizeSpeech,
+} from '../../utils/ttsRouter';
 import { planNovelLoadMore } from '../../utils/dateSessionHistory';
 import { getPendingReplyText } from '../../utils/pendingReply';
 
@@ -216,10 +218,9 @@ const DateSession: React.FC<DateSessionProps> = ({
     const VOICE_LANG_OPTIONS = [{v:'',l:'默认'},{v:'en',l:'EN'},{v:'ja',l:'JP'},{v:'ko',l:'KR'},{v:'fr',l:'FR'},{v:'es',l:'ES'}];
 
     const translateAndSpeak = async (text: string, emotion?: string): Promise<string | null> => {
-        if (!characterHasVoice(char, apiConfig)) return null;
+        if (!canSynthesizeSpeech(char, apiConfig)) return null;
         try {
-            // 鱼声保留 inline cue，用 Fish 专属清洗；MiniMax 走原来的清洗。
-            let ttsText = resolveTtsProvider(apiConfig) === 'fishaudio' ? cleanTextForTtsFish(text) : cleanTextForTts(text);
+            let ttsText = cleanTextForTtsProvider(text, apiConfig);
             if (!ttsText || ttsText.length < 2) return null;
             if (voiceLang) {
                 const langLabel = VOICE_LANG_LABELS[voiceLang] || voiceLang;

@@ -49,12 +49,20 @@ import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettings
 import { useChatAI } from '../hooks/useChatAI';
 import { cleanTextForTts, parseVoiceOutput } from '../utils/minimaxTts';
 import { collectVoiceBatchSubtitle, isPoisonedVoiceSubtitle } from '../utils/voiceSubtitle';
-import { synthesizeSpeechDetailed, characterHasVoice } from '../utils/ttsRouter';
+import {
+    canSynthesizeSpeech,
+    characterHasVoice,
+    cleanTextForTtsProvider,
+    providerUsesRawVoiceMarkup,
+    stripTtsMarkupForDisplay,
+    synthesizeSpeechDetailed,
+} from '../utils/ttsRouter';
 import { shouldAutoGenerateVoice, shouldAutoPlayGeneratedVoice } from '../utils/voicePlayback';
 import { voiceLanguageAnalyticsValue, voiceLanguagePromptLabel } from '../utils/voiceLanguage';
 import { fetchBlobForShare, shareOrDownloadBlob } from '../utils/shareExport';
 import { resolveMiniMaxApiKey } from '../utils/minimaxApiKey';
 import { resolveFishAudioApiKey, stripFishMarkupForDisplay, cleanTextForTtsFish } from '../utils/fishAudioTts';
+// ↑ 保留仅供其它功能使用；语音合成统一走 ttsRouter 的 provider-aware 入口。
 import { CollaborationStore } from '../features/collaboration/store';
 import { resolveTtsProvider } from '../utils/ttsProvider';
 import { isInstantConfigReady, loadInstantConfig } from '../utils/instantPushClient';
@@ -413,16 +421,12 @@ const Chat: React.FC = () => {
     const voiceFailedRef = useRef<Set<number>>(new Set());
     // Track blob: URLs we created so we can revoke them on character switch / unmount.
     const voiceBlobUrlsRef = useRef<Set<string>>(new Set());
-    // We warn the user at most once (per character) that MiniMax voice isn't configured —
+    // We warn the user at most once (per character) that the active TTS provider isn't configured —
     // a character can produce many <语音> messages and we don't want to spam toasts.
-    const minimaxWarnedRef = useRef(false);
+    const ttsWarnedRef = useRef(false);
 
     /** Whether this character can synthesize real voice under the active TTS provider (key + a voice profile). */
-    const isMinimaxReady = useCallback(() => {
-        if (!characterHasVoice(char, apiConfig)) return false;
-        if (resolveTtsProvider(apiConfig) === 'fishaudio') return !!resolveFishAudioApiKey(apiConfig);
-        return !!resolveMiniMaxApiKey(apiConfig);
-    }, [char, apiConfig]);
+    const isTtsReady = useCallback(() => canSynthesizeSpeech(char, apiConfig), [char, apiConfig]);
 
     const persistVoice = async (msgId: number, url: string, blob: Blob | null, originalText: string, spokenText: string | undefined, lang: string | undefined) => {
         try {
@@ -519,10 +523,10 @@ const Chat: React.FC = () => {
 
         // Parse the structured voice output: spoken text (sanitized) + per-message emotion.
         const parsedVoice = parseVoiceOutput(msg.content);
-        // 鱼声用原生 inline cue（[happy]/[whispering]…），要拿未剥离的 rawSpeech 送 API；
-        // MiniMax 用清洗过的 speech。
-        const isFishTts = resolveTtsProvider(apiConfig) === 'fishaudio';
-        const voiceTagContent = parsedVoice.hasVoiceTag ? (isFishTts ? parsedVoice.rawSpeech : parsedVoice.speech) : '';
+        // Fish / ElevenLabs 的适配器需要看到原始 inline cue；MiniMax 使用已消毒的 speech。
+        const ttsProvider = resolveTtsProvider(apiConfig);
+        const preserveRawMarkup = providerUsesRawVoiceMarkup(apiConfig);
+        const voiceTagContent = parsedVoice.hasVoiceTag ? (preserveRawMarkup ? parsedVoice.rawSpeech : parsedVoice.speech) : '';
         const voiceEmotion = parsedVoice.emotion;
 
         // Auto-TTS: only generate voice when AI explicitly used <语音> tag
@@ -530,18 +534,20 @@ const Chat: React.FC = () => {
         // F12 调试：打印 LLM 这条消息的带标签原文，方便核对语音标签写法是否正确。
         // 放在上面那道门之后：即时对话的扫描窗里每来一条消息都要重扫一遍，
         // 搁在门前的话没有语音标签的普通消息会被反复打印，控制台直接刷屏。
-        console.log('[voice] LLM 原文(带标签):', { provider: isFishTts ? 'fishaudio' : 'minimax', content: msg.content, voiceTagContent, emotion: voiceEmotion });
+        console.log('[voice] LLM 原文(带标签):', { provider: ttsProvider, content: msg.content, voiceTagContent, emotion: voiceEmotion });
 
-        // MiniMax not configured for this character: don't attempt synthesis (it would
-        // throw and surface an error toast on every message / every tap). Instead remind
-        // the user just once — the <语音> bubble still shows its 转文字 button so the
+        // 当前 TTS 引擎未配齐时不尝试合成（否则每条语音、每次点击都会抛错刷屏）。
+        // 只提醒一次；<语音> 气泡仍保留「转文字」入口，所以台词不会丢。
+        // The <语音> bubble still shows its 转文字 button so the
         // text stays readable, matching real voice messages.
-        if (!isMinimaxReady()) {
-            if (!autoTriggered && !minimaxWarnedRef.current) {
-                minimaxWarnedRef.current = true;
-                const tip = resolveTtsProvider(apiConfig) === 'fishaudio'
+        if (!isTtsReady()) {
+            if (!autoTriggered && !ttsWarnedRef.current) {
+                ttsWarnedRef.current = true;
+                const tip = ttsProvider === 'fishaudio'
                     ? '该角色未配置鱼声音色或缺少 Fish API Key，无法播放真实语音，可点「转文字」查看内容'
-                    : '该角色未配置 MiniMax 语音，无法播放真实语音，可点「转文字」查看内容';
+                    : ttsProvider === 'elevenlabs'
+                        ? '该角色未配置 ElevenLabs Voice ID 或缺少 ElevenLabs Key，无法播放真实语音，可点「转文字」查看内容'
+                        : '该角色未配置 MiniMax 语音，无法播放真实语音，可点「转文字」查看内容';
                 addToast(tip, 'info');
             }
             return;
@@ -582,22 +588,15 @@ const Chat: React.FC = () => {
                 const bilingualIdx = msg.content.toLowerCase().indexOf('%%bilingual%%');
                 const hasBilingual = bilingualIdx !== -1;
                 if (hasBilingual && voiceLang) {
-                    const langAText = cleanTextForTts(msg.content.substring(0, bilingualIdx));
-                    const langBText = cleanTextForTts(msg.content.substring(bilingualIdx + '%%BILINGUAL%%'.length));
+                    const langAText = cleanTextForTtsProvider(msg.content.substring(0, bilingualIdx), apiConfig);
+                    const langBText = stripTtsMarkupForDisplay(msg.content.substring(bilingualIdx + '%%BILINGUAL%%'.length), apiConfig);
                     if (!langAText || langAText.length < 2) return;
                     spokenText = langAText;
                     originalText = langBText || '';
                 } else {
-                    // 鱼声：保留 inline cue 送 API，显示侧剥掉；MiniMax：照旧。
-                    if (isFishTts) {
-                        spokenText = cleanTextForTtsFish(msg.content);
-                        if (!spokenText || spokenText.length < 2) return;
-                        originalText = stripFishMarkupForDisplay(spokenText) || spokenText;
-                    } else {
-                        originalText = cleanTextForTts(msg.content);
-                        if (!originalText || originalText.length < 2) return;
-                        spokenText = originalText;
-                    }
+                    spokenText = cleanTextForTtsProvider(msg.content, apiConfig);
+                    if (!spokenText || spokenText.length < 2) return;
+                    originalText = stripTtsMarkupForDisplay(spokenText, apiConfig) || spokenText;
                     if (voiceLang) {
                         const langLabel = voiceLanguagePromptLabel(voiceLang);
                         const translated = await llmTranslate(`Translate the following text to ${langLabel}. Output ONLY the translation, nothing else.`, originalText);
@@ -614,8 +613,8 @@ const Chat: React.FC = () => {
                 emotion: voiceEmotion,
             });
             if (blobUrl.startsWith('blob:')) voiceBlobUrlsRef.current.add(blobUrl);
-            // 鱼声的 spokenText 里有 inline cue（[whispering] 等），转文字面板要剥掉再存，别让用户看到标记。
-            const displaySpoken = isFishTts ? stripFishMarkupForDisplay(spokenText) : spokenText;
+            // 转文字面板只展示实际台词，不展示当前引擎的停顿 / 表演标记。
+            const displaySpoken = stripTtsMarkupForDisplay(spokenText, apiConfig);
             const storedSpokenText = voiceTagContent ? displaySpoken : (voiceLang ? displaySpoken : undefined);
             const storedLang = voiceLang || undefined;
             setVoiceDataMap(prev => ({ ...prev, [msg.id]: { url: blobUrl, originalText, spokenText: storedSpokenText, lang: storedLang } }));
@@ -808,8 +807,8 @@ const Chat: React.FC = () => {
 
     // Revoke blob URLs when switching characters / unmounting to avoid leaks.
     useEffect(() => {
-        // Reset the "MiniMax not configured" warning so each character gets one reminder.
-        minimaxWarnedRef.current = false;
+        // Reset the "active TTS not configured" warning so each character gets one reminder.
+        ttsWarnedRef.current = false;
         // 自动合成的失败记录也跟着换角色清空：这一位的失败不该拦着下一位。
         voiceFailedRef.current.clear();
         const urls = voiceBlobUrlsRef.current;
