@@ -756,12 +756,15 @@ const Chat: React.FC = () => {
 
     // 聊天图片留档：识图摘要 → 相册（与相机留档同一存储，角色只读文字摘要）
     const [archivingMsgId, setArchivingMsgId] = useState<number | null>(null);
+    const [archiveImageFailed, setArchiveImageFailed] = useState(false);
     const handleArchiveImage = useCallback(async (msg: Message) => {
         if (!msg?.id || archivingMsgId) return;
         setArchivingMsgId(msg.id);
+        setArchiveImageFailed(false);
         try {
             const blob = await resolveChatImageBlob(msg);
             if (!blob) {
+                setArchiveImageFailed(true);
                 addToast('拿不到这张图片的文件，无法留档', 'error');
                 return;
             }
@@ -829,15 +832,22 @@ const Chat: React.FC = () => {
                 kind: 'other',
             };
             const ok = await addArchiveSafe(entry);
-            addToast(ok ? '已留档，可在「我的相册」查看' : '留档失败：本地存储已满', ok ? 'success' : 'error');
-            trackEvent('聊天图片留档');
+            if (ok) {
+                setModalType('none');
+                addToast('已留档，可在「我的相册」查看', 'success');
+                trackEvent('聊天图片留档');
+            } else {
+                setArchiveImageFailed(true);
+                addToast('留档失败：本地存储已满', 'error');
+            }
         } catch (error: any) {
             console.warn('[Chat] archive image failed', error);
+            setArchiveImageFailed(true);
             addToast(error?.message || '留档失败', 'error');
         } finally {
             setArchivingMsgId(null);
         }
-    }, [archivingMsgId, characters, char, messages, userProfile.name, addToast]);
+    }, [archivingMsgId, characters, char, messages, userProfile.name, addToast, setModalType]);
 
     // 图片大图预览
     const [previewMsg, setPreviewMsg] = useState<Message | null>(null);
@@ -3932,6 +3942,8 @@ const Chat: React.FC = () => {
                 onRerollImage={selectedMessage?.type === 'image' && selectedMessage?.metadata?.imageGenDescription ? () => openRerollEdit(selectedMessage) : undefined}
                 onDownloadImage={selectedMessage?.type === 'image' ? () => handleDownloadImage(selectedMessage) : undefined}
                 onArchiveImage={selectedMessage?.type === 'image' ? () => handleArchiveImage(selectedMessage) : undefined}
+                archivingImage={archivingMsgId === selectedMessage?.id}
+                archiveImageFailed={archiveImageFailed && archivingMsgId === null}
                 onPreviewImage={selectedMessage?.type === 'image' ? () => handlePreviewImage(selectedMessage) : undefined}
                 scheduleData={scheduleData}
                 isScheduleGenerating={isScheduleGenerating}

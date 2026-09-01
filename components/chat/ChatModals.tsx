@@ -118,6 +118,8 @@ interface ChatModalsProps {
     // Image download & preview (图片下载+大图预览)
     onDownloadImage?: () => void;
     onArchiveImage?: () => void;
+    archivingImage?: boolean;
+    archiveImageFailed?: boolean;
     onPreviewImage?: () => void;
     voiceAvailable?: boolean; // true if char has voiceProfile configured
     onDownloadVoice?: () => void;
@@ -265,7 +267,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     htmlModeEnabled, onToggleHtmlMode, htmlModeCustomPrompt, setHtmlModeCustomPrompt,
     chatVoiceEnabled, onToggleChatVoice, chatVoiceAutoPlay, onToggleChatVoiceAutoPlay, chatVoiceLang, onSetChatVoiceLang,
     onGenerateVoice, voiceAvailable, onDownloadVoice, voiceDownloadable, voiceCollectable, onToggleVoiceFavorite, voiceFavorited, onRerollImage,
-    onDownloadImage, onPreviewImage, onArchiveImage,
+    onDownloadImage, onPreviewImage, onArchiveImage, archivingImage, archiveImageFailed,
     scheduleData, isScheduleGenerating, onScheduleEdit, onScheduleDelete, onScheduleReroll, onScheduleCoverChange,
     onScheduleStyleChange, onPlayTheater,
     isScheduleFeatureEnabled, onToggleScheduleFeature,
@@ -1008,9 +1010,17 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         </button>
                     )}
                     {selectedMessage?.type === 'image' && onArchiveImage && (
-                        <button onClick={() => { onArchiveImage(); setModalType('none'); }} className="w-full py-3 bg-teal-50 text-teal-600 font-medium rounded-2xl active:bg-teal-100 transition-colors flex items-center justify-center gap-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
-                            留档
+                        <button
+                            onClick={() => { if (!archivingImage) onArchiveImage(); }}
+                            disabled={archivingImage}
+                            className={`w-full py-3 font-medium rounded-2xl transition-colors flex items-center justify-center gap-2 ${archiveImageFailed ? 'bg-rose-50 text-rose-600 active:bg-rose-100' : archivingImage ? 'bg-teal-50 text-teal-400 cursor-wait' : 'bg-teal-50 text-teal-600 active:bg-teal-100'}`}
+                        >
+                            {archivingImage ? (
+                                <svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+                            )}
+                            {archivingImage ? '留档中…' : archiveImageFailed ? '留档失败，点击重试' : '留档'}
                         </button>
                     )}
                     {selectedMessage?.type === 'image' && selectedMessage?.metadata?.imageGenDescription && onRerollImage && (
