@@ -2,6 +2,7 @@
 // 聊天 MessageItem 和近期接收 App 共用。
 import React, { useEffect } from 'react';
 import type { Message } from '../../types';
+import { useBlobRefUrl } from '../../utils/blobRef';
 
 export interface ImageLightboxProps {
   msg: Message | null;                  // null = 关闭
@@ -20,6 +21,10 @@ const ImageLightbox: React.FC<ImageLightboxProps> = ({ msg, charName, onClose, o
     return () => window.removeEventListener('keydown', onKey);
   }, [msg, onClose]);
 
+  // 优化资源存储后 content 是 blobref 令牌，裸 src 会按相对 URL 去 GET；先解析。
+  // 非令牌值（旧 data: / http 外链）原样透传。
+  const contentUrl = useBlobRefUrl(msg?.content ?? undefined);
+
   if (!msg) return null;
 
   const meta = msg.metadata as any;
@@ -36,7 +41,7 @@ const ImageLightbox: React.FC<ImageLightboxProps> = ({ msg, charName, onClose, o
       >
         <div className="relative">
           <img
-            src={msg.content}
+            src={contentUrl}
             alt={desc || '聊天图片'}
             className="max-w-[92vw] max-h-[78vh] object-contain rounded-lg shadow-2xl"
           />

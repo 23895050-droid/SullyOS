@@ -19,6 +19,8 @@ import { processNewMessagesWithAutoArchive } from '../utils/memoryPalace/autoArc
 import { incrementDigestRound, runCognitiveDigestion } from '../utils/memoryPalace';
 import { RealtimeContextManager } from '../utils/realtimeContext';
 import { DB } from '../utils/db';
+import TokenImg from '../components/os/TokenImg';
+import { useBlobRefUrl } from '../utils/blobRef';
 import { ChatPrompts } from '../utils/chatPrompts';
 import { CharacterProfile, Message, ChatTheme, AppID } from '../types';
 import { PRESET_THEMES } from '../components/chat/ChatConstants';
@@ -345,6 +347,8 @@ const CallApp: React.FC = () => {
   const longPressTimerRef = useRef<number | null>(null);
   const callTouchStartPos = useRef({ x: 0, y: 0 });
   const selectedChar = useMemo(() => characters.find(c => c.id === selectedCharId) || null, [characters, selectedCharId]);
+  // 头像可能是 blobref 令牌（优化后），先解析再拼 url()
+  const selectedCharAvatarUrl = useBlobRefUrl(selectedChar?.avatar);
   // 通话、见面和私聊共用同一个角色时间线。异步整理结束时必须重新读取最新角色状态，
   // 避免用户在整理途中关闭记忆宫殿后，旧闭包仍继续写自动归档结果。
   const charactersRef = useRef(characters);
@@ -1218,7 +1222,7 @@ const CallApp: React.FC = () => {
         {selectedChar?.avatar && (
           <div className="absolute top-0 right-0 w-48 h-60 pointer-events-none"
             style={{ WebkitMaskImage: 'radial-gradient(135% 105% at 100% 0%, #000 32%, transparent 72%)', maskImage: 'radial-gradient(135% 105% at 100% 0%, #000 32%, transparent 72%)' }}>
-            <img src={selectedChar.avatar} alt="" className="w-full h-full object-cover object-top opacity-60" />
+            <TokenImg value={selectedChar.avatar} alt="" className="w-full h-full object-cover object-top opacity-60" />
           </div>
         )}
 
@@ -1250,7 +1254,7 @@ const CallApp: React.FC = () => {
                   <div className="flex items-center gap-3.5">
                     <div className="w-12 h-12 rounded-full overflow-hidden border flex items-center justify-center font-semibold shrink-0"
                       style={{ borderColor: selected ? accentColor : 'rgba(255,255,255,0.25)', backgroundColor: `${accentColor}40` }}>
-                      {char.avatar ? <img src={char.avatar} alt={char.name} className="w-full h-full object-cover" /> : (char.name?.[0] || '角')}
+                      {char.avatar ? <TokenImg value={char.avatar} alt={char.name} className="w-full h-full object-cover" /> : (char.name?.[0] || '角')}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="font-semibold text-[15px] truncate" style={selected ? { color: accentColor } : undefined}>{char.name}</div>
@@ -1419,7 +1423,7 @@ const CallApp: React.FC = () => {
       {/* blurred character art */}
       <div
         className="absolute inset-0 bg-cover bg-center scale-125 blur-3xl opacity-30"
-        style={{ backgroundImage: selectedChar?.avatar ? `url(${selectedChar.avatar})` : undefined }}
+        style={{ backgroundImage: selectedCharAvatarUrl ? `url(${selectedCharAvatarUrl})` : undefined }}
       />
       {/* accent aura glows */}
       <div className="absolute -top-28 left-1/2 -translate-x-1/2 w-[130%] h-72 rounded-full blur-3xl opacity-40 pointer-events-none"
@@ -1481,7 +1485,7 @@ const CallApp: React.FC = () => {
           <div className="absolute -inset-1 rounded-full" style={{ boxShadow: `0 0 0 1px ${accentColor}55, inset 0 0 24px ${accentColor}33` }} />
           <div className={`absolute inset-0 rounded-full border ${displayCallState === 'speaking' ? 'animate-ping' : 'opacity-40'}`} style={{ borderColor: `${accentColor}66` }} />
           {selectedChar?.avatar
-            ? <img src={selectedChar.avatar} alt={selectedChar.name} className="relative z-10 w-full h-full rounded-full object-cover" style={{ boxShadow: `0 0 30px ${accentColor}55` }} />
+            ? <TokenImg value={selectedChar.avatar} alt={selectedChar.name} className="relative z-10 w-full h-full rounded-full object-cover" style={{ boxShadow: `0 0 30px ${accentColor}55` }} />
             : <div className="relative z-10 w-full h-full rounded-full flex items-center justify-center text-4xl font-serif" style={{ backgroundColor: `${accentColor}55` }}>{selectedChar?.name?.[0] || '角'}</div>}
         </div>
         {/* analyzing status + waveform */}

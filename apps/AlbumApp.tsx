@@ -7,6 +7,7 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import type { CharacterProfile } from '../types';
 import ConfirmDialog from '../components/os/ConfirmDialog';
+import TokenImg from '../components/os/TokenImg';
 import ImageReceiptsApp from './ImageReceiptsApp';
 import { loadImageGenSettings } from '../utils/imageGenStorage';
 import {
@@ -70,7 +71,7 @@ const CharAvatar: React.FC<{ char: CharacterProfile | null; fallbackName: string
 }) => {
   const avatar = char?.avatar || '';
   if (avatar && /^(data:|blob:|https?:)/.test(avatar)) {
-    return <img src={avatar} alt={char?.name || fallbackName} className={`${className} rounded-full object-cover shrink-0 bg-slate-100`} />;
+    return <TokenImg value={avatar} alt={char?.name || fallbackName} className={`${className} rounded-full object-cover shrink-0 bg-slate-100`} />;
   }
   return (
     <div className={`${className} rounded-full bg-[#ffe6eb] flex items-center justify-center shrink-0`}>

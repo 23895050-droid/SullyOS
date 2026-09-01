@@ -1524,7 +1524,7 @@ ${memberTimeline || '(暂无互动记录)'}
                                     <div className="grid grid-cols-2 gap-0.5 p-0.5 w-full h-full bg-slate-200">
                                         {g.members.slice(0, 4).map(mid => {
                                             const c = characters.find(char => char.id === mid);
-                                            return <img key={mid} src={c?.avatar} className="w-full h-full object-cover rounded-sm bg-white" />;
+                                            return <TokenImg key={mid} value={c?.avatar} className="w-full h-full object-cover rounded-sm bg-white" />;
                                         })}
                                     </div>
                                 )}

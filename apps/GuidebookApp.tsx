@@ -27,6 +27,7 @@ import {
     DiamondsFour,
     Cards,
 } from '@phosphor-icons/react';
+import TokenImg from '../components/os/TokenImg';
 
 // --- Helper: Generate ID ---
 const genId = () => Math.random().toString(36).slice(2, 10);
@@ -548,7 +549,7 @@ const SessionCard: React.FC<{
             <div {...longPressHandlers}>
                 <div className="flex items-center gap-3">
                     {char?.avatar ? (
-                        <img src={char.avatar} className="w-11 h-11 rounded-xl object-cover shadow-sm" style={{ boxShadow: '0 0 0 2px rgba(200,185,190,0.4)' }} />
+                        <TokenImg value={char.avatar} className="w-11 h-11 rounded-xl object-cover shadow-sm" style={{ boxShadow: '0 0 0 2px rgba(200,185,190,0.4)' }} />
                     ) : (
                         <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold shadow-sm" style={{ background: 'linear-gradient(135deg, #b8909a, #a07880)' }}>
                             {char?.name?.[0] || '?'}

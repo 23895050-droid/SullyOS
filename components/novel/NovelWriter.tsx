@@ -13,6 +13,7 @@ import { safeResponseJson } from '../../utils/safeApi';
 import { DB } from '../../utils/db';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../character/CharacterGroupFilter';
 import { getLocalDateKey } from '../../utils/localDate';
+import TokenImg from '../os/TokenImg';
 
 interface NovelWriterProps {
     activeBook: NovelBook;
@@ -573,7 +574,7 @@ ${chapterText.substring(0, 200000)}
                         <div key={seg.id} className={`p-6 rounded-sm shadow-sm leading-loose text-justify text-[17px] relative group transition-all ${activeTheme.paper} ${activeTheme.text} ${isUser ? 'border-l-4 border-slate-300' : ''}`}>
                             {hoverMenu}
                             <div className="absolute -top-3 left-4 bg-white/90 border border-black/5 px-2 py-0.5 rounded text-[9px] font-sans font-bold uppercase tracking-wider text-slate-500 shadow-sm flex items-center gap-1.5">
-                                {isUser ? null : <img src={char?.avatar} className="w-3 h-3 rounded-full object-cover" />}<span>{isUser ? '我 (User)' : char?.name} 执笔</span>{!isUser && seg.meta?.mood && <span className="bg-slate-100 px-1.5 rounded text-[9px] text-slate-600 normal-case">{seg.meta.mood}</span>}
+                                {isUser ? null : <TokenImg value={char?.avatar} className="w-3 h-3 rounded-full object-cover" />}<span>{isUser ? '我 (User)' : char?.name} 执笔</span>{!isUser && seg.meta?.mood && <span className="bg-slate-100 px-1.5 rounded text-[9px] text-slate-600 normal-case">{seg.meta.mood}</span>}
                             </div>
                             <div className="whitespace-pre-wrap">{seg.content}</div>
                         </div>

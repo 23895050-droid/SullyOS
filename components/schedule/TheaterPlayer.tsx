@@ -1,6 +1,7 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { CharacterProfile, ScheduleSlot, TheaterLine } from '../../types';
+import { useBlobRefUrl } from '../../utils/blobRef';
 
 interface TheaterPlayerProps {
     character: CharacterProfile | null;
@@ -37,6 +38,8 @@ const TheaterPlayer: React.FC<TheaterPlayerProps> = ({
 }) => {
     const accent = `hsl(${HUE}, 75%, 72%)`;
     const charName = character?.name || '角色';
+    // 头像可能是 blobref 令牌（优化后），先解析再拼 url()
+    const characterAvatarUrl = useBlobRefUrl(character?.avatar);
 
     // 已完整显示的行数；当前正在打字的行 = shownCount（索引）
     const [shownCount, setShownCount] = useState(0);     // 已完成打字的行数
@@ -114,7 +117,7 @@ const TheaterPlayer: React.FC<TheaterPlayerProps> = ({
                 <div
                     className="absolute inset-0 pointer-events-none"
                     style={{
-                        backgroundImage: `url(${character.avatar})`,
+                        backgroundImage: `url(${characterAvatarUrl})`,
                         backgroundSize: 'cover',
                         backgroundPosition: 'center',
                         filter: 'blur(34px) saturate(0.7)',

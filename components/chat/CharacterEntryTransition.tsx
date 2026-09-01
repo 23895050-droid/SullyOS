@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useBlobRefUrl } from '../../utils/blobRef';
 
 // 角色切换「登场」过场 —— 不是换页/换 tab，而是「离开一个人，走进另一个人的空间」。
 // 设计：以「即将见到的这个人」的头像虚化铺底（ta 的色彩世界），中心头像带柔光浮现 + 名字升起 → 推进穿过进入聊天。
@@ -22,6 +23,8 @@ const prefersReducedMotion = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const CharacterEntryTransition: React.FC<Props> = ({ name, avatar, onDone }) => {
+  // avatar 可能是 blobref 令牌（优化后），先解析再拼 url()
+  const avatarUrl = useBlobRefUrl(avatar);
   const reduced = useMemo(prefersReducedMotion, []);
   // 头像约 650ms 对焦清晰、名字约 780ms 到位 → 停留到 REVEAL_AT 让人看清，再退场。
   const REVEAL_AT = reduced ? 220 : 1000; // 开始退场的时刻（清晰后的停留终点）
@@ -42,7 +45,7 @@ const CharacterEntryTransition: React.FC<Props> = ({ name, avatar, onDone }) => 
   // 轻触跳过：立刻进入退场（仍是平滑推进，不是硬切）
   const skip = () => { if (!exiting) { setExiting(true); window.setTimeout(finish, EXIT); } };
 
-  const avatarBg = avatar ? `url(${avatar})` : '';
+  const avatarBg = avatarUrl ? `url(${avatarUrl})` : '';
 
   return (
     <div

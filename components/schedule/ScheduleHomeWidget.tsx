@@ -5,6 +5,8 @@ import { getCurrentScheduleSlotIndex, getScheduleWallClock } from '../../utils/s
 import { useOS } from '../../context/OSContext';
 import { resolveScheduleCardPalette } from '../../utils/scheduleAppearance';
 import ScheduleAppearanceButton, { ScheduleCustomCssStyle } from './ScheduleAppearanceButton';
+import { useBlobRefUrl } from '../../utils/blobRef';
+import TokenImg from '../os/TokenImg';
 
 interface ScheduleSquareWidgetProps {
     schedule: DailySchedule | null;
@@ -73,8 +75,8 @@ export const ScheduleSquareWidget: React.FC<ScheduleSquareWidgetProps> = ({
             </div>
             {/* Background avatar */}
             {character?.avatar && (
-                <img
-                    src={character.avatar}
+                <TokenImg
+                    value={character.avatar}
                     alt=""
                     loading="lazy"
                     className="absolute inset-0 w-full h-full object-cover opacity-55"
@@ -170,6 +172,8 @@ export const ScheduleHomeWidget: React.FC<ScheduleHomeWidgetProps> = ({
     paper = false,
 }) => {
     const { theme } = useOS();
+    // 头像可能是 blobref 令牌（优化后），先解析再拼 url()
+    const characterAvatarUrl = useBlobRefUrl(character?.avatar);
     const currentIdx = schedule ? getCurrentScheduleSlotIndex(schedule.slots, character) : -1;
     const currentSlot = currentIdx >= 0 ? schedule!.slots[currentIdx] : null;
     const nextSlot = schedule && currentIdx < schedule.slots.length - 1
@@ -320,7 +324,7 @@ export const ScheduleHomeWidget: React.FC<ScheduleHomeWidgetProps> = ({
                 <div
                     className="absolute inset-0 opacity-25 pointer-events-none"
                     style={{
-                        backgroundImage: `url(${character.avatar})`,
+                        backgroundImage: `url(${characterAvatarUrl})`,
                         backgroundSize: 'cover',
                         backgroundPosition: 'center 28%',
                         filter: 'blur(36px) saturate(1.6)',

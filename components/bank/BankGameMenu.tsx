@@ -5,6 +5,7 @@ import { SHOP_RECIPES, AVAILABLE_STAFF } from './BankGameConstants';
 import BankAssetIcon from './BankAssetIcon';
 import { processImage } from '../../utils/file';
 import { UsersThree, Target, Sparkle, PawPrint, Link as LinkIcon, Camera, Check, Lightbulb, Confetti, Briefcase, CookingPot, HandWaving, Dog, Cat, Rabbit } from '@phosphor-icons/react';
+import TokenImg from '../os/TokenImg';
 
 interface Props {
     state: BankFullState;
@@ -229,7 +230,7 @@ const BankGameMenu: React.FC<Props> = ({
                                                             : 'bg-white border border-[#E8DCC8] hover:border-[#FF7043]'
                                                     }`}
                                                 >
-                                                    <img src={char.avatar} className="w-10 h-10 rounded-lg object-cover" />
+                                                    <TokenImg value={char.avatar} className="w-10 h-10 rounded-lg object-cover" />
                                                     <span className={`text-[9px] font-bold mt-1 truncate max-w-[50px] ${selectedOwner === char.id ? 'text-white' : 'text-[#5D4037]'}`}>
                                                         {char.name}
                                                     </span>

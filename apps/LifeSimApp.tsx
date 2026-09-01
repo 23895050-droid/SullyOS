@@ -60,6 +60,7 @@ import GameOverOverlay from './lifesim/GameOverOverlay';
 import LifeSimSettingsPanel from './lifesim/LifeSimSettingsPanel';
 import NPCEditorPanel from './lifesim/NPCEditorPanel';
 import ResetCityDialog from './lifesim/ResetCityDialog';
+import TokenImg from '../components/os/TokenImg';
 
 // ── 常量 ────────────────────────────────────────────────────────
 
@@ -1140,8 +1141,8 @@ const LifeSimApp: React.FC = () => {
                                         flexShrink: 0,
                                         transition: 'all 0.18s ease',
                                     }}>
-                                    <img
-                                        src={char.avatar}
+                                    <TokenImg
+                                        value={char.avatar}
                                         alt={char.name}
                                         style={{
                                             width: 20,
