@@ -39,10 +39,14 @@ import CharacterEntryTransition from '../components/chat/CharacterEntryTransitio
 import ChromeCssEditor from '../components/chat/ChromeCssEditor';
 import ChatInputArea from '../components/chat/ChatInputArea';
 import MemoryRepairPortal from '../components/chat/MemoryRepairPortal';
-import VoiceFavoritesPortal from '../components/chat/VoiceFavoritesPortal';
+import FavoritesPortal from '../components/chat/VoiceFavoritesPortal';
 import ChatModals from '../components/chat/ChatModals';
 import ImageLightbox from '../components/chat/ImageLightbox';
-import { downloadChatImage } from '../utils/imageDownload';
+import { downloadChatImage, resolveChatImageBlob } from '../utils/imageDownload';
+import { blobToDataUrl } from '../utils/blobRef';
+import { addArchiveSafe, downscaleImage, type ArchiveEntry } from '../utils/archive';
+import { loadImageGenSettings } from '../utils/imageGenStorage';
+import { getPrompt } from '../utils/promptRegistry';
 import Modal from '../components/os/Modal';
 import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
@@ -73,6 +77,13 @@ import {
     removeVoiceFavorite,
     saveVoiceFavorite,
 } from '../utils/voiceFavorites';
+import {
+    CONTENT_FAVORITES_CHANGED_EVENT,
+    contentFavoriteIdForMessage,
+    listContentFavorites,
+    removeContentFavoriteById,
+    saveMessageContentFavorite,
+} from '../utils/contentFavorites';
 import { isInstantConfigReady, loadInstantConfig } from '../utils/instantPushClient';
 import { resolveActiveSound, playWhiteboxSound, unlockWhiteboxAudio, parseWhiteboxSound, upsertWhiteboxSound, stripWhiteboxSoundDirective, WhiteboxSound } from '../utils/whiteboxSound';
 import WhiteboxSoundEditor from '../components/chat/WhiteboxSoundEditor';
@@ -153,19 +164,20 @@ const Chat: React.FC = () => {
     const [totalMsgCount, setTotalMsgCount] = useState(0);
     const [visibleCount, setVisibleCount] = useState(30);
     const [windowedFocusMsgId, setWindowedFocusMsgId] = useState<number | null>(null);
+    const [historyWindowRange, setHistoryWindowRange] = useState<ChatHistoryWindowRange | null>(null);
     const [flashMsgId, setFlashMsgId] = useState<number | null>(null);
     // 角色切换/进入时的缓入开关：先 false（透明），下一帧转 true，靠 CSS transition 平滑淡入。
     // 初值 false 让首次打开也是淡入、且不会有"先显示再变透明"的闪烁。
     // 角色切换「登场」过场是否显示。切换/进入角色时由 useLayoutEffect 在绘制前置真，覆盖住加载、避免闪到新聊天。
     const [showEntry, setShowEntry] = useState(false);
-    const WINDOW_RADIUS = 25;
     const [input, setInput] = useState('');
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
     const [collaborationOpen, setCollaborationOpen] = useState(false);
     const [collaborationPreviewAssetId, setCollaborationPreviewAssetId] = useState<string | null>(null);
     const [memoryRepairOpen, setMemoryRepairOpen] = useState(false);
-    const [voiceFavoritesOpen, setVoiceFavoritesOpen] = useState(false);
-    
+    const [favoritesOpen, setFavoritesOpen] = useState(false);
+    const [contentFavoriteIds, setContentFavoriteIds] = useState<Set<string>>(new Set());
+
     // Emoji State
     const [emojis, setEmojis] = useState<Emoji[]>([]);
     const [categories, setCategories] = useState<EmojiCategory[]>([]);
@@ -177,6 +189,13 @@ const Chat: React.FC = () => {
     const lastMsgIdRef = useRef<number | null>(null);
     const scrollThrottleRef = useRef(0);
     const visibleCountRef = useRef(30);
+    const pendingFavoriteJumpRef = useRef<{ charId: string; messageId: number } | null>(null);
+    const historyWindowRangeRef = useRef<ChatHistoryWindowRange | null>(null);
+    const historyWindowTotalRef = useRef(0);
+    const historyWindowLoadingRef = useRef(false);
+    const historyPrependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+    const historyJumpUnlockTimerRef = useRef<number | null>(null);
+    const historyWindowScrollEnabledRef = useRef(false);
     const activeCharIdRef = useRef(activeCharacterId);
     // 流式预览接棒过的正式消息在当前会话内始终跳过入场动画，避免后续 DB 刷新时动画类又被加回来。
     const streamPreviewHandoverIdsRef = useRef<Set<number>>(new Set());
@@ -698,7 +717,7 @@ const Chat: React.FC = () => {
             });
             setChatFavoriteKeys(prev => new Set(prev).add(sourceKey));
             setVoiceDataMap(prev => ({ ...prev, [msg.id]: { ...prev[msg.id], favorite: true } }));
-            addToast('已收藏语音，可在聊天加号里查看', 'success');
+            addToast('已收藏语音，可在“收藏”里查看', 'success');
             trackEvent('收藏语音条');
         } catch (e) {
             console.warn('[Chat] favorite voice failed', e);
@@ -734,6 +753,91 @@ const Chat: React.FC = () => {
         const charName = characters.find(c => c.id === msg.charId)?.name || char?.name;
         void downloadChatImage(msg, { charName, notify: addToast });
     }, [characters, char, addToast]);
+
+    // 聊天图片留档：识图摘要 → 相册（与相机留档同一存储，角色只读文字摘要）
+    const [archivingMsgId, setArchivingMsgId] = useState<number | null>(null);
+    const handleArchiveImage = useCallback(async (msg: Message) => {
+        if (!msg?.id || archivingMsgId) return;
+        setArchivingMsgId(msg.id);
+        try {
+            const blob = await resolveChatImageBlob(msg);
+            if (!blob) {
+                addToast('拿不到这张图片的文件，无法留档', 'error');
+                return;
+            }
+            const imageDataUrl = await blobToDataUrl(blob);
+            const targetChar = characters.find(c => c.id === msg.charId) || char;
+            const date = new Date(msg.timestamp);
+            const dateLabel = `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+            const recentChat = messages.slice(-12).map(m => {
+                const sender = m.role === 'user' ? userProfile.name : (characters.find(c => c.id === m.charId)?.name || char?.name || '角色');
+                const text = m.type === 'text' ? m.content.substring(0, 80) : `[${m.type === 'image' ? '图片' : m.type}]`;
+                return `${sender}: ${text}`;
+            }).join('\n');
+
+            const genSettings = loadImageGenSettings();
+            let summary = `${dateLabel}，${userProfile.name} 在聊天里给${targetChar?.name || '角色'}发了这张照片。`;
+            if (genSettings.promptGenApiKey && genSettings.promptGenBaseUrl && genSettings.promptGenModel) {
+                try {
+                    const systemPrompt = getPrompt('聊天图片留档')
+                        .replace(/\{\{char\}\}/g, targetChar?.name || '角色')
+                        .replace(/\{\{user\}\}/g, userProfile.name)
+                        .replace(/\{\{date\}\}/g, dateLabel);
+                    const res = await fetch(genSettings.promptGenBaseUrl.replace(/\/+$/, '') + '/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${genSettings.promptGenApiKey}` },
+                        body: JSON.stringify({
+                            model: genSettings.promptGenModel,
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                {
+                                    role: 'user',
+                                    content: [
+                                        { type: 'text', text: `近期聊天（语境参考）：\n${recentChat.slice(0, 3000)}` },
+                                        { type: 'text', text: '照片就是这张：' },
+                                        { type: 'image_url', image_url: { url: imageDataUrl } },
+                                    ],
+                                },
+                            ],
+                            max_tokens: 4000,
+                        }),
+                    });
+                    const data = await safeResponseJson(res);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const s = String(data?.choices?.[0]?.message?.content || '').trim();
+                    if (s) summary = s;
+                } catch {
+                    // 识图失败用模板兜底，不阻塞留档
+                }
+            }
+            const thumbnail = await downscaleImage(imageDataUrl, 320);
+            const entry: ArchiveEntry = {
+                id: `ma_${Date.now()}`,
+                thumbnail,
+                charId: msg.charId,
+                charName: targetChar?.name || '未知角色',
+                summary,
+                description: '',
+                prefixPrompt: '',
+                presetName: '',
+                refMode: 'none',
+                tags: ['聊天'],
+                favorite: false,
+                charAlbum: true,
+                timestamp: msg.timestamp || Date.now(),
+                fromUser: true,
+                kind: 'other',
+            };
+            const ok = await addArchiveSafe(entry);
+            addToast(ok ? '已留档，可在「我的相册」查看' : '留档失败：本地存储已满', ok ? 'success' : 'error');
+            trackEvent('聊天图片留档');
+        } catch (error: any) {
+            console.warn('[Chat] archive image failed', error);
+            addToast(error?.message || '留档失败', 'error');
+        } finally {
+            setArchivingMsgId(null);
+        }
+    }, [archivingMsgId, characters, char, messages, userProfile.name, addToast]);
 
     // 图片大图预览
     const [previewMsg, setPreviewMsg] = useState<Message | null>(null);
@@ -1024,6 +1128,16 @@ const Chat: React.FC = () => {
             setVectorizeResult(null);
             setShowingTargetIds(new Set());
             setWindowedFocusMsgId(null);
+            setHistoryWindowRange(null);
+            historyWindowRangeRef.current = null;
+            historyWindowTotalRef.current = 0;
+            historyWindowLoadingRef.current = false;
+            historyPrependAnchorRef.current = null;
+            historyWindowScrollEnabledRef.current = false;
+            if (historyJumpUnlockTimerRef.current) {
+                window.clearTimeout(historyJumpUnlockTimerRef.current);
+                historyJumpUnlockTimerRef.current = null;
+            }
             setFlashMsgId(null);
             try {
                 const rawToolStatus = localStorage.getItem(`instant_tool_status_${activeCharacterId}`);
@@ -1199,6 +1313,43 @@ const Chat: React.FC = () => {
         }
     }, [messages, activeCharacterId, selectionMode, windowedFocusMsgId]);
 
+    const extendHistoryWindow = useCallback((direction: 'older' | 'newer') => {
+        const scroller = scrollRef.current;
+        const range = historyWindowRangeRef.current;
+        if (!scroller || !range || historyWindowLoadingRef.current) return;
+
+        const nextRange = expandChatHistoryWindow(
+            range,
+            historyWindowTotalRef.current,
+            direction,
+            HISTORY_WINDOW_BATCH_SIZE,
+        );
+        if (nextRange.start === range.start && nextRange.end === range.end) return;
+
+        historyWindowLoadingRef.current = true;
+        if (direction === 'older') {
+            // 前插消息会把当前内容整体向下顶；记录原高度，提交 DOM 后补偿差值，
+            // 用户看到的位置就不会突然跳走。
+            historyPrependAnchorRef.current = {
+                scrollHeight: scroller.scrollHeight,
+                scrollTop: scroller.scrollTop,
+            };
+        }
+        historyWindowRangeRef.current = nextRange;
+        setHistoryWindowRange(nextRange);
+    }, []);
+
+    useLayoutEffect(() => {
+        if (!historyWindowRange) return;
+        const anchor = historyPrependAnchorRef.current;
+        const scroller = scrollRef.current;
+        if (anchor && scroller) {
+            scroller.scrollTop = anchor.scrollTop + (scroller.scrollHeight - anchor.scrollHeight);
+        }
+        historyPrependAnchorRef.current = null;
+        historyWindowLoadingRef.current = false;
+    }, [historyWindowRange]);
+
     useEffect(() => {
         if (isTyping && scrollRef.current && !selectionMode && windowedFocusMsgId === null) {
             const now = Date.now();
@@ -1258,6 +1409,12 @@ const Chat: React.FC = () => {
         // 发消息隐含"回到当前聊天"——退出 windowed 旧消息浏览模式
         if (windowedFocusMsgId !== null) {
             setWindowedFocusMsgId(null);
+            setHistoryWindowRange(null);
+            historyWindowRangeRef.current = null;
+            historyWindowTotalRef.current = 0;
+            historyWindowScrollEnabledRef.current = false;
+            visibleCountRef.current = LOAD_BATCH_SIZE;
+            setVisibleCount(LOAD_BATCH_SIZE);
             setFlashMsgId(null);
         }
 
@@ -1679,7 +1836,7 @@ const Chat: React.FC = () => {
         switch (type) {
             case 'collaboration': setShowPanel('none'); setCollaborationOpen(true); break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
-            case 'voice-favorites': setShowPanel('none'); setVoiceFavoritesOpen(true); break;
+            case 'favorites': setShowPanel('none'); setFavoritesOpen(true); break;
             case 'transfer': setModalType('transfer'); break;
             case 'poke': handleSendText('[戳一戳]', 'interaction'); break;
             case 'archive': setModalType('archive-settings'); break;
@@ -2597,26 +2754,120 @@ const Chat: React.FC = () => {
     const handleJumpToMessageInChat = async (messageId: number) => {
         if (!activeCharacterId) return;
         setModalType('none');
+        const requestCharId = activeCharacterId;
         const LARGE = 999999;
         visibleCountRef.current = LARGE;
         setVisibleCount(LARGE);
-        await reloadMessages(LARGE);
+        const allMsgs = await DB.getMessagesByCharId(requestCharId, true);
+        if (activeCharIdRef.current !== requestCharId) return;
+        const browseableMessages = allMsgs.filter(message => isVisibleChatMessage(message, !!char?.hideSystemLogs));
+        const targetIndex = browseableMessages.findIndex(message => message.id === messageId);
+        if (targetIndex < 0) {
+            visibleCountRef.current = LOAD_BATCH_SIZE;
+            setVisibleCount(LOAD_BATCH_SIZE);
+            addToast('这条记录当前未显示在聊天界面中', 'info');
+            await reloadMessages(LOAD_BATCH_SIZE);
+            return;
+        }
+
+        const nextRange = createChatHistoryWindow(
+            browseableMessages.length,
+            targetIndex,
+            HISTORY_WINDOW_RADIUS,
+        );
+        setMessages(allMsgs);
+        setTotalMsgCount(browseableMessages.length);
+        historyWindowTotalRef.current = browseableMessages.length;
+        historyWindowRangeRef.current = nextRange;
+        historyWindowScrollEnabledRef.current = false;
+        setHistoryWindowRange(nextRange);
         setWindowedFocusMsgId(messageId);
         setFlashMsgId(messageId);
-        // 等下一帧让目标节点挂上 DOM 再滚
-        requestAnimationFrame(() => {
+        // 等窗口节点挂上 DOM 再定位；定位动画结束后才开放边缘续载，避免滚动动画
+        // 自己触发 onScroll，提前改动窗口。
+        requestAnimationFrame(() => requestAnimationFrame(() => {
             const el = document.getElementById(`chat-msg-${messageId}`);
             el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        });
+            if (historyJumpUnlockTimerRef.current) window.clearTimeout(historyJumpUnlockTimerRef.current);
+            historyJumpUnlockTimerRef.current = window.setTimeout(() => {
+                historyWindowScrollEnabledRef.current = true;
+                historyJumpUnlockTimerRef.current = null;
+            }, 450);
+        }));
         window.setTimeout(() => setFlashMsgId(null), 2200);
     };
 
+    const refreshContentFavoriteIds = useCallback(async () => {
+        const items = await listContentFavorites().catch(() => []);
+        setContentFavoriteIds(new Set(items.map(item => item.id)));
+    }, []);
+
+    useEffect(() => {
+        void refreshContentFavoriteIds();
+        window.addEventListener(CONTENT_FAVORITES_CHANGED_EVENT, refreshContentFavoriteIds);
+        return () => window.removeEventListener(CONTENT_FAVORITES_CHANGED_EVENT, refreshContentFavoriteIds);
+    }, [refreshContentFavoriteIds]);
+
+    const handleToggleContentFavorite = async (msg: Message) => {
+        if (!msg?.id) return;
+        const favoriteId = contentFavoriteIdForMessage(msg);
+        try {
+            if (contentFavoriteIds.has(favoriteId)) {
+                await removeContentFavoriteById(favoriteId);
+                setContentFavoriteIds(previous => {
+                    const next = new Set(previous);
+                    next.delete(favoriteId);
+                    return next;
+                });
+                addToast(msg.type === 'image' ? '已取消收藏图片' : '已取消收藏聊天消息', 'info');
+                return;
+            }
+            await saveMessageContentFavorite(msg, char?.name || '未知角色');
+            setContentFavoriteIds(previous => new Set(previous).add(favoriteId));
+            addToast(msg.type === 'image' ? '已收藏图片（仅保存引用）' : '已收藏聊天消息', 'success');
+            trackEvent(msg.type === 'image' ? '收藏聊天图片' : '收藏聊天消息');
+        } catch (error) {
+            console.warn('[Chat] favorite content failed', error);
+            addToast('收藏失败，请稍后重试', 'error');
+        }
+    };
+
+    const handleOpenFavoriteMessage = (charId: string, messageId: number) => {
+        setFavoritesOpen(false);
+        if (activeCharIdRef.current === charId) {
+            void handleJumpToMessageInChat(messageId);
+            return;
+        }
+        pendingFavoriteJumpRef.current = { charId, messageId };
+        setActiveCharacterId(charId);
+    };
+
+    useEffect(() => {
+        const pending = pendingFavoriteJumpRef.current;
+        if (!pending || pending.charId !== activeCharacterId) return;
+        pendingFavoriteJumpRef.current = null;
+        const timer = window.setTimeout(() => void handleJumpToMessageInChat(pending.messageId), 0);
+        return () => window.clearTimeout(timer);
+    // handleJumpToMessageInChat intentionally uses the freshly rendered character state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeCharacterId]);
+
     const handleBackToCurrent = async () => {
         setWindowedFocusMsgId(null);
+        setHistoryWindowRange(null);
+        historyWindowRangeRef.current = null;
+        historyWindowTotalRef.current = 0;
+        historyWindowLoadingRef.current = false;
+        historyPrependAnchorRef.current = null;
+        historyWindowScrollEnabledRef.current = false;
+        if (historyJumpUnlockTimerRef.current) {
+            window.clearTimeout(historyJumpUnlockTimerRef.current);
+            historyJumpUnlockTimerRef.current = null;
+        }
         setFlashMsgId(null);
-        visibleCountRef.current = 30;
-        setVisibleCount(30);
-        await reloadMessages(30);
+        visibleCountRef.current = LOAD_BATCH_SIZE;
+        setVisibleCount(LOAD_BATCH_SIZE);
+        await reloadMessages(LOAD_BATCH_SIZE);
         requestAnimationFrame(() => {
             scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
         });
@@ -3228,23 +3479,37 @@ const Chat: React.FC = () => {
     // hideBeforeMessageId 不在视觉层过滤：用户依旧能往上翻到旧消息，只是 LLM 拉不到。
     // 真正想从聊天记录里抹掉，应该走"删除"。
     // windowed 模式：定位到旧消息时只渲染目标周围 51 条，避免 DOM 卡爆。
+    const chatDisplayMessages = useMemo(
+        () => messages.filter(message => isVisibleChatMessage(message, !!char?.hideSystemLogs)),
+        [messages, char?.id, char?.hideSystemLogs],
+    );
+
+    useEffect(() => {
+        if (windowedFocusMsgId !== null) historyWindowTotalRef.current = chatDisplayMessages.length;
+    }, [chatDisplayMessages.length, windowedFocusMsgId]);
+
     const displayMessages = useMemo(() => {
-        const base = messages
-            .filter(m => m.metadata?.source !== 'date' && m.metadata?.source !== 'call' && m.metadata?.source !== 'story_theater_memory')
-            .filter(m => !m.metadata?.proactiveHint)
-            .filter(m => { if (char?.hideSystemLogs && m.role === 'system' && m.type !== 'score_card') return false; return true; });
         if (windowedFocusMsgId !== null) {
-            const idx = base.findIndex(m => m.id === windowedFocusMsgId);
+            if (historyWindowRange) {
+                return chatDisplayMessages.slice(
+                    Math.max(0, historyWindowRange.start),
+                    Math.min(chatDisplayMessages.length, historyWindowRange.end),
+                );
+            }
+            const idx = chatDisplayMessages.findIndex(m => m.id === windowedFocusMsgId);
             if (idx >= 0) {
-                const start = Math.max(0, idx - WINDOW_RADIUS);
-                const end = Math.min(base.length, idx + WINDOW_RADIUS + 1);
-                return base.slice(start, end);
+                return chatDisplayMessages.slice(
+                    Math.max(0, idx - HISTORY_WINDOW_RADIUS),
+                    Math.min(chatDisplayMessages.length, idx + HISTORY_WINDOW_RADIUS + 1),
+                );
             }
         }
-        return base.slice(-visibleCount);
-    }, [messages, char?.id, char?.hideSystemLogs, visibleCount, windowedFocusMsgId]);
+        return chatDisplayMessages.slice(-visibleCount);
+    }, [chatDisplayMessages, visibleCount, windowedFocusMsgId, historyWindowRange]);
 
     const collapsedCount = Math.max(0, totalMsgCount - displayMessages.length);
+    const hasOlderHistoryWindow = windowedFocusMsgId !== null && !!historyWindowRange && historyWindowRange.start > 0;
+    const hasNewerHistoryWindow = windowedFocusMsgId !== null && !!historyWindowRange && historyWindowRange.end < chatDisplayMessages.length;
 
     // ── 新消息进入动画 ──────────────────────────────────────────────
     // 只让「刚追加的最新消息」（自己发的 / AI 回的）整条淡入一次。
@@ -3623,7 +3888,10 @@ const Chat: React.FC = () => {
                 onCreatePrompt={createNewPrompt} onEditPrompt={editSelectedPrompt} onSavePrompt={handleSavePrompt} onDeletePrompt={handleDeletePrompt}
                 onSetHistoryStart={handleSetHistoryStart} onRestoreAdaptiveContext={restoreAdaptiveContext} onJumpToMessageInChat={handleJumpToMessageInChat} onEnterSelectionMode={handleEnterSelectionMode}
                 onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
-                onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage} onDeleteEmoji={handleDeleteEmoji} onDeleteCategory={handleDeleteCategory}
+                onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage}
+                messageFavorited={!!(selectedMessage && contentFavoriteIds.has(contentFavoriteIdForMessage(selectedMessage)))}
+                onToggleMessageFavorite={selectedMessage ? () => handleToggleContentFavorite(selectedMessage) : undefined}
+                onDeleteEmoji={handleDeleteEmoji} onDeleteCategory={handleDeleteCategory}
                 allCharacters={characters} onSaveCategoryVisibility={handleSaveCategoryVisibility}
                 translationEnabled={translationEnabled}
                 onToggleTranslation={() => { const next = !translationEnabled; setTranslationEnabled(next); localStorage.setItem(`chat_translate_enabled_${activeCharacterId}`, JSON.stringify(next)); if (next) { trackEvent('开启聊天翻译', { targetLang: isTranslationLangPreset(translateTargetLang) ? translateTargetLang : 'custom' }); } if (!next) { setShowingTargetIds(new Set()); } }}
@@ -3663,6 +3931,7 @@ const Chat: React.FC = () => {
                 onToggleVoiceFavorite={selectedMessage ? () => handleToggleVoiceFavorite(selectedMessage) : undefined}
                 onRerollImage={selectedMessage?.type === 'image' && selectedMessage?.metadata?.imageGenDescription ? () => openRerollEdit(selectedMessage) : undefined}
                 onDownloadImage={selectedMessage?.type === 'image' ? () => handleDownloadImage(selectedMessage) : undefined}
+                onArchiveImage={selectedMessage?.type === 'image' ? () => handleArchiveImage(selectedMessage) : undefined}
                 onPreviewImage={selectedMessage?.type === 'image' ? () => handlePreviewImage(selectedMessage) : undefined}
                 scheduleData={scheduleData}
                 isScheduleGenerating={isScheduleGenerating}
@@ -3915,6 +4184,20 @@ const Chat: React.FC = () => {
                         }} className="px-4 py-2 bg-white/50 backdrop-blur-sm rounded-full text-xs text-slate-500 shadow-sm border border-white hover:bg-white transition-colors">加载历史消息 ({collapsedCount})</button>
                     </div>
                 )}
+                {windowedFocusMsgId !== null && (
+                    <div className="flex justify-center mb-4 px-4">
+                        {hasOlderHistoryWindow ? (
+                            <button
+                                onClick={() => extendHistoryWindow('older')}
+                                className="px-3 py-1.5 bg-white/60 backdrop-blur-sm rounded-full text-[11px] text-slate-500 shadow-sm border border-white hover:bg-white transition-colors"
+                            >
+                                向上滑继续看更早消息
+                            </button>
+                        ) : (
+                            <span className="text-[11px] text-slate-400">已到最早一条消息</span>
+                        )}
+                    </div>
+                )}
 
                 {displayMessages.map((m, i) => {
                     const prevMessage = i > 0 ? displayMessages[i - 1] : null;
@@ -4005,7 +4288,21 @@ const Chat: React.FC = () => {
                         </div>
                     );
                 })}
-                
+                {windowedFocusMsgId !== null && (
+                    <div className="flex justify-center mt-2 mb-4 px-4">
+                        {hasNewerHistoryWindow ? (
+                            <button
+                                onClick={() => extendHistoryWindow('newer')}
+                                className="px-3 py-1.5 bg-white/60 backdrop-blur-sm rounded-full text-[11px] text-slate-500 shadow-sm border border-white hover:bg-white transition-colors"
+                            >
+                                向下滑继续看较新消息
+                            </button>
+                        ) : (
+                            <span className="text-[11px] text-slate-400">已到当前最新消息</span>
+                        )}
+                    </div>
+                )}
+
                 {/* 纯前端「发送准备中」三个点: 不走 MessageItem (那条逐条路径实测渲染不出来), 直接挂在
                     消息列表末尾、靠右(用户侧). 跟 header「发送中」同源 instantSendingActive 一起亮灭.
                     原版精致观感 = 小号 (w-1) + 轻脉冲. 但原版用的 Tailwind 自定义类 animate-dot-pulse
@@ -4514,8 +4811,11 @@ const Chat: React.FC = () => {
                     />
                 </React.Suspense>
             )}
-            {voiceFavoritesOpen && (
-                <VoiceFavoritesPortal onClose={() => setVoiceFavoritesOpen(false)} />
+            {favoritesOpen && (
+                <FavoritesPortal
+                    onClose={() => setFavoritesOpen(false)}
+                    onJumpToMessage={handleOpenFavoriteMessage}
+                />
             )}
 
             <McdMiniApp

@@ -138,8 +138,13 @@ export function formatArchiveTime(ts: number, withYear = true): string {
 export function buildForwardText(e: ArchiveEntry): string {
   const d = new Date(e.timestamp);
   const date = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
-  const info = (e.description || e.summary || '').trim();
-  const body = info.length > 60 ? `${info.slice(0, 60)}…` : info;
+  // 留档摘要（前因后果 + 当下感受）与图片描述全部进上下文，不再截断——
+  // 角色只读文字，文字越完整越知道这张照片是什么、为什么留着。
+  const summary = (e.summary || '').trim();
+  const description = (e.description || '').trim();
+  const tags = (e.tags || []).filter(Boolean).map(t => `#${t}`).join(' ');
+  const parts = [summary, description && description !== summary ? description : '', tags];
+  const body = parts.filter(Boolean).join('。');
   return `[历史照片：${e.charName}，${date}。${body}]`;
 }
 
