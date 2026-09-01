@@ -12,6 +12,8 @@ import {
 import { MagnifyingGlass, Gear, User as UserIcon } from '@phosphor-icons/react';
 import NeteaseLoginPanel from './NeteaseLoginPanel';
 import { trackEvent } from '../../utils/analytics';
+import TokenImg from '../../components/os/TokenImg';
+import { isBlobRef } from '../../utils/blobRef';
 
 interface Playlist {
   id: number;
@@ -553,7 +555,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
               {characters.map(ch => {
                 const initialized = !!ch.musicProfile?.initializedAt;
                 const avatar = ch.avatar || '';
-                const isImage = avatar.startsWith('data:') || avatar.startsWith('http');
+                const isImage = avatar.startsWith('data:') || avatar.startsWith('http') || isBlobRef(avatar);
                 return (
                   <button
                     key={ch.id}
@@ -563,8 +565,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                   >
                     <div className="relative w-14 h-14 mx-auto">
                       {isImage ? (
-                        <img
-                          src={avatar}
+                        <TokenImg value={avatar}
                           alt=""
                           className="w-14 h-14 rounded-full object-cover transition-transform group-active:scale-95"
                           style={{

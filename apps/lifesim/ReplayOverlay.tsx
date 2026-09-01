@@ -11,6 +11,7 @@ import {
 import StoryAttachments from './StoryAttachments';
 import { formatLifeSimActionDescription } from '../../utils/lifeSimTone';
 import TokenImg from '../../components/os/TokenImg';
+import { isBlobRef } from '../../utils/blobRef';
 
 const TONE_STYLES: Record<string, { accent: string; label: string }> = {
     vengeful: { accent: '#b85050', label: '复仇' },
@@ -95,7 +96,7 @@ const NarrativeReplayOverlay: React.FC<{
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             overflow: 'hidden', flexShrink: 0,
                         }}>
-                            {action.actorAvatar?.startsWith('http') || action.actorAvatar?.startsWith('data:')
+                            {(action.actorAvatar && (action.actorAvatar.startsWith('http') || action.actorAvatar.startsWith('data:') || isBlobRef(action.actorAvatar)))
                                 ? <TokenImg value={action.actorAvatar} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 3 }} alt="" />
                                 : action.actorAvatar ? <span style={{ fontSize: 18 }}>{action.actorAvatar}</span>
                                 : <Alien size={18} weight="bold" style={{ color: '#aaa' }} />}

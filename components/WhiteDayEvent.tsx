@@ -21,7 +21,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { injectMemoryPalace } from '../utils/memoryPalace/pipeline';
-import { dataUrlToBlob, putImageBlob, resolveRefToDataUrl } from '../utils/blobRef';
+import { dataUrlToBlob, putImageBlob, resolveRefToDataUrl , isBlobRef} from '../utils/blobRef';
 import TokenImg from './os/TokenImg';
 
 // ============================================================
@@ -437,8 +437,8 @@ const SpriteDialogBox: React.FC<SpriteDialogBoxProps> = ({
                             style={{ transform: `scale(${spriteScale}) translate(${spriteX}%, ${spriteY}%)` }}
                         >{sprite}</div>
                     ) : (
-                        <img
-                            src={sprite}
+                        <TokenImg
+                            value={sprite}
                             className="h-full w-auto max-w-none drop-shadow-lg transition-all duration-300"
                             style={{ transform: `scale(${spriteScale}) translate(${spriteX}%, ${spriteY}%)` }}
                             alt=""
@@ -1231,7 +1231,8 @@ ${answerSummary}
         const avatarX = SIDE_PAD + avatarR + 4;
         if (char?.avatar) {
             try {
-                const avatarImg = await loadImg(char.avatar);
+                const avatarSrc = isBlobRef(char.avatar) ? ((await resolveRefToDataUrl(char.avatar)) || '') : char.avatar;
+                const avatarImg = await loadImg(avatarSrc);
                 ctx.save();
                 ctx.beginPath();
                 ctx.arc(avatarX, row1Y, avatarR, 0, Math.PI * 2);

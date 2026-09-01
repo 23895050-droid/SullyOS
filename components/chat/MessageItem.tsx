@@ -1643,8 +1643,8 @@ const MessageItem = React.memo(({
             <div className={`relative ${avatarSizeClass} z-0 ${options?.className || ''}`}>
                 {visible && (
                     <>
-                        <img
-                            src={src}
+                        <TokenImg
+                            value={src}
                             className={`sully-chat-message-avatar-img w-full h-full ${avatarRadiusClass} object-cover shadow-sm ring-1 ring-black/5 relative z-0`}
                             alt="avatar"
                             loading="lazy"
@@ -1674,7 +1674,7 @@ const MessageItem = React.memo(({
         <div className="relative shrink-0 rounded-full overflow-hidden"
             style={{ width: 32, height: 32, boxShadow: `0 0 0 2px #fff, 0 0 0 3.5px ${ring}, 0 2px 6px ${ring}66` }}>
             {src ? (
-                <img src={src} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer"
+                <TokenImg value={src} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer"
                     onError={(e: any) => {
                         const img = e.target;
                         const p = img.parentElement;
@@ -2583,7 +2583,7 @@ const MessageItem = React.memo(({
                 }}
             >
                 {src ? (
-                    <img src={src} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer"
+                    <TokenImg value={src} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer"
                         onError={(e: any) => {
                             const img = e.target;
                             const p = img.parentElement;

@@ -93,6 +93,7 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
         [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])],
         char.avatar,
     );
+    const currentSpriteImgUrl = useBlobRefUrl(currentSpriteImg);
 
     const triggerUpload = (target: 'bg' | 'sprite', emotionKey?: string) => {
         setUploadTarget(target);
@@ -249,7 +250,7 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                     <div className="absolute inset-0 bg-cover bg-center opacity-60" style={{ backgroundImage: dateBackgroundUrl ? `url("${dateBackgroundUrl}")` : 'none' }}></div>
                     <div className="absolute inset-0 flex items-end justify-center pointer-events-none">
                         <img 
-                        src={currentSpriteImg}
+                        src={currentSpriteImgUrl}
                         className="max-h-[90%] object-contain transition-transform"
                         style={{ 
                             transform: `translate(${tempSpriteConfig.x}%, ${tempSpriteConfig.y}%) scale(${tempSpriteConfig.scale})`

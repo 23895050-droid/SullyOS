@@ -12,7 +12,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { creatorPartToBlobRefs, loadCreatorPartsForRender } from '../utils/creatorPartsBlob';
-import { dataUrlToBlob, putImageBlob } from '../utils/blobRef';
+import { dataUrlToBlob, putImageBlob , isBlobRef} from '../utils/blobRef';
 import { CharacterProfile, SpecialMomentRecord } from '../types';
 import { safeResponseJson } from '../utils/safeApi';
 import { assetMirrors, attachAudioMirrorFallback } from '../utils/assetUrl';
@@ -1854,7 +1854,7 @@ const Y520Scene: React.FC<Y520SceneProps> = ({ callA, charName, charAvatar, char
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <div className="l520-charpill">
-                            {charAvatar?.startsWith('http') || charAvatar?.startsWith('data:')
+                            {(charAvatar && (charAvatar.startsWith('http') || charAvatar.startsWith('data:') || isBlobRef(charAvatar)))
                                 ? <TokenImg value={charAvatar} alt={charName} />
                                 : <span className="l520-charpill-emoji">{charAvatar || '🌸'}</span>}
                             <span>{charName}</span>
@@ -2197,7 +2197,7 @@ const UncoveredLineView: React.FC<{
             <div className="l520-topbar" style={{ paddingBottom: 0 }}>
                 <div className="l520-header-row">
                     <div className="l520-charpill">
-                        {charAvatar?.startsWith('http') || charAvatar?.startsWith('data:')
+                        {(charAvatar && (charAvatar.startsWith('http') || charAvatar.startsWith('data:') || isBlobRef(charAvatar)))
                             ? <TokenImg value={charAvatar} alt={charName} />
                             : <span className="l520-charpill-emoji">{charAvatar || '🌸'}</span>}
                         <span>{charName}</span>
@@ -3873,7 +3873,7 @@ export const Like520Controller: React.FC<Like520ControllerProps> = ({ onClose, i
                                         onClick={() => { setCharId(c.id); setStage('session'); }}
                                         className="flex flex-col items-center gap-2 p-3 bg-[#FFF8F1] rounded-2xl border border-[#FCEDD9] active:scale-95 transition-transform"
                                     >
-                                        {c.avatar?.startsWith('http') || c.avatar?.startsWith('data:') ? (
+                                        {(c.avatar && (c.avatar.startsWith('http') || c.avatar.startsWith('data:') || isBlobRef(c.avatar))) ? (
                                             <TokenImg value={c.avatar} alt={c.name} className="w-12 h-12 rounded-full object-cover" />
                                         ) : (
                                             <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center text-2xl">

@@ -26,6 +26,7 @@ import { useLocalDateKey } from '../../hooks/useLocalDateKey';
 import { resolveCharTimeZone } from '../../utils/timezone';
 import { trackEvent } from '../../utils/analytics';
 import TokenImg from '../../components/os/TokenImg';
+import { isBlobRef } from '../../utils/blobRef';
 
 interface Props {
   charId: string;
@@ -319,7 +320,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
           style={{ boxShadow: `0 10px 40px rgba(var(--mz-glow-rgb, 205,198,233), 0.08)` }}>
           <div className="flex items-center gap-3">
             <div className="relative shrink-0">
-              {char.avatar && char.avatar.startsWith('data:') || char.avatar?.startsWith('http') ? (
+              {char.avatar && (char.avatar.startsWith('data:') || char.avatar.startsWith('http') || isBlobRef(char.avatar)) ? (
                 <TokenImg value={char.avatar} alt="" className="w-16 h-16 rounded-2xl object-cover"
                   style={{ border: `2px solid rgba(var(--mz-glow-rgb, 205,198,233), 0.38)`, boxShadow: `0 4px 20px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }} />
               ) : (

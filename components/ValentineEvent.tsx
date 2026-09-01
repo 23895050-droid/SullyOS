@@ -24,6 +24,7 @@ import { Like520Session, isLike520EventAvailable, isLike520Past, LIKE520_RECORD_
 import { injectMemoryPalace } from '../utils/memoryPalace/pipeline';
 import { markAmsgStateDirty } from '../utils/amsgStateSync';
 import TokenImg from './os/TokenImg';
+import { isBlobRef } from '../utils/blobRef';
 
 // ============================================================
 // 情人节立绘 Sprite 映射 (占位 emoji，等图片整理好后替换为图床URL)
@@ -957,8 +958,8 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
             {/* 立绘区域 - 高度填满设备，等比缩放，多余宽度裁掉 */}
             <div className="absolute inset-0 overflow-hidden flex items-end justify-center z-10 pointer-events-none">
                 {spriteInfo.type === 'image' ? (
-                    <img
-                        src={spriteInfo.value}
+                    <TokenImg
+                        value={spriteInfo.value}
                         className="h-full w-auto max-w-none drop-shadow-[0_10px_30px_rgba(236,72,153,0.3)] transition-all duration-500"
                         style={{
                             transform: `scale(${localSpriteScale}) translate(${localSpriteX}%, ${localSpriteY}%)`,
@@ -1263,7 +1264,7 @@ const SpecialEventCardImpl: React.FC<EventCardProps> = ({
                                             onContextMenu={(e) => { e.preventDefault(); if (hasRecord) onLongPressDelete(c.id); }}
                                             className={`flex flex-col items-center gap-2 p-3 bg-white/15 rounded-2xl border ${isPending ? 'border-white/80 ring-2 ring-white/60' : 'border-white/20'} active:scale-95 transition-transform relative`}
                                         >
-                                            {c.avatar?.startsWith('http') || c.avatar?.startsWith('data:') ? (
+                                            {(c.avatar && (c.avatar.startsWith('http') || c.avatar.startsWith('data:') || isBlobRef(c.avatar))) ? (
                                                 <TokenImg value={c.avatar} loading="lazy" decoding="async" alt="" className={`w-12 h-12 rounded-full object-cover border-2 ${theme.avatarRing}`} />
                                             ) : (
                                                 <span className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl bg-white/10 border-2 ${theme.avatarRing}`}>{c.avatar || '🌸'}</span>

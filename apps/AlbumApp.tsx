@@ -70,7 +70,7 @@ const CharAvatar: React.FC<{ char: CharacterProfile | null; fallbackName: string
   char, fallbackName, className = 'w-9 h-9',
 }) => {
   const avatar = char?.avatar || '';
-  if (avatar && /^(data:|blob:|https?:)/.test(avatar)) {
+  if (avatar && /^(data:|blob:|blobref:|https?:)/.test(avatar)) {
     return <TokenImg value={avatar} alt={char?.name || fallbackName} className={`${className} rounded-full object-cover shrink-0 bg-slate-100`} />;
   }
   return (
