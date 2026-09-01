@@ -13,10 +13,14 @@ import { VALID_EMOTIONS } from '../../utils/minimaxTts';
 import {
     canSynthesizeSpeech,
     cleanTextForTtsProvider,
+    stripTtsMarkupForDisplay,
     synthesizeSpeech,
 } from '../../utils/ttsRouter';
 import { planNovelLoadMore } from '../../utils/dateSessionHistory';
 import { getPendingReplyText } from '../../utils/pendingReply';
+import { fetchBlobForShare } from '../../utils/shareExport';
+import VoiceFavoriteActionSheet from '../voice/VoiceFavoriteActionSheet';
+import { getVoiceFavorite, makeVoiceFavoriteId, removeVoiceFavorite, saveVoiceFavorite } from '../../utils/voiceFavorites';
 
 // 语音情绪标记 [v:xxx]：跟立绘情绪 [emotion] 分开的独立通道。立绘的 happy 是
 // 夸张的表情、语音的 happy 是音色情绪，两者强度/语义差异大，不能一概而论。
@@ -131,7 +135,15 @@ const NOVEL_HISTORY_FETCH_STEP = 220;
 const NOVEL_MESSAGE_LOAD_STEP = 40;
 const REQUIRED_EMOTIONS_SET = ['normal', 'happy', 'angry', 'sad', 'shy'];
 
-const DateSession: React.FC<DateSessionProps> = ({ 
+type DateSpeechResult = { url: string; spokenText: string };
+type DateVoiceFavoriteTarget = {
+    sourceKey: string;
+    originalText: string;
+    sourceTimestamp: number;
+    voiceEmotion?: string;
+};
+
+const DateSession: React.FC<DateSessionProps> = ({
     onLoadMoreHistory,
     historyLoadLimit = 0,
     historyReachedEnd = true,
@@ -202,7 +214,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     const [dateVoicePlaying, setDateVoicePlaying] = useState(false);
     const [galVoiceLoading, setGalVoiceLoading] = useState(false);
     const [showVoiceLangPicker, setShowVoiceLangPicker] = useState(false);
-    const voiceCacheRef = useRef<Record<string, string>>({});
+    const voiceCacheRef = useRef<Record<string, DateSpeechResult>>({});
     const [novelVoiceLoading, setNovelVoiceLoading] = useState<Set<string>>(new Set());
     const [novelPlayingId, setNovelPlayingId] = useState<string | null>(null);
     const [novelVisibleCount, setNovelVisibleCount] = useState(NOVEL_MESSAGE_WINDOW_SIZE);
@@ -213,11 +225,16 @@ const DateSession: React.FC<DateSessionProps> = ({
     // voice effect (which keys off currentText only). undefined = 不传情绪，自然朗读。
     // A ref so it doesn't churn the effect's deps.
     const currentLineEmotionRef = useRef<string | undefined>(undefined);
+    const [voiceFavoriteTarget, setVoiceFavoriteTarget] = useState<DateVoiceFavoriteTarget | null>(null);
+    const [voiceFavoriteSaved, setVoiceFavoriteSaved] = useState(false);
+    const [voiceFavoriteBusy, setVoiceFavoriteBusy] = useState(false);
+    const voiceFavoriteLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const voiceFavoriteLongPressTriggered = useRef(false);
 
     const VOICE_LANG_LABELS: Record<string, string> = { en: 'English', ja: '日本語', ko: '한국어', fr: 'Français', es: 'Español' };
     const VOICE_LANG_OPTIONS = [{v:'',l:'默认'},{v:'en',l:'EN'},{v:'ja',l:'JP'},{v:'ko',l:'KR'},{v:'fr',l:'FR'},{v:'es',l:'ES'}];
 
-    const translateAndSpeak = async (text: string, emotion?: string): Promise<string | null> => {
+    const translateAndSpeak = async (text: string, emotion?: string): Promise<DateSpeechResult | null> => {
         if (!canSynthesizeSpeech(char, apiConfig)) return null;
         try {
             let ttsText = cleanTextForTtsProvider(text, apiConfig);
@@ -239,11 +256,15 @@ const DateSession: React.FC<DateSessionProps> = ({
                     if (translated) ttsText = translated;
                 } catch { /* use original */ }
             }
-            return await synthesizeSpeech(ttsText, char, apiConfig, {
+            const url = await synthesizeSpeech(ttsText, char, apiConfig, {
                 languageBoost: voiceLang || undefined,
                 groupId: apiConfig.minimaxGroupId || undefined,
                 emotion,
             });
+            return {
+                url,
+                spokenText: stripTtsMarkupForDisplay(ttsText, apiConfig),
+            };
         } catch (err: any) {
             console.warn('Date TTS failed:', err?.message);
             return null;
@@ -269,18 +290,18 @@ const DateSession: React.FC<DateSessionProps> = ({
         const cacheKey = dialogueText;
         const play = async () => {
             // Check cache first
-            let url = voiceCacheRef.current[cacheKey];
-            if (!url) {
+            let speech: DateSpeechResult | undefined = voiceCacheRef.current[cacheKey];
+            if (!speech) {
                 setGalVoiceLoading(true);
-                url = await translateAndSpeak(dialogueText, currentLineEmotionRef.current) || '';
+                speech = await translateAndSpeak(dialogueText, currentLineEmotionRef.current) || undefined;
                 if (cancelled) return;
                 setGalVoiceLoading(false);
-                if (!url) return;
-                voiceCacheRef.current[cacheKey] = url;
+                if (!speech) return;
+                voiceCacheRef.current[cacheKey] = speech;
             }
             if (cancelled) return;
             if (!dateAudioRef.current) dateAudioRef.current = new Audio();
-            dateAudioRef.current.src = url;
+            dateAudioRef.current.src = speech.url;
             dateAudioRef.current.onended = () => setDateVoicePlaying(false);
             dateAudioRef.current.play().catch(() => {});
             setDateVoicePlaying(true);
@@ -300,16 +321,16 @@ const DateSession: React.FC<DateSessionProps> = ({
         }
         const dialogueText = extractDialogueText(currentText);
         const cacheKey = dialogueText;
-        let url = voiceCacheRef.current[cacheKey];
-        if (!url) {
+        let speech: DateSpeechResult | undefined = voiceCacheRef.current[cacheKey];
+        if (!speech) {
             setGalVoiceLoading(true);
-            url = await translateAndSpeak(dialogueText, currentLineEmotionRef.current) || '';
+            speech = await translateAndSpeak(dialogueText, currentLineEmotionRef.current) || undefined;
             setGalVoiceLoading(false);
-            if (!url) { addToast('语音合成失败，请稍后重试', 'error'); return; }
-            voiceCacheRef.current[cacheKey] = url;
+            if (!speech) { addToast('语音合成失败，请稍后重试', 'error'); return; }
+            voiceCacheRef.current[cacheKey] = speech;
         }
         if (!dateAudioRef.current) dateAudioRef.current = new Audio();
-        dateAudioRef.current.src = url;
+        dateAudioRef.current.src = speech.url;
         dateAudioRef.current.onended = () => setDateVoicePlaying(false);
         dateAudioRef.current.play().catch(() => {});
         setDateVoicePlaying(true);
@@ -320,8 +341,8 @@ const DateSession: React.FC<DateSessionProps> = ({
     // 且命中同一条持久缓存（ttsCache/IndexedDB）——退出见面再进来点旧台词也能从本地缓存秒取，
     // 不必按不同的 key 重新联网合成。
     const handleNovelLinePlay = async (lineKey: string, dialogueText: string, voiceEmotion?: string) => {
-        const cachedUrl = voiceCacheRef.current[dialogueText];
-        if (cachedUrl) {
+        const cached = voiceCacheRef.current[dialogueText];
+        if (cached) {
             // Already have URL (from GAL or previous novel play), just play/pause
             if (!dateAudioRef.current) dateAudioRef.current = new Audio();
             if (novelPlayingId === lineKey) {
@@ -329,27 +350,121 @@ const DateSession: React.FC<DateSessionProps> = ({
                 setNovelPlayingId(null);
                 return;
             }
-            dateAudioRef.current.src = cachedUrl;
+            dateAudioRef.current.src = cached.url;
             dateAudioRef.current.onended = () => setNovelPlayingId(null);
             dateAudioRef.current.play().catch(() => {});
             setNovelPlayingId(lineKey);
             return;
         }
         setNovelVoiceLoading(prev => new Set(prev).add(lineKey));
-        const url = await translateAndSpeak(dialogueText, voiceEmotion);
+        const speech = await translateAndSpeak(dialogueText, voiceEmotion);
         setNovelVoiceLoading(prev => { const n = new Set(prev); n.delete(lineKey); return n; });
-        if (!url) { addToast('语音合成失败，请稍后重试', 'error'); return; }
-        voiceCacheRef.current[dialogueText] = url;
+        if (!speech) { addToast('语音合成失败，请稍后重试', 'error'); return; }
+        voiceCacheRef.current[dialogueText] = speech;
         if (!dateAudioRef.current) dateAudioRef.current = new Audio();
-        dateAudioRef.current.src = url;
+        dateAudioRef.current.src = speech.url;
         dateAudioRef.current.onended = () => setNovelPlayingId(null);
         dateAudioRef.current.play().catch(() => {});
         setNovelPlayingId(lineKey);
     };
 
+    const resolveCurrentDateVoiceTarget = (): DateVoiceFavoriteTarget | null => {
+        if (!currentText || !isDialogueLine(currentText)) return null;
+        const originalText = extractDialogueText(currentText);
+        for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+            const message = messages[messageIndex];
+            if (message.role !== 'assistant') continue;
+            const { rest: body } = extractObservation(message.content || '', { lenient: observeEnabled, custom: char.dateObserve?.custom });
+            const lines = body.split('\n');
+            for (let lineIndex = lines.length - 1; lineIndex >= 0; lineIndex--) {
+                const parsed = extractVoiceEmotionTag(lines[lineIndex]);
+                if (isDialogueLine(parsed.rest) && extractDialogueText(parsed.rest) === originalText) {
+                    return {
+                        sourceKey: `${char.id}:${message.id}-${lineIndex}`,
+                        originalText,
+                        sourceTimestamp: message.timestamp,
+                        voiceEmotion: parsed.voiceEmotion || currentLineEmotionRef.current,
+                    };
+                }
+            }
+        }
+        return {
+            sourceKey: `${char.id}:live:${makeVoiceFavoriteId('date', originalText)}`,
+            originalText,
+            sourceTimestamp: Date.now(),
+            voiceEmotion: currentLineEmotionRef.current,
+        };
+    };
+
+    const openDateVoiceFavorite = async (target: DateVoiceFavoriteTarget | null) => {
+        if (!target) return;
+        setVoiceFavoriteTarget(target);
+        setVoiceFavoriteBusy(false);
+        setVoiceFavoriteSaved(!!await getVoiceFavorite('date', target.sourceKey).catch(() => null));
+    };
+
+    const startDateVoiceLongPress = (event: React.TouchEvent, target: DateVoiceFavoriteTarget | null) => {
+        event.stopPropagation();
+        if (!target) return;
+        voiceFavoriteLongPressTriggered.current = false;
+        if (voiceFavoriteLongPressTimer.current) clearTimeout(voiceFavoriteLongPressTimer.current);
+        voiceFavoriteLongPressTimer.current = setTimeout(() => {
+            voiceFavoriteLongPressTriggered.current = true;
+            void openDateVoiceFavorite(target);
+        }, 450);
+    };
+
+    const endDateVoiceLongPress = (event: React.SyntheticEvent) => {
+        event.stopPropagation();
+        if (voiceFavoriteLongPressTimer.current) clearTimeout(voiceFavoriteLongPressTimer.current);
+        voiceFavoriteLongPressTimer.current = null;
+    };
+
+    const toggleDateVoiceFavorite = async () => {
+        const target = voiceFavoriteTarget;
+        if (!target || voiceFavoriteBusy) return;
+        setVoiceFavoriteBusy(true);
+        try {
+            if (voiceFavoriteSaved) {
+                await removeVoiceFavorite('date', target.sourceKey);
+                setVoiceFavoriteSaved(false);
+                addToast('已取消收藏语音', 'info');
+                return;
+            }
+            let speech: DateSpeechResult | undefined = voiceCacheRef.current[target.originalText];
+            if (!speech) {
+                speech = await translateAndSpeak(target.originalText, target.voiceEmotion) || undefined;
+                if (speech) voiceCacheRef.current[target.originalText] = speech;
+            }
+            if (!speech) throw new Error('语音合成失败，请稍后重试');
+            const blob = await fetchBlobForShare(speech.url, 'audio/mpeg');
+            await saveVoiceFavorite({
+                source: 'date',
+                sourceKey: target.sourceKey,
+                charId: char.id,
+                charName: char.name,
+                sourceTimestamp: target.sourceTimestamp,
+                originalText: target.originalText,
+                spokenText: speech.spokenText !== target.originalText ? speech.spokenText : undefined,
+                language: voiceLang || undefined,
+                blob,
+            });
+            setVoiceFavoriteSaved(true);
+            addToast('已收藏见面语音', 'success');
+        } catch (error: any) {
+            addToast(error?.message || '收藏失败，请检查浏览器存储空间', 'error');
+        } finally {
+            setVoiceFavoriteBusy(false);
+        }
+    };
+
     // Back Handler
     useEffect(() => {
         const unregister = registerBackHandler(() => {
+            if (voiceFavoriteTarget) {
+                if (!voiceFavoriteBusy) setVoiceFavoriteTarget(null);
+                return true;
+            }
             if (showSettings) {
                 setShowSettings(false);
                 return true;
@@ -367,7 +482,7 @@ const DateSession: React.FC<DateSessionProps> = ({
             return true;
         });
         return unregister;
-    }, [showSettings, showMenu, showExitModal, registerBackHandler]);
+    }, [voiceFavoriteTarget, voiceFavoriteBusy, showSettings, showMenu, showExitModal, registerBackHandler]);
 
     const dateEmotionKeys = [...REQUIRED_EMOTIONS_SET, ...(char.customDateSprites || [])];
 
@@ -557,6 +672,10 @@ const DateSession: React.FC<DateSessionProps> = ({
     }, [lastAssistantContent]);
 
     const handleScreenClick = (e: React.MouseEvent) => {
+        if (voiceFavoriteLongPressTriggered.current) {
+            voiceFavoriteLongPressTriggered.current = false;
+            return;
+        }
         if ((e.target as HTMLElement).closest('button, input, textarea, .control-panel')) return;
         // 菜单展开时，点击场景任意处先收起菜单，不推进对话
         if (showMenu) {
@@ -994,13 +1113,43 @@ const DateSession: React.FC<DateSessionProps> = ({
                                                 const lineIsDialogue = isDialogueLine(line);
                                                 const lineKey = `${msg.id}-${idx}`;
                                                 const isOpeningMsg = msg.metadata?.isOpening === true;
+                                                const parsedVoiceLine = extractVoiceEmotionTag(line);
+                                                const dialogueText = extractDialogueText(parsedVoiceLine.rest);
+                                                const voiceTarget: DateVoiceFavoriteTarget = {
+                                                    sourceKey: `${char.id}:${lineKey}`,
+                                                    originalText: dialogueText,
+                                                    sourceTimestamp: msg.timestamp,
+                                                    voiceEmotion: parsedVoiceLine.voiceEmotion,
+                                                };
                                                 return (
-                                                    <div key={idx} className="flex items-start gap-1 mb-4 last:mb-0">
+                                                    <div
+                                                        key={idx}
+                                                        className="flex items-start gap-1 mb-4 last:mb-0"
+                                                        onClick={(e) => {
+                                                            if (!voiceFavoriteLongPressTriggered.current) return;
+                                                            e.stopPropagation();
+                                                            voiceFavoriteLongPressTriggered.current = false;
+                                                        }}
+                                                        onTouchStart={voiceEnabled && lineIsDialogue && !isOpeningMsg ? (e) => startDateVoiceLongPress(e, voiceTarget) : undefined}
+                                                        onTouchMove={voiceEnabled && lineIsDialogue && !isOpeningMsg ? endDateVoiceLongPress : undefined}
+                                                        onTouchEnd={voiceEnabled && lineIsDialogue && !isOpeningMsg ? endDateVoiceLongPress : undefined}
+                                                        onMouseDown={voiceEnabled && lineIsDialogue && !isOpeningMsg ? (e) => e.stopPropagation() : undefined}
+                                                        onContextMenu={voiceEnabled && lineIsDialogue && !isOpeningMsg ? (e) => { e.preventDefault(); e.stopPropagation(); void openDateVoiceFavorite(voiceTarget); } : undefined}
+                                                    >
                                                         <p className={`flex-1 whitespace-pre-wrap font-serif text-[18px] text-justify leading-loose tracking-wide pl-4 ${char.dateLightReading ? 'text-stone-700 border-l-2 border-stone-200' : 'text-slate-200 drop-shadow-md border-l-2 border-white/10'}`}>{cleanLine}</p>
                                                         {/* Voice button: only for dialogue lines, not opening */}
                                                         {voiceEnabled && lineIsDialogue && !isOpeningMsg && (
                                                             <button
-                                                                onClick={(e) => { e.stopPropagation(); const { voiceEmotion: lineVoiceEmotion, rest: lineRest } = extractVoiceEmotionTag(line); handleNovelLinePlay(lineKey, extractDialogueText(lineRest), lineVoiceEmotion); }}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (voiceFavoriteLongPressTriggered.current) { voiceFavoriteLongPressTriggered.current = false; return; }
+                                                                    handleNovelLinePlay(lineKey, dialogueText, parsedVoiceLine.voiceEmotion);
+                                                                }}
+                                                                onTouchStart={(e) => startDateVoiceLongPress(e, voiceTarget)}
+                                                                onTouchMove={endDateVoiceLongPress}
+                                                                onTouchEnd={endDateVoiceLongPress}
+                                                                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); void openDateVoiceFavorite(voiceTarget); }}
+                                                                title="播放；长按可收藏"
                                                                 className={`shrink-0 mt-2 w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90 select-none ${
                                                                     novelPlayingId === lineKey
                                                                         ? (char.dateLightReading ? 'bg-emerald-100 text-emerald-600' : 'bg-emerald-500/20 text-emerald-300')
@@ -1036,13 +1185,28 @@ const DateSession: React.FC<DateSessionProps> = ({
                     </div>
                     {!isTyping && (
                         <div className="absolute inset-x-0 bottom-8 z-30 flex justify-center">
-                            <div className="w-[90%] max-w-lg bg-black/60 backdrop-blur-xl rounded-2xl border border-white/10 p-6 min-h-[140px] shadow-2xl animate-slide-up hover:bg-black/70 cursor-pointer">
+                            <div
+                                className="w-[90%] max-w-lg bg-black/60 backdrop-blur-xl rounded-2xl border border-white/10 p-6 min-h-[140px] shadow-2xl animate-slide-up hover:bg-black/70 cursor-pointer"
+                                onTouchStart={voiceEnabled && !isTextAnimating && !isShowingOpening && isDialogueLine(currentText) ? (e) => startDateVoiceLongPress(e, resolveCurrentDateVoiceTarget()) : undefined}
+                                onTouchMove={voiceEnabled && !isTextAnimating && !isShowingOpening && isDialogueLine(currentText) ? endDateVoiceLongPress : undefined}
+                                onTouchEnd={voiceEnabled && !isTextAnimating && !isShowingOpening && isDialogueLine(currentText) ? endDateVoiceLongPress : undefined}
+                                onContextMenu={voiceEnabled && !isTextAnimating && !isShowingOpening && isDialogueLine(currentText) ? (e) => { e.preventDefault(); e.stopPropagation(); void openDateVoiceFavorite(resolveCurrentDateVoiceTarget()); } : undefined}
+                            >
                                 <div className="absolute -top-3 left-6 flex items-center gap-2">
                                     <div className="bg-white/90 text-black px-4 py-1 rounded-sm text-xs font-bold tracking-widest uppercase shadow-[0_4px_10px_rgba(0,0,0,0.3)] transform -skew-x-12">{char.name}</div>
                                     {/* Voice play button next to name */}
                                     {voiceEnabled && !isTextAnimating && !isShowingOpening && isDialogueLine(currentText) && (
                                         <button
-                                            onClick={(e) => { e.stopPropagation(); handleGalVoiceToggle(); }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (voiceFavoriteLongPressTriggered.current) { voiceFavoriteLongPressTriggered.current = false; return; }
+                                                handleGalVoiceToggle();
+                                            }}
+                                            onTouchStart={(e) => startDateVoiceLongPress(e, resolveCurrentDateVoiceTarget())}
+                                            onTouchMove={endDateVoiceLongPress}
+                                            onTouchEnd={endDateVoiceLongPress}
+                                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); void openDateVoiceFavorite(resolveCurrentDateVoiceTarget()); }}
+                                            title="播放；长按可收藏"
                                             className={`w-6 h-6 rounded-full flex items-center justify-center transition-all active:scale-90 ${dateVoicePlaying ? 'bg-white/30 text-white/90' : 'bg-white/10 text-white/40 hover:bg-white/20'}`}
                                         >
                                             {galVoiceLoading ? (
@@ -1100,6 +1264,16 @@ const DateSession: React.FC<DateSessionProps> = ({
                     <DateSettings char={char} onBack={() => setShowSettings(false)} />
                 </div>
             )}
+
+            <VoiceFavoriteActionSheet
+                open={!!voiceFavoriteTarget}
+                favorited={voiceFavoriteSaved}
+                busy={voiceFavoriteBusy}
+                title="见面语音"
+                preview={voiceFavoriteTarget?.originalText}
+                onToggle={() => void toggleDateVoiceFavorite()}
+                onClose={() => { if (!voiceFavoriteBusy) setVoiceFavoriteTarget(null); }}
+            />
 
             {/* Exit Modal */}
             <Modal isOpen={showExitModal} title="暂时离开?" onClose={() => setShowExitModal(false)} footer={<div className="flex gap-3 w-full"><button onClick={() => setShowExitModal(false)} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-600 font-bold">留在这里</button><button onClick={handleExitClick} className="flex-1 py-3 bg-slate-800 text-white rounded-2xl font-bold">保存并退出</button></div>}>

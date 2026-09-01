@@ -39,6 +39,7 @@ import CharacterEntryTransition from '../components/chat/CharacterEntryTransitio
 import ChromeCssEditor from '../components/chat/ChromeCssEditor';
 import ChatInputArea from '../components/chat/ChatInputArea';
 import MemoryRepairPortal from '../components/chat/MemoryRepairPortal';
+import VoiceFavoritesPortal from '../components/chat/VoiceFavoritesPortal';
 import ChatModals from '../components/chat/ChatModals';
 import ImageLightbox from '../components/chat/ImageLightbox';
 import { downloadChatImage } from '../utils/imageDownload';
@@ -65,6 +66,13 @@ import { resolveFishAudioApiKey, stripFishMarkupForDisplay, cleanTextForTtsFish 
 // ↑ 保留仅供其它功能使用；语音合成统一走 ttsRouter 的 provider-aware 入口。
 import { CollaborationStore } from '../features/collaboration/store';
 import { resolveTtsProvider } from '../utils/ttsProvider';
+import {
+    VOICE_FAVORITES_CHANGED_EVENT,
+    getVoiceFavorite,
+    listVoiceFavorites,
+    removeVoiceFavorite,
+    saveVoiceFavorite,
+} from '../utils/voiceFavorites';
 import { isInstantConfigReady, loadInstantConfig } from '../utils/instantPushClient';
 import { resolveActiveSound, playWhiteboxSound, unlockWhiteboxAudio, parseWhiteboxSound, upsertWhiteboxSound, stripWhiteboxSoundDirective, WhiteboxSound } from '../utils/whiteboxSound';
 import WhiteboxSoundEditor from '../components/chat/WhiteboxSoundEditor';
@@ -156,6 +164,7 @@ const Chat: React.FC = () => {
     const [collaborationOpen, setCollaborationOpen] = useState(false);
     const [collaborationPreviewAssetId, setCollaborationPreviewAssetId] = useState<string | null>(null);
     const [memoryRepairOpen, setMemoryRepairOpen] = useState(false);
+    const [voiceFavoritesOpen, setVoiceFavoritesOpen] = useState(false);
     
     // Emoji State
     const [emojis, setEmojis] = useState<Emoji[]>([]);
@@ -400,12 +409,22 @@ const Chat: React.FC = () => {
     });
 
     // --- Voice TTS for chat messages ---
-    interface VoiceData { url: string; originalText: string; spokenText?: string; lang?: string; }
+    interface VoiceData { url: string; originalText: string; spokenText?: string; lang?: string; favorite?: boolean; }
     // Persisted shape (IndexedDB assets store). `blob` is the raw audio;
     // `remoteUrl` is the fallback when fetching the MiniMax CDN blob was blocked by CORS.
-    interface StoredVoice { blob?: Blob; remoteUrl?: string; originalText: string; spokenText?: string; lang?: string; }
+    interface StoredVoice {
+        blob?: Blob;
+        remoteUrl?: string;
+        favorite?: boolean;
+        originalText: string;
+        spokenText?: string;
+        lang?: string;
+    }
+    type GeneratedVoiceData = VoiceData & { blob: Blob | null };
     const voiceAssetKey = (msgId: number) => `voice_msg_${msgId}`;
+    const chatFavoriteSourceKey = (msg: Pick<Message, 'charId' | 'id'>) => `${msg.charId}:${msg.id}`;
     const [voiceDataMap, setVoiceDataMap] = useState<Record<number, VoiceData>>({});
+    const [chatFavoriteKeys, setChatFavoriteKeys] = useState<Set<string>>(new Set());
     const [voiceLoading, setVoiceLoading] = useState<Set<number>>(new Set());
     const [playingMsgId, setPlayingMsgId] = useState<number | null>(null);
     const chatAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -431,8 +450,8 @@ const Chat: React.FC = () => {
     const persistVoice = async (msgId: number, url: string, blob: Blob | null, originalText: string, spokenText: string | undefined, lang: string | undefined) => {
         try {
             const stored: StoredVoice = blob
-                ? { blob, originalText, spokenText, lang }
-                : { remoteUrl: url, originalText, spokenText, lang };
+                ? { blob, originalText, spokenText, lang, favorite: false }
+                : { remoteUrl: url, originalText, spokenText, lang, favorite: false };
             await DB.saveAssetRaw(voiceAssetKey(msgId), stored);
         } catch (e) {
             console.warn('[Chat] persist voice failed', e);
@@ -512,10 +531,10 @@ const Chat: React.FC = () => {
         catch { try { return await attempt(); } catch { return ''; } }
     };
 
-    const handleManualTts = async (msg: Message, autoTriggered = false) => {
-        if (voiceLoading.has(msg.id)) return;
+    const handleManualTts = async (msg: Message, autoTriggered = false): Promise<GeneratedVoiceData | null> => {
+        if (voiceLoading.has(msg.id)) return null;
         if (voiceDataMap[msg.id]) {
-            if (autoTriggered) return;
+            if (autoTriggered) return null;
             // 手动点「转换语音」= 用户要求重新生成（典型场景：编辑了消息内容后）。
             // 丢掉这条旧语音再走正常合成；文本没变时会命中共享 TTS 缓存，不会重复请求 API。
             discardVoiceForMessages([msg.id]);
@@ -530,7 +549,7 @@ const Chat: React.FC = () => {
         const voiceEmotion = parsedVoice.emotion;
 
         // Auto-TTS: only generate voice when AI explicitly used <语音> tag
-        if (autoTriggered && !parsedVoice.hasVoiceTag) return;
+        if (autoTriggered && !parsedVoice.hasVoiceTag) return null;
         // F12 调试：打印 LLM 这条消息的带标签原文，方便核对语音标签写法是否正确。
         // 放在上面那道门之后：即时对话的扫描窗里每来一条消息都要重扫一遍，
         // 搁在门前的话没有语音标签的普通消息会被反复打印，控制台直接刷屏。
@@ -550,7 +569,7 @@ const Chat: React.FC = () => {
                         : '该角色未配置 MiniMax 语音，无法播放真实语音，可点「转文字」查看内容';
                 addToast(tip, 'info');
             }
-            return;
+            return null;
         }
 
         setVoiceLoading(prev => new Set(prev).add(msg.id));
@@ -590,12 +609,12 @@ const Chat: React.FC = () => {
                 if (hasBilingual && voiceLang) {
                     const langAText = cleanTextForTtsProvider(msg.content.substring(0, bilingualIdx), apiConfig);
                     const langBText = stripTtsMarkupForDisplay(msg.content.substring(bilingualIdx + '%%BILINGUAL%%'.length), apiConfig);
-                    if (!langAText || langAText.length < 2) return;
+                    if (!langAText || langAText.length < 2) return null;
                     spokenText = langAText;
                     originalText = langBText || '';
                 } else {
                     spokenText = cleanTextForTtsProvider(msg.content, apiConfig);
-                    if (!spokenText || spokenText.length < 2) return;
+                    if (!spokenText || spokenText.length < 2) return null;
                     originalText = stripTtsMarkupForDisplay(spokenText, apiConfig) || spokenText;
                     if (voiceLang) {
                         const langLabel = voiceLanguagePromptLabel(voiceLang);
@@ -605,7 +624,7 @@ const Chat: React.FC = () => {
                 }
             }
 
-            if (!spokenText || spokenText.length < 2) return;
+            if (!spokenText || spokenText.length < 2) return null;
 
             const { url: blobUrl, blob } = await synthesizeSpeechDetailed(spokenText, char, apiConfig, {
                 languageBoost: voiceLang || undefined,
@@ -629,12 +648,61 @@ const Chat: React.FC = () => {
                 chatAudioRef.current.play().catch(() => {});
                 setPlayingMsgId(msg.id);
             }
+            return { url: blobUrl, originalText, spokenText: storedSpokenText, lang: storedLang, blob };
         } catch (err: any) {
             // 记一笔失败：自动那条路下次扫到就跳过（见 voiceFailedRef 的说明）。
             voiceFailedRef.current.add(msg.id);
             addToast(`语音生成失败: ${err?.message || '未知错误'}`, 'error');
+            return null;
         } finally {
             setVoiceLoading(prev => { const next = new Set(prev); next.delete(msg.id); return next; });
+        }
+    };
+
+    const handleToggleVoiceFavorite = async (msg: Message) => {
+        if (!msg?.id) return;
+        try {
+            const sourceKey = chatFavoriteSourceKey(msg);
+            if (await getVoiceFavorite('chat', sourceKey)) {
+                await removeVoiceFavorite('chat', sourceKey);
+                setChatFavoriteKeys(prev => { const next = new Set(prev); next.delete(sourceKey); return next; });
+                setVoiceDataMap(prev => prev[msg.id] ? ({ ...prev, [msg.id]: { ...prev[msg.id], favorite: false } }) : prev);
+                addToast('已取消收藏语音', 'info');
+                return;
+            }
+            let current: GeneratedVoiceData | VoiceData | undefined = voiceDataMap[msg.id];
+            if (!current) current = await handleManualTts(msg, false) || undefined;
+            if (!current) return;
+            const stored = await DB.getAssetRaw(voiceAssetKey(msg.id)) as StoredVoice | null;
+
+            let blob: Blob | null = 'blob' in current && current.blob instanceof Blob
+                ? current.blob
+                : stored?.blob instanceof Blob ? stored.blob : null;
+            if (!blob) {
+                try { blob = await fetchBlobForShare(current.url, 'audio/mpeg'); } catch { /* handled below */ }
+            }
+            if (!blob) {
+                addToast('暂时拿不到这条语音的音频文件，无法收藏', 'error');
+                return;
+            }
+            await saveVoiceFavorite({
+                source: 'chat',
+                sourceKey,
+                charId: msg.charId,
+                charName: char?.name || '未知角色',
+                sourceTimestamp: msg.timestamp,
+                originalText: current.originalText,
+                spokenText: current.spokenText,
+                language: current.lang,
+                blob,
+            });
+            setChatFavoriteKeys(prev => new Set(prev).add(sourceKey));
+            setVoiceDataMap(prev => ({ ...prev, [msg.id]: { ...prev[msg.id], favorite: true } }));
+            addToast('已收藏语音，可在聊天加号里查看', 'success');
+            trackEvent('收藏语音条');
+        } catch (e) {
+            console.warn('[Chat] favorite voice failed', e);
+            addToast('收藏失败，请检查浏览器存储空间', 'error');
         }
     };
 
@@ -776,6 +844,12 @@ const Chat: React.FC = () => {
         let cancelled = false;
         (async () => {
             const updates: Record<number, VoiceData> = {};
+            const favoriteKeys = new Set(
+                (await listVoiceFavorites().catch(() => []))
+                    .filter(item => item.source === 'chat')
+                    .map(item => item.sourceKey),
+            );
+            if (!cancelled) setChatFavoriteKeys(favoriteKeys);
             for (const m of toFetch) {
                 try {
                     const stored = await DB.getAssetRaw(voiceAssetKey(m.id)) as StoredVoice | null;
@@ -796,13 +870,43 @@ const Chat: React.FC = () => {
                         DB.saveAssetRaw(voiceAssetKey(m.id), { ...stored, originalText: '' })
                             .catch(() => { /* 回写失败下次进聊天再试 */ });
                     }
-                    updates[m.id] = { url, originalText, spokenText: stored.spokenText, lang: stored.lang };
+                    const favorited = favoriteKeys.has(chatFavoriteSourceKey(m));
+                    updates[m.id] = { url, originalText, spokenText: stored.spokenText, lang: stored.lang, favorite: favorited };
                 } catch { /* ignore single-message hydration errors */ }
             }
             if (cancelled || !Object.keys(updates).length) return;
             setVoiceDataMap(prev => ({ ...updates, ...prev }));
         })();
         return () => { cancelled = true; };
+    }, [messages]);
+
+    // The archive can remove an item while this chat stays mounted. Keep the
+    // long-press menu's 收藏/取消收藏 label in sync without touching audio data.
+    useEffect(() => {
+        const syncFavoriteFlags = async () => {
+            const keys = new Set(
+                (await listVoiceFavorites().catch(() => []))
+                    .filter(item => item.source === 'chat')
+                    .map(item => item.sourceKey),
+            );
+            setChatFavoriteKeys(keys);
+            setVoiceDataMap(prev => {
+                let changed = false;
+                const next = { ...prev };
+                for (const message of messages) {
+                    const voice = next[message.id];
+                    if (!voice) continue;
+                    const favorite = keys.has(chatFavoriteSourceKey(message));
+                    if (!!voice.favorite !== favorite) {
+                        next[message.id] = { ...voice, favorite };
+                        changed = true;
+                    }
+                }
+                return changed ? next : prev;
+            });
+        };
+        window.addEventListener(VOICE_FAVORITES_CHANGED_EVENT, syncFavoriteFlags);
+        return () => window.removeEventListener(VOICE_FAVORITES_CHANGED_EVENT, syncFavoriteFlags);
     }, [messages]);
 
     // Revoke blob URLs when switching characters / unmounting to avoid leaks.
@@ -1575,6 +1679,7 @@ const Chat: React.FC = () => {
         switch (type) {
             case 'collaboration': setShowPanel('none'); setCollaborationOpen(true); break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
+            case 'voice-favorites': setShowPanel('none'); setVoiceFavoritesOpen(true); break;
             case 'transfer': setModalType('transfer'); break;
             case 'poke': handleSendText('[戳一戳]', 'interaction'); break;
             case 'archive': setModalType('archive-settings'); break;
@@ -3552,7 +3657,10 @@ const Chat: React.FC = () => {
                 voiceAvailable={characterHasVoice(char, apiConfig)}
                 onGenerateVoice={selectedMessage ? () => handleManualTts(selectedMessage) : undefined}
                 voiceDownloadable={!!(selectedMessage?.id && voiceDataMap[selectedMessage.id])}
+                voiceCollectable={!!(selectedMessage?.id && (voiceDataMap[selectedMessage.id] || parseVoiceOutput(selectedMessage.content || '').hasVoiceTag))}
                 onDownloadVoice={selectedMessage ? () => handleDownloadVoice(selectedMessage) : undefined}
+                voiceFavorited={!!(selectedMessage?.id && chatFavoriteKeys.has(chatFavoriteSourceKey(selectedMessage)))}
+                onToggleVoiceFavorite={selectedMessage ? () => handleToggleVoiceFavorite(selectedMessage) : undefined}
                 onRerollImage={selectedMessage?.type === 'image' && selectedMessage?.metadata?.imageGenDescription ? () => openRerollEdit(selectedMessage) : undefined}
                 onDownloadImage={selectedMessage?.type === 'image' ? () => handleDownloadImage(selectedMessage) : undefined}
                 onPreviewImage={selectedMessage?.type === 'image' ? () => handlePreviewImage(selectedMessage) : undefined}
@@ -4406,6 +4514,10 @@ const Chat: React.FC = () => {
                     />
                 </React.Suspense>
             )}
+            {voiceFavoritesOpen && (
+                <VoiceFavoritesPortal onClose={() => setVoiceFavoritesOpen(false)} />
+            )}
+
             <McdMiniApp
                 open={mcdAppOpen}
                 onClose={() => setMcdAppOpen(false)}
