@@ -236,7 +236,7 @@ Language: Chinese.`;
                         <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1">
                             <PawPrint className="w-4 h-4 text-pink-500" weight="fill" />
                             {ownerChar && (
-                                <img src={ownerChar.avatar} className="w-4 h-4 rounded-full border border-white shadow-sm" title={`${ownerChar.name}的宠物`} />
+                                <TokenImg value={ownerChar.avatar} className="w-4 h-4 rounded-full border border-white shadow-sm" title={`${ownerChar.name}的宠物`} />
                             )}
                         </div>
                     )}

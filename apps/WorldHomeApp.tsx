@@ -33,6 +33,7 @@ import { WORLD_API_KEY, WORLD_CUSTOM_STYLE_KEY } from '../utils/worldHome/localB
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { trackEvent } from '../utils/analytics';
 import type { WorldProfile, WorldEpisode, WorldHomeMode, WorldTimeMode, WorldHouse, WorldThread, WorldChatMessage, WorldNarrativeStyle, CharacterProfile, WorldCharBeat, APIConfig, ApiPreset } from '../types';
+import TokenImg from '../components/os/TokenImg';
 
 /**
  * 家园里「生成内容」的可编辑/删除目标（手机里的动态/备忘/聊天）。
@@ -213,7 +214,7 @@ const ThreadBubbles: React.FC<{
             <div key={m.id} className={`flex items-end gap-1.5 ${mine ? 'justify-end' : 'justify-start'}`}>
                 {!mine && (
                     avatarOf(m.fromId)
-                        ? <img src={avatarOf(m.fromId)} className="w-[22px] h-[22px] rounded-full object-cover shrink-0" alt="" />
+                        ? <TokenImg value={avatarOf(m.fromId)} className="w-[22px] h-[22px] rounded-full object-cover shrink-0" alt="" />
                         : <div className="w-[22px] h-[22px] rounded-full bg-white/15 flex items-center justify-center text-[11px] shrink-0">{isNpc(m.fromId) ? emojiOf(m.fromId) : m.fromName.slice(0, 1)}</div>
                 )}
                 <div className={`max-w-[78%] ${mine ? 'items-end' : 'items-start'} flex flex-col`}>
@@ -337,7 +338,7 @@ const PhoneModal: React.FC<{
                         {/* 机主栏 */}
                         <div className="px-4 pt-2 pb-3 flex items-center gap-2.5 shrink-0">
                             {avatar
-                                ? <img src={avatar} className="w-9 h-9 rounded-2xl object-cover ring-2 ring-white/20" alt="" />
+                                ? <TokenImg value={avatar} className="w-9 h-9 rounded-2xl object-cover ring-2 ring-white/20" alt="" />
                                 : <div className="w-9 h-9 rounded-2xl bg-white/15 flex items-center justify-center text-white font-bold">{ownerName.slice(0, 1)}</div>}
                             <div className="min-w-0">
                                 <div className="text-[13px] font-bold text-white truncate">{ownerName} 的手机</div>
@@ -369,7 +370,7 @@ const PhoneModal: React.FC<{
                                                 <div key={i} className="rounded-2xl bg-white/95 p-3 shadow-sm">
                                                     <div className="flex items-center gap-2">
                                                         {avatar
-                                                            ? <img src={avatar} className="w-6 h-6 rounded-full object-cover" alt="" />
+                                                            ? <TokenImg value={avatar} className="w-6 h-6 rounded-full object-cover" alt="" />
                                                             : <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-600">{ownerName.slice(0, 1)}</div>}
                                                         <div>
                                                             <div className="text-[10.5px] font-bold text-slate-800 leading-none">{ownerName}</div>
@@ -851,7 +852,7 @@ const WorldEditor: React.FC<{
                     {filterCharactersByGroup(characters, characterGroups, memberGroupId).map(c => (
                         <button key={c.id} onClick={() => toggleMember(c.id)}
                             className={`flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border transition-all ${w.memberIds.includes(c.id) ? 'bg-stone-900 border-stone-900 text-white shadow-md' : 'bg-white border-stone-200 text-stone-700'}`}>
-                            <img src={c.avatar} className="w-6 h-6 rounded-full object-cover" alt="" />
+                            <TokenImg value={c.avatar} className="w-6 h-6 rounded-full object-cover" alt="" />
                             <span className="text-[12px] font-semibold">{c.name}</span>
                         </button>
                     ))}

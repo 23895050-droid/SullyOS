@@ -43,6 +43,7 @@ import {
     makeCustomMemoryPalaceWaterline,
     resolveMemoryPalaceWaterline,
 } from '../utils/memoryPalace/waterline';
+import TokenImg from '../components/os/TokenImg';
 
 /** 手动总结面板：每页渲染多少条聊天记录（翻页，避免一次性塞几百条 DOM 卡顿） */
 const RANGE_PAGE_SIZE = 50;
@@ -2401,7 +2402,7 @@ export default function MemoryPalaceApp() {
                                                     background: '#f3f4f6',
                                                 }}
                                             >
-                                                <img src={c.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                <TokenImg value={c.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                 {palaceOn && (
                                                     <div
                                                         style={{
@@ -2829,7 +2830,7 @@ export default function MemoryPalaceApp() {
                                 border: '1px solid #e5e7eb', backgroundColor: '#fafafa',
                             }}
                         >
-                            <img src={c.avatar} alt="" style={{ width: 28, height: 28, borderRadius: 8, objectFit: 'cover' }} />
+                            <TokenImg value={c.avatar} alt="" style={{ width: 28, height: 28, borderRadius: 8, objectFit: 'cover' }} />
                             <div>
                                 <div style={{ fontSize: 12, fontWeight: 600 }}>{c.name}</div>
                                 <div style={{ fontSize: 10, color: '#7c3aed', display: 'inline-flex' }}>
@@ -4768,7 +4769,7 @@ create table if not exists memory_vectors (
                         onClick={() => setShowCharPicker(!showCharPicker)}
                         style={{ fontSize: 18, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
                     >
-                        <img src={char!.avatar} alt="" style={{ width: 24, height: 24, borderRadius: 8, objectFit: 'cover' }} />
+                        <TokenImg value={char!.avatar} alt="" style={{ width: 24, height: 24, borderRadius: 8, objectFit: 'cover' }} />
                         {char!.name} 的记忆宫殿
                         <span style={{ fontSize: 10, color: '#9ca3af' }}>▼</span>
                     </div>
@@ -4856,7 +4857,7 @@ create table if not exists memory_vectors (
                                         backgroundColor: c.id === activeCharacterId ? '#f3f0ff' : 'transparent',
                                     }}
                                 >
-                                    <img src={c.avatar} alt="" style={{ width: 32, height: 32, borderRadius: 10, objectFit: 'cover' }} />
+                                    <TokenImg value={c.avatar} alt="" style={{ width: 32, height: 32, borderRadius: 10, objectFit: 'cover' }} />
                                     <div>
                                         <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name}</div>
                                         <div style={{ fontSize: 10, color: '#9ca3af' }}>

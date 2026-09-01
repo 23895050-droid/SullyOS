@@ -458,7 +458,7 @@ const SpriteDialogBox: React.FC<SpriteDialogBoxProps> = ({
                     )}
                     <div className="flex items-center gap-2 mb-2">
                         {hasSprite && (
-                            <img src={char.avatar} className="w-6 h-6 rounded-full object-cover border border-white/30 shrink-0" alt="" />
+                            <TokenImg value={char.avatar} className="w-6 h-6 rounded-full object-cover border border-white/30 shrink-0" alt="" />
                         )}
                         <span className="text-white/80 text-xs font-bold">{char.name}</span>
                         {subInfo && <span className="ml-auto text-white/40 text-xs">{subInfo}</span>}
@@ -1447,7 +1447,7 @@ ${answerSummary}
                                 onClick={() => { setSelectedCharId(c.id); setPhase('loading_quiz'); }}
                                 className="flex flex-col items-center gap-2 p-3 bg-white rounded-2xl border border-amber-100 shadow-sm active:scale-95 transition-transform"
                             >
-                                <img src={c.avatar} className="w-12 h-12 rounded-full object-cover border-2 border-amber-200" alt={c.name} />
+                                <TokenImg value={c.avatar} className="w-12 h-12 rounded-full object-cover border-2 border-amber-200" alt={c.name} />
                                 <span className="text-xs font-bold text-slate-700 truncate w-full text-center">{c.name}</span>
                             </button>
                         ))}
@@ -1499,7 +1499,7 @@ ${answerSummary}
                     {quizData?.intro && (
                         <div className="mb-5 flex items-start gap-3 bg-amber-50 rounded-2xl p-4 border border-amber-100">
                             {char && (
-                                <img src={char.avatar} className="w-10 h-10 rounded-full shrink-0 object-cover border-2 border-amber-200" alt="" />
+                                <TokenImg value={char.avatar} className="w-10 h-10 rounded-full shrink-0 object-cover border-2 border-amber-200" alt="" />
                             )}
                             <p className="text-sm text-amber-900 leading-relaxed">{quizData.intro}</p>
                         </div>
@@ -1906,7 +1906,7 @@ ${answerSummary}
                         </div>
                         <div className="px-4 py-3 flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                {char && <img src={char.avatar} className="w-8 h-8 rounded-full object-cover border-2 border-amber-200" alt="" />}
+                                {char && <TokenImg value={char.avatar} className="w-8 h-8 rounded-full object-cover border-2 border-amber-200" alt="" />}
                                 <div>
                                     <p className="text-xs font-bold text-amber-800">{char?.name}</p>
                                     <p className="text-[10px] text-amber-400">2026.3.14 白色情人节</p>

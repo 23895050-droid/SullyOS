@@ -23,6 +23,7 @@ import { WhiteDaySession, isWhiteDayEventAvailable, WHITEDAY_RECORD_KEY } from '
 import { Like520Session, isLike520EventAvailable, isLike520Past, LIKE520_RECORD_KEY } from './Like520Event';
 import { injectMemoryPalace } from '../utils/memoryPalace/pipeline';
 import { markAmsgStateDirty } from '../utils/amsgStateSync';
+import TokenImg from './os/TokenImg';
 
 // ============================================================
 // 情人节立绘 Sprite 映射 (占位 emoji，等图片整理好后替换为图床URL)
@@ -737,7 +738,7 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
                                     onContextMenu={(e) => { e.preventDefault(); setDeleteTargetId(c.id); }}
                                     className="bg-white rounded-2xl p-4 shadow-sm border border-pink-100 active:scale-95 transition-transform flex flex-col items-center gap-3 hover:shadow-md hover:border-pink-200 relative"
                                 >
-                                    <img src={c.avatar} className="w-16 h-16 rounded-full object-cover shadow-sm border-2 border-pink-100" alt={c.name} />
+                                    <TokenImg value={c.avatar} className="w-16 h-16 rounded-full object-cover shadow-sm border-2 border-pink-100" alt={c.name} />
                                     <span className="font-bold text-slate-700 text-sm">{c.name}</span>
                                     {hasRecord && <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-pink-400" />}
                                 </button>
@@ -788,7 +789,7 @@ export const ValentineSession: React.FC<ValentineSessionProps> = ({ charId, onCl
                 <div className="flex flex-col items-center gap-6">
                     <div className="relative">
                         <div className="w-20 h-20 rounded-full border-2 border-pink-500/20 flex items-center justify-center">
-                            {char && <img src={char.avatar} className="w-16 h-16 rounded-full object-cover" alt="" />}
+                            {char && <TokenImg value={char.avatar} className="w-16 h-16 rounded-full object-cover" alt="" />}
                         </div>
                         <div className="absolute inset-0 w-20 h-20 rounded-full border-2 border-transparent border-t-pink-400 animate-spin" />
                     </div>
@@ -1263,7 +1264,7 @@ const SpecialEventCardImpl: React.FC<EventCardProps> = ({
                                             className={`flex flex-col items-center gap-2 p-3 bg-white/15 rounded-2xl border ${isPending ? 'border-white/80 ring-2 ring-white/60' : 'border-white/20'} active:scale-95 transition-transform relative`}
                                         >
                                             {c.avatar?.startsWith('http') || c.avatar?.startsWith('data:') ? (
-                                                <img src={c.avatar} loading="lazy" decoding="async" alt="" className={`w-12 h-12 rounded-full object-cover border-2 ${theme.avatarRing}`} />
+                                                <TokenImg value={c.avatar} loading="lazy" decoding="async" alt="" className={`w-12 h-12 rounded-full object-cover border-2 ${theme.avatarRing}`} />
                                             ) : (
                                                 <span className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl bg-white/10 border-2 ${theme.avatarRing}`}>{c.avatar || '🌸'}</span>
                                             )}

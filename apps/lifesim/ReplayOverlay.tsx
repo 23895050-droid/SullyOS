@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react';
 import StoryAttachments from './StoryAttachments';
 import { formatLifeSimActionDescription } from '../../utils/lifeSimTone';
+import TokenImg from '../../components/os/TokenImg';
 
 const TONE_STYLES: Record<string, { accent: string; label: string }> = {
     vengeful: { accent: '#b85050', label: '复仇' },
@@ -95,7 +96,7 @@ const NarrativeReplayOverlay: React.FC<{
                             overflow: 'hidden', flexShrink: 0,
                         }}>
                             {action.actorAvatar?.startsWith('http') || action.actorAvatar?.startsWith('data:')
-                                ? <img src={action.actorAvatar} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 3 }} alt="" />
+                                ? <TokenImg value={action.actorAvatar} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 3 }} alt="" />
                                 : action.actorAvatar ? <span style={{ fontSize: 18 }}>{action.actorAvatar}</span>
                                 : <Alien size={18} weight="bold" style={{ color: '#aaa' }} />}
                         </div>

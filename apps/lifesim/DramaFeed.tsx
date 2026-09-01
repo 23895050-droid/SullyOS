@@ -10,6 +10,7 @@ import {
 import StoryAttachments from './StoryAttachments';
 import { formatLifeSimActionDescription } from '../../utils/lifeSimTone';
 import { trackEvent } from '../../utils/analytics';
+import TokenImg from '../../components/os/TokenImg';
 
 const EVENT_ACCENTS: Record<string, string> = {
     fight: '#b85050',
@@ -108,7 +109,7 @@ const DramaEntry: React.FC<{ action: SimAction }> = ({ action }) => {
                     }}
                 >
                     {action.actorAvatar?.startsWith('http') || action.actorAvatar?.startsWith('data:')
-                        ? <img src={action.actorAvatar} style={{ width: 18, height: 18, objectFit: 'cover', borderRadius: 3 }} alt="" />
+                        ? <TokenImg value={action.actorAvatar} style={{ width: 18, height: 18, objectFit: 'cover', borderRadius: 3 }} alt="" />
                         : action.actorAvatar
                             ? <span style={{ fontSize: 11 }}>{action.actorAvatar}</span>
                             : <Alien size={10} weight="bold" style={{ color: '#aaa' }} />}

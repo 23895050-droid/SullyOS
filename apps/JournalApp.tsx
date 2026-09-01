@@ -15,6 +15,7 @@ import { getRoomLabel } from '../utils/memoryPalace/types';
 import { Sparkle, Archive } from '@phosphor-icons/react';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { trackEvent } from '../utils/analytics';
+import TokenImg from '../components/os/TokenImg';
 
 const INTRO_SEEN_KEY = 'journal_app_intro_seen_v4';
 
@@ -753,7 +754,7 @@ ${charPart}
                             }}
                         >
                             {s.url.startsWith('http') || s.url.startsWith('data') ? (
-                                <img src={s.url} className="w-20 h-20 object-contain pointer-events-none" draggable={false} />
+                                <TokenImg value={s.url} className="w-20 h-20 object-contain pointer-events-none" draggable={false} />
                             ) : s.url}
 
                             {/* Controls for Selected Sticker */}
@@ -943,7 +944,7 @@ ${charPart}
                         <div key={c.id} onClick={() => handleCharSelect(c)} className="aspect-[3/4] bg-white rounded-r-2xl rounded-l-md border-l-4 border-l-amber-800 shadow-[2px_4px_12px_rgba(0,0,0,0.08)] p-4 flex flex-col items-center justify-center gap-3 cursor-pointer active:scale-95 transition-all relative overflow-hidden group">
                             <div className="absolute inset-y-0 left-0 w-2 bg-gradient-to-r from-black/10 to-transparent"></div>
                             <div className="w-16 h-16 rounded-full p-[2px] border border-amber-100 bg-amber-50">
-                                <img src={c.avatar} className="w-full h-full rounded-full object-cover" />
+                                <TokenImg value={c.avatar} className="w-full h-full rounded-full object-cover" />
                             </div>
                             <span className="font-bold text-amber-900 text-sm">{c.name}</span>
                             <span className="text-[9px] text-amber-600 bg-amber-50 px-2 py-1 rounded-full font-mono uppercase tracking-wide">Journal</span>
@@ -1239,7 +1240,7 @@ ${charPart}
                                     onContextMenu={(e) => { e.preventDefault(); setDeletingSticker(s); }}
                                     className="p-2 bg-white/5 rounded-xl border border-white/5 flex items-center justify-center relative active:scale-95 transition-transform"
                                 >
-                                    <img src={s.url} className="w-8 h-8 object-contain pointer-events-none" />
+                                    <TokenImg value={s.url} className="w-8 h-8 object-contain pointer-events-none" />
                                 </button>
                             ))}
                         </div>
@@ -1269,7 +1270,7 @@ ${charPart}
                 footer={<div className="flex gap-2 w-full"><button onClick={() => setDeletingSticker(null)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-2xl font-bold">取消</button><button onClick={handleDeleteStickerAsset} className="flex-1 py-3 bg-red-500 text-white rounded-2xl font-bold">删除</button></div>}
             >
                 <div className="flex flex-col items-center gap-3 py-2">
-                    {deletingSticker && <img src={deletingSticker.url} className="w-16 h-16 object-contain rounded-lg bg-slate-100 border" />}
+                    {deletingSticker && <TokenImg value={deletingSticker.url} className="w-16 h-16 object-contain rounded-lg bg-slate-100 border" />}
                     <p className="text-sm text-slate-600">确定要删除这个贴纸素材吗？(不会影响已使用的日记)</p>
                 </div>
             </Modal>

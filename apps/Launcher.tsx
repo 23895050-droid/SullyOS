@@ -14,6 +14,7 @@ import { getDailyScheduleForChar } from '../utils/dailySchedule';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
 import { resolveCharTimeZone } from '../utils/timezone';
 import { trackEvent } from '../utils/analytics';
+import { useBlobRefUrl } from '../utils/blobRef';
 
 // --- Isolated Components to prevent full re-renders ---
 
@@ -124,6 +125,7 @@ const CharacterWidget = React.memo(({
 }) => {
     const { theme } = useOS();
     const acnh = theme.skin === 'animalcrossing'; // 动森彩蛋：会"说话"的村民卡
+    const resolvedCharAvatar = useBlobRefUrl(char?.avatar);
 
     // 动森：村民头像 + AC 对话气泡（显示最近消息，点开聊天）
     if (acnh) {
@@ -186,7 +188,7 @@ const CharacterWidget = React.memo(({
                  {!acnh && !paper && char?.avatar && (
                      <div className="absolute inset-0 opacity-25 pointer-events-none"
                          style={{
-                             backgroundImage: `url(${char.avatar})`,
+                             backgroundImage: `url(${resolvedCharAvatar})`,
                              backgroundSize: 'cover',
                              backgroundPosition: 'center',
                              filter: 'blur(30px) saturate(1.6)',

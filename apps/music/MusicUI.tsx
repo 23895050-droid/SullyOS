@@ -211,7 +211,8 @@ export const TinyAvatar: React.FC<{
   size?: number;
   ring?: string;
 }> = ({ avatar, name, size = 28, ring = C.sakura }) => {
-  const isImg = !!avatar && (avatar.startsWith('http') || avatar.startsWith('data:'));
+  const resolvedAvatar = useBlobRefUrl(avatar);
+  const isImg = !!resolvedAvatar && (resolvedAvatar.startsWith('http') || resolvedAvatar.startsWith('data:') || resolvedAvatar.startsWith('blob:'));
   const style: React.CSSProperties = {
     width: size,
     height: size,
@@ -219,7 +220,7 @@ export const TinyAvatar: React.FC<{
     boxShadow: `0 0 0 2px ${ring}22, 0 2px 8px ${ring}40`,
   };
   if (isImg) {
-    return <img src={avatar} alt="" className="rounded-full object-cover shrink-0" style={style} />;
+    return <img src={resolvedAvatar} alt="" className="rounded-full object-cover shrink-0" style={style} />;
   }
   return (
     <div

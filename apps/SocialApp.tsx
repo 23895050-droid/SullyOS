@@ -942,7 +942,7 @@ ${identityMap}
                     <div className="flex items-center justify-between px-4 bg-white/60 backdrop-blur-xl border-b border-white/20 shrink-0 relative z-20" style={{ paddingTop: 'max(12px, var(--safe-top))', paddingBottom: '12px' }}>
                         <button onClick={handleClosePost} className="p-2 -m-2 active:opacity-60"><Icons.Back /></button>
                         <div className="flex items-center gap-2">
-                            <img src={selectedPost.authorAvatar} className="w-8 h-8 rounded-full object-cover border border-white/50" />
+                            <TokenImg value={selectedPost.authorAvatar} className="w-8 h-8 rounded-full object-cover border border-white/50" />
                             <span className="text-sm font-bold text-slate-800">{selectedPost.authorName}</span>
                         </div>
                         <button onClick={() => { setShowShareModal(true); trackEvent('打开分享帖子面板'); }} className="p-2 -m-2 active:opacity-60"><Icons.Share onClick={() => setShowShareModal(true)} className="w-6 h-6 text-slate-800 cursor-pointer hover:text-[#ff2442]" /></button>
@@ -978,7 +978,7 @@ ${identityMap}
                                 {selectedPost.comments.length === 0 && !loadingComments && <div className="text-center text-slate-300 text-xs py-10">快来抢沙发...</div>}
                                 {selectedPost.comments.map(c => (
                                     <div key={c.id} className="flex gap-3 animate-fade-in group">
-                                        <img src={c.authorAvatar} className="w-9 h-9 rounded-full object-cover shrink-0 border border-slate-100" />
+                                        <TokenImg value={c.authorAvatar} className="w-9 h-9 rounded-full object-cover shrink-0 border border-slate-100" />
                                         <div className="flex-1">
                                             <div className="flex justify-between items-start">
                                                 <span className={`text-xs font-bold ${c.isCharacter ? 'text-slate-800' : 'text-slate-500'}`}>{c.authorName}</span>
@@ -1043,7 +1043,7 @@ ${identityMap}
                         {filterCharactersByGroup(characters, characterGroups, identityGroupId).map(c => (
                             <div key={c.id} className="space-y-3 pb-4 border-b border-slate-50">
                                 <div className="flex items-center gap-2">
-                                    <img src={c.avatar} className="w-6 h-6 rounded-full object-cover" />
+                                    <TokenImg value={c.avatar} className="w-6 h-6 rounded-full object-cover" />
                                     <span className="text-sm font-bold text-slate-700">{c.name}</span>
                                     <button onClick={() => addSubAccount(c.id)} className="ml-auto text-[10px] bg-[#ff2442] text-white px-2 py-1 rounded-full shadow-sm active:scale-95 transition-transform">+ 添加马甲</button>
                                 </div>
@@ -1099,7 +1099,7 @@ ${identityMap}
                 <div className="grid grid-cols-4 gap-4 p-2">
                     {filterCharactersByGroup(characters, characterGroups, shareGroupId).map(c => (
                         <button key={c.id} onClick={() => handleShare(c.id, false)} className="flex flex-col items-center gap-2 group">
-                            <img src={c.avatar} className="w-12 h-12 rounded-full object-cover border border-slate-100 group-active:scale-90 transition-transform" />
+                            <TokenImg value={c.avatar} className="w-12 h-12 rounded-full object-cover border border-slate-100 group-active:scale-90 transition-transform" />
                             <span className="text-[10px] text-slate-600 truncate w-full text-center">{c.name}</span>
                         </button>
                     ))}
@@ -1206,7 +1206,7 @@ ${identityMap}
                                     {userBgImage ? (
                                         <TokenImg value={userBgImage} className="w-full h-full object-cover" />
                                     ) : (
-                                        <img src={userProfile.avatar} className="w-full h-full object-cover blur-2xl opacity-60 scale-125" />
+                                        <TokenImg value={userProfile.avatar} className="w-full h-full object-cover blur-2xl opacity-60 scale-125" />
                                     )}
                                     <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                                         <span className="text-white text-xs font-bold bg-black/30 px-3 py-1 rounded-full backdrop-blur-md">更换背景</span>

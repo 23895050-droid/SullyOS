@@ -1451,7 +1451,7 @@ Answer in character. Be helpful and clear. If they're confused about a concept, 
                     {viewQuiz.aiReview && (
                         <div className="mb-6">
                             <div className="flex items-center gap-2 mb-3">
-                                {selectedChar && <img src={selectedChar.avatar} className="w-8 h-8 rounded-full object-cover border-2 border-emerald-500/30" />}
+                                {selectedChar && <TokenImg value={selectedChar.avatar} className="w-8 h-8 rounded-full object-cover border-2 border-emerald-500/30" />}
                                 <span className="text-emerald-400 text-sm font-bold">{selectedChar?.name || '助教'} 的锐评</span>
                             </div>
                             <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
@@ -1504,7 +1504,7 @@ Answer in character. Be helpful and clear. If they're confused about a concept, 
                         <span className="text-sm text-slate-500 font-bold">{quizLoading}</span>
                         {selectedChar && (
                             <div className="flex items-center gap-2 mt-2">
-                                <img src={selectedChar.avatar} className="w-8 h-8 rounded-full object-cover" />
+                                <TokenImg value={selectedChar.avatar} className="w-8 h-8 rounded-full object-cover" />
                                 <span className="text-xs text-slate-400">{selectedChar.name} 正在出题...</span>
                             </div>
                         )}
@@ -1614,7 +1614,7 @@ Answer in character. Be helpful and clear. If they're confused about a concept, 
                             {filterCharactersByGroup(characters, characterGroups, tutorGroupId).map(c => (
                                 <div key={c.id} onClick={() => setSelectedChar(c)} className={`flex flex-col items-center gap-2 cursor-pointer transition-opacity ${selectedChar?.id === c.id ? 'opacity-100' : 'opacity-50'}`}>
                                     <div className={`w-14 h-14 rounded-full p-[2px] ${selectedChar?.id === c.id ? 'border-2 border-emerald-500' : 'border border-slate-200'}`}>
-                                        <img src={c.avatar} className="w-full h-full rounded-full object-cover" />
+                                        <TokenImg value={c.avatar} className="w-full h-full rounded-full object-cover" />
                                     </div>
                                     <span className="text-[10px] font-bold text-slate-600">{c.name}</span>
                                 </div>

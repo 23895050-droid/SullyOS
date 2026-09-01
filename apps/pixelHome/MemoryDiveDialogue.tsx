@@ -10,6 +10,7 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import type { DiveDialogue } from './memoryDiveTypes';
+import { useBlobRefUrl } from '../../utils/blobRef';
 
 interface Props {
   current: DiveDialogue | null;
@@ -135,8 +136,9 @@ const MemoryDiveDialogue: React.FC<Props> = ({
     onAdvance();
   };
 
-  const isEmojiAvatar = !!charAvatar && !charAvatar.startsWith('http') && !charAvatar.startsWith('data:') && !charAvatar.startsWith('/');
-  const isImageAvatar = !!charAvatar && !isEmojiAvatar;
+  const resolvedCharAvatar = useBlobRefUrl(charAvatar);
+  const isEmojiAvatar = !!resolvedCharAvatar && !resolvedCharAvatar.startsWith('http') && !resolvedCharAvatar.startsWith('data:') && !resolvedCharAvatar.startsWith('/') && !resolvedCharAvatar.startsWith('blob:');
+  const isImageAvatar = !!resolvedCharAvatar && !isEmojiAvatar;
 
   const advanceGlyph =
     !isLastPage ? '▼' :
@@ -160,7 +162,7 @@ const MemoryDiveDialogue: React.FC<Props> = ({
       <div className="absolute left-1.5 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 w-16">
         <div className="w-16 h-16">
           {current?.speaker === 'character' && (
-            <AvatarFace src={charAvatar} isEmoji={isEmojiAvatar} isImage={isImageAvatar}
+            <AvatarFace src={resolvedCharAvatar} isEmoji={isEmojiAvatar} isImage={isImageAvatar}
               glyph="·" toneClass="border-violet-500/60 bg-violet-900/30" />
           )}
           {current?.speaker === 'narrator' && (

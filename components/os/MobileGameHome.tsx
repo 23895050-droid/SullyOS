@@ -8,6 +8,7 @@ import { getMobileGameArt } from './mobilegameArt';
 import { SCHEMES, hsl, schemePreview, type TgStyle } from './gotchiScheme';
 import { getChibi } from '../../utils/vrWorld/chibi';
 import { isDevDebugAvailable, subscribeDevDebugAvailability } from '../../utils/devDebug';
+import TokenImg from './TokenImg';
 
 // ===== 手游主题（mobilegame skin）=====
 // 风格：梦幻粉紫二次元手游首页（照搬参考图）。浅粉紫底 + 深紫文字 + 粉色强调，
@@ -373,7 +374,7 @@ const MobileGameHome: React.FC = () => {
                             style={{ background: `linear-gradient(135deg, ${PAL.pink}, ${PAL.peri}, ${PAL.lilac})`, boxShadow: '0 6px 16px rgba(150,120,200,0.35)' }}>
                             <div className="w-full h-full rounded-full overflow-hidden" style={{ border: '2px solid #fff' }}>
                                 {widgetChar?.avatar
-                                    ? <img src={widgetChar.avatar} className="w-full h-full object-cover" alt="char" loading="lazy" />
+                                    ? <TokenImg value={widgetChar.avatar} className="w-full h-full object-cover" alt="char" loading="lazy" />
                                     : <div className="w-full h-full flex items-center justify-center text-2xl" style={{ background: PAL.mist, color: PAL.lilac }}>✦</div>}
                             </div>
                         </div>

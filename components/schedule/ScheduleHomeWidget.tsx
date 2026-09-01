@@ -237,7 +237,7 @@ export const ScheduleHomeWidget: React.FC<ScheduleHomeWidgetProps> = ({
                         <div className="w-[64px] h-[64px] shrink-0 rounded-[22%] overflow-hidden bg-[#e8e2d6] flex items-center justify-center"
                             style={{ border: '3px solid #fff', boxShadow: '0 4px 10px -3px rgba(61,52,40,0.25)' }}>
                             {character?.avatar
-                                ? <img src={character.avatar} alt="" loading="lazy" className="w-full h-full object-cover" style={{ objectPosition: 'center 28%' }} />
+                                ? <TokenImg value={character.avatar} alt="" loading="lazy" className="w-full h-full object-cover" style={{ objectPosition: 'center 28%' }} />
                                 : <span className="text-lg font-bold" style={{ color: '#9f927d' }}>{character?.name?.[0] || '🍃'}</span>}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -361,8 +361,7 @@ export const ScheduleHomeWidget: React.FC<ScheduleHomeWidgetProps> = ({
                         }}
                     >
                         {character?.avatar ? (
-                            <img
-                                src={character.avatar}
+                            <TokenImg value={character.avatar}
                                 alt=""
                                 loading="lazy"
                                 className="w-full h-full object-cover"
@@ -571,7 +570,7 @@ export const ScheduleFullscreenViewer: React.FC<ScheduleFullscreenViewerProps> =
                                         }}
                                     >
                                         {c.avatar ? (
-                                            <img src={c.avatar} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                            <TokenImg value={c.avatar} alt="" className="w-full h-full object-cover" loading="lazy" />
                                         ) : (
                                             <div className="w-full h-full bg-white/10 flex items-center justify-center text-sm font-bold">
                                                 {c.name[0]}

@@ -6,6 +6,7 @@ import CreatorPartsUploader from './CreatorPartsUploader';
 import { useBlobRefUrl, putImageBlob, dataUrlToBlob, resolveRefToDataUrl } from '../../utils/blobRef';
 import { VR_DEFAULT_INTERVAL_MIN } from '../../utils/vrWorld/constants';
 import { CaretLeft, CaretRight, PencilSimple, ArrowsClockwise, Sparkle, X, FileArrowUp } from '@phosphor-icons/react';
+import TokenImg from '../os/TokenImg';
 
 // ============================================================
 // QQ捏人工坊（神经链接）—— 手办展示柜
@@ -403,7 +404,7 @@ const ChibiStudio: React.FC<{ charId: string; onClose: () => void }> = ({ charId
                         <p className="text-[10px] tracking-[3px] text-indigo-300/60">FIGURE STUDIO</p>
                     </div>
                     <div className="ml-auto flex items-center gap-2 rounded-full pl-1 pr-3 py-1 border border-white/15 bg-white/5">
-                        <img src={char.avatar} alt={char.name} className="w-6 h-6 rounded-full object-cover border border-white/30" />
+                        <TokenImg value={char.avatar} alt={char.name} className="w-6 h-6 rounded-full object-cover border border-white/30" />
                         <span className="text-[11px] text-indigo-100 font-medium max-w-[80px] truncate">{char.name}</span>
                     </div>
                 </div>
