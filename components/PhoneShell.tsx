@@ -510,7 +510,6 @@ const PhoneShell: React.FC = () => {
 
   useEffect(() => {
     if (!isDataLoaded) return;
-    if (useIOSStandaloneLayout) return;
     let cancelled = false;
     let idx = 0;
     const ric: (cb: () => void) => number = (window as any).requestIdleCallback
