@@ -18,7 +18,20 @@ import {
     MCP_REQUEST_TIMEOUT_MS,
     type McpServerConfig,
 } from './mcpClient';
-import { buildMcpOpenAITools, buildMcpRejectedToolsFallbackBody, buildMcpTextFallbackBody, formatMcpToolResult, MCP_RESULT_MAX_CHARS, sanitizeMcpLeadInText, shouldRetryMcpWithoutTools, stripTextFakedMcpCalls } from './mcpToolBridge';
+import {
+    buildMcpOpenAITools,
+    buildMcpRejectedToolsFallbackBody,
+    buildMcpSystemBlock,
+    buildMcpTextFallbackBody,
+    formatMcpToolResult,
+    MCP_CHAT_MAX_STALLED_ROUNDS,
+    MCP_CHAT_MAX_TOOL_LOOPS,
+    MCP_RESULT_MAX_CHARS,
+    MCP_TAIL_REMINDER,
+    sanitizeMcpLeadInText,
+    shouldRetryMcpWithoutTools,
+    stripTextFakedMcpCalls,
+} from './mcpToolBridge';
 import { completeGroupChatWithMcp } from './groupChat/mcp';
 
 const mkServer = (over: Partial<McpServerConfig>): McpServerConfig => ({
@@ -237,6 +250,38 @@ describe('MCP 高风险工具保护', () => {
         const result = await callMcpTool(server, 'delete_note', { id: 'n1' });
         expect(result.success).toBe(false);
         expect(fetchSpy).not.toHaveBeenCalled();
+    });
+});
+
+describe('MCP 多步任务策略', () => {
+    it('工具轮次使用 12 轮硬上限，并在连续两轮没有新结果时提前收口', () => {
+        expect(MCP_CHAT_MAX_TOOL_LOOPS).toBe(12);
+        expect(MCP_CHAT_MAX_STALLED_ROUNDS).toBe(2);
+    });
+
+    it('提示模型从检查推进到动作，并把用户本轮明确要求视为已确认', () => {
+        saveMcpServers([mkServer({ name: '游戏盒' })]);
+        const block = buildMcpSystemBlock('条条');
+        expect(block).toContain('随后立刻调用能推进目标的动作工具');
+        expect(block).toContain('不要反复读取同一份说明或状态');
+        expect(block).toContain('本轮已经明确要求执行，即视为已经确认');
+        expect(MCP_TAIL_REMINDER).toContain('本轮已明确要求的操作视为已确认');
+    });
+
+    it('文字兼容提示允许按结果继续下一步，但要求每次只输出一个调用', () => {
+        const body = buildMcpRejectedToolsFallbackBody({
+            messages: [{ role: 'user', content: '继续玩游戏' }],
+            tools: [{ type: 'function', function: {
+                name: 'play_game',
+                description: '执行游戏动作',
+                parameters: { type: 'object', properties: { action: { type: 'string' } } },
+            } }],
+            tool_choice: 'auto',
+        });
+        const prompt = body.messages.at(-1).content;
+        expect(prompt).toContain('每一步如果需要工具，只输出一行');
+        expect(prompt).toContain('选择下一步真正能推进目标的工具');
+        expect(prompt).toContain('不要反复读取同一份说明或状态');
     });
 });
 
