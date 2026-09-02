@@ -193,6 +193,13 @@ export function collectCharSettings(
         ),
         // 角色专属提示音同样只分「内置哪个 / 自己弄的」
         角色提示音: presetOrCustom(c.chatSound?.src, Object.keys(BUILTIN_SOUNDS), '没设'),
+        // 只问有没有角色选过粤语；不报角色名，也不拆成可关联的逐角色记录。
+        // fork 改编：陪伴触感（companionTouchSettings）与桌面陪伴形象块未搬运，只数语音三处。
+        粤语语音: characters.some(x => [
+            x.chatVoiceLang,
+            x.dateVoiceLang,
+            x.callVoiceLang,
+        ].includes('yue')) ? '有人选' : '没人选',
     };
 }
 
@@ -205,6 +212,11 @@ interface MemoryPalaceConfigShape {
     embedding?: { apiKey?: string };
     lightLLM?: { apiKey?: string };
     rerank?: { enabled?: boolean; apiKey?: string };
+    featureFlags?: {
+        recallRouter?: boolean;
+        interactionAdaptation?: boolean;
+        deepEngagement?: boolean;
+    };
 }
 
 /** 远程向量（记忆云端同步）配置里我们要看的字段。 */
@@ -339,6 +351,12 @@ export function collectFeatureFlags(src: FeatureSources): Record<string, string>
     // 「用起来了的角色」= 在面板里把开关打开过的（enabled:true 是用户表过态的真痕迹），
     // 与工具注入门同一个判定。
     const amsg2ActiveChars = src.characters.filter(isAmsg2EnabledForChar);
+    const contextFlags = src.memoryPalaceConfig.featureFlags;
+    const contextEnabledCount = [
+        contextFlags?.recallRouter,
+        contextFlags?.interactionAdaptation,
+        contextFlags?.deepEngagement,
+    ].filter(value => value === true).length;
 
     return {
         // ── 外部服务接入 ──
@@ -387,6 +405,16 @@ export function collectFeatureFlags(src: FeatureSources): Record<string, string>
             Boolean(src.remoteVectorConfig.supabaseUrl?.trim() && src.remoteVectorConfig.supabaseAnonKey?.trim()),
             Boolean(src.remoteVectorConfig.enabled),
         ),
+        智能语境: contextEnabledCount === 3 ? '全开' : contextEnabledCount > 0 ? '部分开' : '全关',
+
+        // ── 协同工作 ──
+        // 三个数字都来自 IndexedDB.count()，不会把窗口标题、对话正文或文件名读进统计层。
+        协同工作: src.collaborationUsage.sessions > 0 || src.collaborationUsage.messages > 0 || src.collaborationUsage.assets > 0
+            ? '用过'
+            : '没用过',
+        协同窗口数: bucketFewCount(src.collaborationUsage.sessions),
+        协同消息数: bucketFewCount(src.collaborationUsage.messages),
+        协同文件数: bucketFewCount(src.collaborationUsage.assets),
 
         // ── 模型线路 ──
         // 服务商是枚举，可以报；baseUrl / key / 模型名一律不报。
@@ -428,15 +456,6 @@ export function collectFeatureFlags(src: FeatureSources): Record<string, string>
         单独关了即时对话的角色数: bucketFewCount(
             amsg2ActiveChars.filter((ch) => ch.activeMsg2Config?.instantChatEnabled === false).length,
         ),
-
-        // ── 协同工作 ──
-        // 三个数字都来自 IndexedDB.count()，不会把窗口标题、对话正文或文件名读进统计层。
-        协同工作: src.collaborationUsage.sessions > 0 || src.collaborationUsage.messages > 0 || src.collaborationUsage.assets > 0
-            ? '用过'
-            : '没用过',
-        协同窗口数: bucketFewCount(src.collaborationUsage.sessions),
-        协同消息数: bucketFewCount(src.collaborationUsage.messages),
-        协同文件数: bucketFewCount(src.collaborationUsage.assets),
     };
 }
 
