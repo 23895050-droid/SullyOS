@@ -2022,6 +2022,7 @@ export const useChatAI = ({
                 userProfile,
                 emojis,
                 realtimeConfig,
+                groups,
                 contextMsgs,
                 fullMessages,
                 initialData: data,
