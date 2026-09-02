@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   OUR_FEATURE_SCOPES, OUR_BACKUP_FORMAT, OUR_BACKUP_FORMAT_VERSION,
   scopeLocalStorageKeys, scopeIncludesReceipts, collectBlobTokens,
-  exportOurData, importOurData, readOurBackupFile, isOurBackupPayload,
+  exportOurData, importOurData, surveyOurData, readOurBackupFile, isOurBackupPayload,
   type OurBackupPayload,
 } from './ourDataBackup';
 import type { ImageReceipt } from '../types';
@@ -42,7 +42,9 @@ const basePayload = (): OurBackupPayload => ({
 
 beforeEach(() => {
   localStorage.clear();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  vi.mocked(DB.getAllImageReceipts).mockResolvedValue([]);
+  vi.mocked(DB.saveImageReceipt).mockResolvedValue(undefined);
 });
 
 describe('功能面清单', () => {
@@ -117,6 +119,30 @@ describe('exportOurData', () => {
 
     expect(payload.blobs).toEqual({});
     expect(payload.missingBlobs).toEqual(['b_gone']);
+  });
+});
+
+describe('surveyOurData', () => {
+  it('有的列大小（大的在前）、没有的列 missing，总量 = 各 key 之和', async () => {
+    localStorage.setItem('couple_beauty_v1', 'x'.repeat(30));
+    localStorage.setItem('assistant_v1', 'y'.repeat(5));
+
+    const survey = await surveyOurData('all');
+
+    expect(survey.keys).toEqual([
+      { key: 'couple_beauty_v1', bytes: 30 },
+      { key: 'assistant_v1', bytes: 5 },
+    ]);
+    expect(survey.totalBytes).toBe(35);
+    expect(survey.missingKeys).toHaveLength(scopeLocalStorageKeys('all').length - 2);
+    expect(survey.receiptsCount).toBe(0);
+  });
+
+  it('近期接收条数跟范围走', async () => {
+    vi.mocked(DB.getAllImageReceipts).mockResolvedValue([receiptRow('img_r1'), receiptRow('img_r2')]);
+
+    expect((await surveyOurData('receipts')).receiptsCount).toBe(2);
+    expect((await surveyOurData('music')).receiptsCount).toBe(0);
   });
 });
 

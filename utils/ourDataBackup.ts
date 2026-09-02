@@ -115,6 +115,43 @@ export function isOurBackupPayload(v: unknown): v is OurBackupPayload {
   return true;
 }
 
+// ─── 盘点（导出前先看这台设备上有什么）────────────────────────────
+
+export interface OurDataSurveyKey {
+  key: string;
+  bytes: number;
+}
+
+export interface OurDataSurvey {
+  /** 清单里有数据的 key（按大小从大到小排） */
+  keys: OurDataSurveyKey[];
+  /** 清单里有、但这台设备上没有的 key */
+  missingKeys: string[];
+  receiptsCount: number;
+  /** localStorage 部分的总字节数（UTF-8 实测，含内嵌的 base64 图） */
+  totalBytes: number;
+}
+
+/** 盘点某个范围的数据：哪些 key 有、各多大、近期接收几条。导出就是照这些原样打包。 */
+export async function surveyOurData(scope: OurFeatureId | 'all'): Promise<OurDataSurvey> {
+  const keys: OurDataSurveyKey[] = [];
+  const missingKeys: string[] = [];
+  let totalBytes = 0;
+  for (const key of scopeLocalStorageKeys(scope)) {
+    const raw = localStorage.getItem(key);
+    if (raw === null) {
+      missingKeys.push(key);
+      continue;
+    }
+    const bytes = new Blob([raw]).size;
+    keys.push({ key, bytes });
+    totalBytes += bytes;
+  }
+  keys.sort((a, b) => b.bytes - a.bytes);
+  const receiptsCount = scopeIncludesReceipts(scope) ? (await DB.getAllImageReceipts()).length : 0;
+  return { keys, missingKeys, receiptsCount, totalBytes };
+}
+
 // ─── 导出 ─────────────────────────────────────────────────────────
 
 export async function exportOurData(scope: OurFeatureId | 'all'): Promise<OurBackupPayload> {

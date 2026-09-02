@@ -3,8 +3,8 @@
 // 走法：点导出 → 一个格式化 JSON 文件直接下载；点导入 → 选文件 → 看备份信息确认 → 导入 → 逐项报告。
 import React, { useRef, useState } from 'react';
 import {
-  exportOurData, downloadOurBackup, importOurData, readOurBackupFile,
-  OUR_FEATURE_SCOPES, type OurFeatureId, type OurBackupPayload, type OurImportReport,
+  exportOurData, downloadOurBackup, importOurData, surveyOurData, readOurBackupFile,
+  OUR_FEATURE_SCOPES, type OurFeatureId, type OurBackupPayload, type OurImportReport, type OurDataSurvey,
 } from '../../utils/ourDataBackup';
 
 type Status =
@@ -14,10 +14,18 @@ type Status =
   | { kind: 'picked'; payload: OurBackupPayload; fileName: string }
   | { kind: 'importing' }
   | { kind: 'imported'; report: OurImportReport; payload: OurBackupPayload }
+  | { kind: 'surveyed'; survey: OurDataSurvey }
   | { kind: 'error'; message: string };
 
 const scopeLabel = (id: OurFeatureId | 'all'): string =>
   id === 'all' ? '全部功能' : OUR_FEATURE_SCOPES.find((s) => s.id === id)?.label ?? id;
+
+const fmtSize = (bytes: number): string =>
+  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+// key → 功能名（盘点列表里把技术名翻成人话）
+const KEY_SCOPE_LABEL: Record<string, string> = {};
+for (const s of OUR_FEATURE_SCOPES) for (const k of s.localStorageKeys) KEY_SCOPE_LABEL[k] = s.label;
 
 const fmtTime = (iso: string): string => {
   const d = new Date(iso);
@@ -67,6 +75,15 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
     }
   };
 
+  const doSurvey = async () => {
+    try {
+      const survey = await surveyOurData(scope);
+      setStatus({ kind: 'surveyed', survey });
+    } catch {
+      setStatus({ kind: 'error', message: '盘点失败，请重试' });
+    }
+  };
+
   const doImport = async () => {
     if (status.kind !== 'picked') return;
     const { payload } = status;
@@ -100,6 +117,9 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
           {status.kind === 'importing' ? '导入中…' : '导入备份'}
         </button>
         <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" onChange={onPickFile} />
+        <button type="button" style={{ ...softBtn, color: '#9a7a8a', background: 'transparent', padding: '9px 8px' }} onClick={doSurvey}>
+          盘点数据
+        </button>
       </div>
 
       {status.kind === 'exported' && (
@@ -141,6 +161,31 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
             <div style={{ ...muted, color: '#c25a82' }}>图片恢复失败：{status.report.blobsFailed.join('、')}</div>
           )}
           {status.payload.missingBlobs?.length ? <div style={{ ...muted, color: '#c25a82' }}>备份里 {status.payload.missingBlobs.length} 个编号没有原图（见上），对应图是裂的。</div> : null}
+        </div>
+      )}
+
+      {status.kind === 'surveyed' && (
+        <div className="flex flex-col gap-1.5 rounded-xl px-3 py-2.5" style={{ background: '#faf7f8', border: '1px solid #f2d3e0' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#3a2a33' }}>
+            这台设备上：数据区 {status.survey.keys.length} 个（共 {fmtSize(status.survey.totalBytes)}）
+            {status.survey.receiptsCount > 0 && `、近期接收 ${status.survey.receiptsCount} 条`}
+          </div>
+          {status.survey.keys.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              {status.survey.keys.slice(0, 10).map((k) => (
+                <div key={k.key} className="flex items-center justify-between" style={{ fontSize: 11, color: '#3a2a33' }}>
+                  <span>{KEY_SCOPE_LABEL[k.key] ?? k.key} · {k.key}</span>
+                  <span style={{ color: k.bytes > 1024 * 1024 ? '#c25a82' : '#9a7a8a', fontVariantNumeric: 'tabular-nums' }}>{fmtSize(k.bytes)}</span>
+                </div>
+              ))}
+              {status.survey.keys.length > 10 && <div style={muted}>…还有 {status.survey.keys.length - 10} 个小的没列</div>}
+            </div>
+          )}
+          {status.survey.missingKeys.length > 0 && (
+            <div style={muted}>
+              这台设备上没有：{status.survey.missingKeys.map((k) => KEY_SCOPE_LABEL[k] ?? k).join('、')}
+            </div>
+          )}
         </div>
       )}
 
