@@ -4,16 +4,17 @@
 import React, { useRef, useState } from 'react';
 import {
   exportOurData, downloadOurBackup, importOurData, surveyOurData, surveyAllLocalStorage, readOurBackupFile, collectBlobTokens,
-  OUR_FEATURE_SCOPES, type OurFeatureId, type OurBackupPayload, type OurImportReport, type OurDataSurvey, type OurDataRawSurvey,
+  OUR_FEATURE_SCOPES, type OurFeatureId, type OurBackupPayload, type OurBackupPayloadV1, type OurBackupPayloadAny,
+  type OurBackupBundle, type OurImportReport, type OurDataSurvey, type OurDataRawSurvey,
 } from '../../utils/ourDataBackup';
 
 type Status =
   | { kind: 'idle' }
   | { kind: 'exporting' }
-  | { kind: 'exported'; payload: OurBackupPayload; sizeMb: number }
-  | { kind: 'picked'; payload: OurBackupPayload; fileName: string }
+  | { kind: 'exported'; payload: OurBackupPayload; zipBlob: Blob; sizeMb: number }
+  | { kind: 'picked'; bundle: OurBackupBundle; fileName: string }
   | { kind: 'importing' }
-  | { kind: 'imported'; report: OurImportReport; payload: OurBackupPayload }
+  | { kind: 'imported'; report: OurImportReport; payload: OurBackupPayloadAny }
   | { kind: 'surveyed'; survey: OurDataSurvey; raw?: OurDataRawSurvey }
   | { kind: 'error'; message: string };
 
@@ -35,16 +36,18 @@ const fmtTime = (iso: string): string => {
 };
 
 /** 备份文件里装了什么，一行说完 */
-const summaryLine = (p: OurBackupPayload): string =>
-  `${Object.keys(p.localStorage).length} 个数据区、${p.imageReceipts.length} 条近期接收、${Object.keys(p.blobs).length} 个文件`;
+const blobCount = (p: OurBackupPayloadAny): number =>
+  'blobIndex' in p && p.formatVersion === 2 ? p.blobIndex.length : Object.keys((p as OurBackupPayloadV1).blobs ?? {}).length;
+
+const summaryLine = (p: OurBackupPayloadAny): string =>
+  `${Object.keys(p.localStorage).length} 个数据区、${p.imageReceipts.length} 条近期接收、${blobCount(p)} 个文件`;
 
 const fromLabel = (keys: string[]): string =>
   keys.length === 0 ? '未知来源' : keys.map((k) => (k === 'image_receipts' ? '近期接收' : KEY_SCOPE_LABEL[k] ?? k)).join('、');
 
-/** 备份里谁占了大头：文字部分多大 + 最大的 3 个文件各自多大、被谁引用（一眼看出 20MB 是谁） */
-const backupDetail = (p: OurBackupPayload): string => {
+/** 备份里谁占了大头：文字部分多大 + 最大的 3 个文件各自多大、被谁引用（一眼看出大文件是谁） */
+const backupDetail = (p: OurBackupPayloadAny): string => {
   const lsBytes = Object.values(p.localStorage).reduce((s, v) => s + new Blob([v]).size, 0);
-  const blobTotal = Object.values(p.blobs).reduce((s, v) => s + v.length, 0);
   const sources = new Map<string, string[]>();
   for (const [key, v] of Object.entries(p.localStorage)) {
     for (const t of collectBlobTokens([v])) {
@@ -59,12 +62,19 @@ const backupDetail = (p: OurBackupPayload): string => {
     if (!arr.includes('image_receipts')) arr.push('image_receipts');
     sources.set(t, arr);
   }
-  const top = Object.entries(p.blobs)
-    .map(([t, dataUrl]) => ({ t, bytes: dataUrl.length, from: sources.get(t) ?? [] }))
-    .sort((a, b) => b.bytes - a.bytes)
-    .slice(0, 3)
-    .map((x) => `${fromLabel(x.from)}（${fmtSize(x.bytes)}）`);
+  const entries: Array<{ id: string; bytes: number; from: string[] }> = 'blobIndex' in p && p.formatVersion === 2
+    ? p.blobIndex.map((b) => ({ id: b.id, bytes: b.size, from: sources.get(b.id) ?? [] }))
+    : Object.entries((p as OurBackupPayloadV1).blobs ?? {}).map(([id, dataUrl]) => ({ id, bytes: dataUrl.length, from: sources.get(id) ?? [] }));
+  const blobTotal = entries.reduce((s, e) => s + e.bytes, 0);
+  const top = entries.sort((a, b) => b.bytes - a.bytes).slice(0, 3).map((x) => `${fromLabel(x.from)}（${fmtSize(x.bytes)}）`);
   return `文字部分 ${fmtSize(lsBytes)}；文件共 ${fmtSize(blobTotal)}，最大：${top.length > 0 ? top.join('、') : '无'}`;
+};
+
+/** 这台设备上清单里有但没有的 key（没用过就没有，不是丢数据） */
+const missingKeysLine = (p: OurBackupPayloadAny): string => {
+  const mk = (p as OurBackupPayload).missingKeys;
+  if (!mk || mk.length === 0) return '';
+  return `这台设备上没有：${mk.map((k) => KEY_SCOPE_LABEL[k] ?? k).join('、')}（没用过就没有，不是丢数据）`;
 };
 
 const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) => {
@@ -84,9 +94,9 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
   const doExport = async () => {
     setStatus({ kind: 'exporting' });
     try {
-      const payload = await exportOurData(scope);
-      downloadOurBackup(payload);
-      setStatus({ kind: 'exported', payload, sizeMb: JSON.stringify(payload, null, 2).length / 1024 / 1024 });
+      const { payload, zipBlob } = await exportOurData(scope);
+      downloadOurBackup(zipBlob, scope);
+      setStatus({ kind: 'exported', payload, zipBlob, sizeMb: zipBlob.size / 1024 / 1024 });
     } catch {
       setStatus({ kind: 'error', message: '导出失败，请重试' });
     }
@@ -97,8 +107,8 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
     e.target.value = '';
     if (!f) return;
     try {
-      const payload = await readOurBackupFile(f);
-      setStatus({ kind: 'picked', payload, fileName: f.name });
+      const bundle = await readOurBackupFile(f);
+      setStatus({ kind: 'picked', bundle, fileName: f.name });
     } catch (err) {
       setStatus({ kind: 'error', message: err instanceof Error ? err.message : '文件读不了' });
     }
@@ -116,17 +126,17 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
 
   const doImport = async () => {
     if (status.kind !== 'picked') return;
-    const { payload } = status;
+    const { bundle } = status;
     setStatus({ kind: 'importing' });
     try {
-      const report = await importOurData(payload);
-      setStatus({ kind: 'imported', report, payload });
+      const report = await importOurData(bundle);
+      setStatus({ kind: 'imported', report, payload: bundle.payload });
     } catch {
       setStatus({ kind: 'error', message: '导入失败，请重试' });
     }
   };
 
-  const missingNote = (payload: OurBackupPayload) =>
+  const missingNote = (payload: OurBackupPayloadAny) =>
     payload.missingBlobs?.length
       ? ` ⚠️ 备份里有 ${payload.missingBlobs.length} 个编号在柜子里已找不到原图（字段照样导入，只是那张图会是裂的）。`
       : '';
@@ -135,8 +145,8 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
     <div className="flex flex-col gap-2">
       <div style={muted}>
         {scope === 'all'
-          ? '把我们的功能（相机/相册/近期接收/NoxHome/小助手/音乐）数据打成一个 JSON 文件下载；导入把数据原样写回。与原版备份完全独立、互不影响。'
-          : `把「${scopeLabel(scope)}」的数据打成一个 JSON 文件下载；导入把数据原样写回。与原版备份完全独立、互不影响。`}
+          ? '把我们的功能（相机/相册/近期接收/NoxHome/小助手/音乐）数据打成一个 zip 文件下载（里面是格式化 JSON + 原文件，图片不压缩不转码）；导入把数据原样写回。与原版备份完全独立、互不影响。'
+          : `把「${scopeLabel(scope)}」的数据打成一个 zip 文件下载（里面是格式化 JSON + 原文件，图片不压缩不转码）；导入把数据原样写回。与原版备份完全独立、互不影响。`}
       </div>
 
       <div className="flex items-center gap-2">
@@ -146,7 +156,7 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
         <button type="button" style={softBtn} disabled={status.kind === 'importing'} onClick={() => fileRef.current?.click()}>
           {status.kind === 'importing' ? '导入中…' : '导入备份'}
         </button>
-        <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" onChange={onPickFile} />
+        <input ref={fileRef} type="file" accept=".zip,.json,application/zip,application/json" className="hidden" onChange={onPickFile} />
         <button type="button" style={{ ...softBtn, color: '#9a7a8a', background: 'transparent', padding: '9px 8px' }} onClick={doSurvey}>
           盘点数据
         </button>
@@ -158,15 +168,17 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
             ✅ 已下载备份（{scopeLabel(status.payload.scope)}，{summaryLine(status.payload)}，文件约 {status.sizeMb.toFixed(1)} MB）。{missingNote(status.payload)}
           </div>
           <div style={muted}>{backupDetail(status.payload)}</div>
+          {missingKeysLine(status.payload) && <div style={muted}>{missingKeysLine(status.payload)}</div>}
         </div>
       )}
 
       {status.kind === 'picked' && (
         <div className="flex flex-col gap-2 rounded-xl px-3 py-2.5" style={{ background: '#fff5f9' }}>
           <div style={{ fontSize: 11, color: '#3a2a33', lineHeight: 1.6 }}>
-            「{status.fileName}」：{fmtTime(status.payload.exportedAt)} 导出，范围 {scopeLabel(status.payload.scope)}，含 {summaryLine(status.payload)}。{missingNote(status.payload)}
+            「{status.fileName}」：{fmtTime(status.bundle.payload.exportedAt)} 导出，范围 {scopeLabel(status.bundle.payload.scope)}，含 {summaryLine(status.bundle.payload)}。{missingNote(status.bundle.payload)}
           </div>
-          <div style={muted}>{backupDetail(status.payload)}</div>
+          <div style={muted}>{backupDetail(status.bundle.payload)}</div>
+          {missingKeysLine(status.bundle.payload) && <div style={muted}>{missingKeysLine(status.bundle.payload)}</div>}
           <div style={muted}>导入会补写并覆盖同名数据（以备份为准），点击确认后开始。</div>
           <div className="flex items-center gap-2">
             <button type="button" style={accentBtn} onClick={doImport}>确认导入</button>

@@ -31,6 +31,21 @@ export function createCoupleStore<T extends { version: number; updatedAt: string
     // 保持默认
   }
   const listeners = new Set<() => void>();
+  // 导入备份后现场重读（同窗口 setItem 不触发 storage 事件；广播由 ourDataBackup 导入收尾发出，不用刷新页面）
+  if (typeof window !== 'undefined') {
+    window.addEventListener('our-backup-imported', () => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw) as T;
+          if (parsed && parsed.version === version) state = patch ? patch(parsed) : { ...defaults, ...parsed };
+        }
+      } catch {
+        // 保持现状
+      }
+      listeners.forEach((l) => l());
+    });
+  }
   return {
     get: () => state,
     set: (updater) => {

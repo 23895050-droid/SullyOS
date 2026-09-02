@@ -75,6 +75,14 @@ function load(): PeriodStore {
 let state = load();
 const listeners = new Set<() => void>();
 
+// 导入备份后现场重读（同窗口 setItem 不触发 storage 事件；广播由 ourDataBackup 导入收尾发出）
+if (typeof window !== 'undefined') {
+  window.addEventListener('our-backup-imported', () => {
+    state = load();
+    listeners.forEach((l) => l());
+  });
+}
+
 function commit(next: PeriodStore) {
   state = next;
   try {

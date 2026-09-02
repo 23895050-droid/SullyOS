@@ -167,6 +167,12 @@ const FeedMode: React.FC = () => {
     return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).map((x) => x.item);
   }, [store.events, actStore.events, selected]);
 
+  // 全库最近一条记录的日期：导入的数据都是过去的日子，今天为空时给个「去看看」跳过去（防「导入丢了」错觉）
+  const latestDate = useMemo(() => {
+    const dates = [...store.events.map((e) => e.date), ...actStore.events.map((a) => a.date)];
+    return dates.length > 0 ? dates.sort().reverse()[0] : null;
+  }, [store.events, actStore.events]);
+
   return (
     <>
       <div className="rounded-3xl p-4 flex flex-col" style={CARD}>
@@ -174,6 +180,19 @@ const FeedMode: React.FC = () => {
         <div style={{ marginTop: 8 }}>
           <DateStrip selected={selected} onSelect={setSelected} />
         </div>
+        {items.length === 0 && latestDate && latestDate !== selected && (
+          <div className="flex items-center justify-between rounded-2xl" style={{ marginTop: 10, padding: '8px 12px', background: '#fff5f9' }}>
+            <span style={{ fontSize: 11, color: '#9a7a8a' }}>这一天没有记录；最近一条在 {latestDate}</span>
+            <button
+              type="button"
+              onClick={() => setSelected(latestDate)}
+              className="border-0 cursor-pointer rounded-full"
+              style={{ padding: '5px 12px', fontSize: 11, fontWeight: 600, color: '#fff', background: 'var(--cs-accent, #f0a8c0)' }}
+            >
+              去看看
+            </button>
+          </div>
+        )}
         <div style={{ marginTop: 12 }}>
           <CoupleTimeline
             items={items}

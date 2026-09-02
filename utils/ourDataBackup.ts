@@ -3,16 +3,19 @@
 // 与原版备份完全独立：独立文件格式、独立入口、互不经过、互不影响。
 // 覆盖的数据面 = 我们功能的 localStorage key + 近期接收表（image_receipts）+ 这些数据引用的 blob 二进制。
 //
-// blob 机制：字段里只存编号（blobref:xxx），真正的图片/字体二进制在 blob_assets 柜子里。
-// 导出 = 编号原样带走 + 柜子里对应的文件 base64 旁路打包（保留原 mime）；导入 = 按原编号
-// 放回柜子（restoreBlobRef，SDK 现成支持），字段零改写。编号扫描是对收集到的数据整段找子串，
-// 字段以后加新编号自动覆盖，不用维护第二张清单。
+// 文件格式 v2（2026-09-04 她验收后改）：zip 容器，同上游 v3 备份的思路——
+//   · backup.json（格式化 JSON）：数据区原样 + blobIndex（编号 → mime/字节数），不含二进制；
+//   · blobs/<id>：原文件直放（STORE 不压缩、不转 base64、不重编码，画质像素级不动）；
+//   · 导入按原编号放回柜子（restoreBlobRef），字段零改写。
+// v1（旧导出，纯 JSON + blobs base64）只读兼容，导入照常还原。
 //
+// 编号扫描是对收集到的数据整段找子串，字段以后加新编号自动覆盖，不用维护第二张清单。
 // 全量导出 = 所有功能合一份；分功能导出 = 各自范围（同一套函数，scope 不同）。
 // 插件化设计原则（她定）：以后我们新写功能，第一件事就是来 OUR_FEATURE_SCOPES 登记自己的 key。
 
+import JSZip from 'jszip';
 import { DB } from './db';
-import { getBlobForRef, restoreBlobRef, blobToDataUrl, dataUrlToBlob } from './blobRef';
+import { getBlobForRef, restoreBlobRef, dataUrlToBlob } from './blobRef';
 import type { ImageReceipt } from '../types';
 
 // ─── 功能面清单（她 2026-09-03 验收过；每个功能自己记账自己的 key）───────────────
@@ -80,39 +83,6 @@ export function collectBlobTokens(texts: string[]): Set<string> {
     while ((m = BLOBREF_TOKEN_RE.exec(text)) !== null) tokens.add(m[1]);
   }
   return tokens;
-}
-
-// ─── 备份文件格式 ─────────────────────────────────────────────────
-
-export const OUR_BACKUP_FORMAT = 'sullyos-fork-features-backup';
-export const OUR_BACKUP_FORMAT_VERSION = 1;
-
-export interface OurBackupPayload {
-  format: typeof OUR_BACKUP_FORMAT;
-  formatVersion: number;
-  exportedAt: string;
-  scope: OurFeatureId | 'all';
-  /** key → 原始字符串（值本身已是 JSON 字符串，原样带走，不做二次解析） */
-  localStorage: Record<string, string>;
-  imageReceipts: ImageReceipt[];
-  /** blobref 编号 → base64 data URL（保留原 mime） */
-  blobs: Record<string, string>;
-  /** 导出时柜子里已经找不到的编号（图已丢）——导入会照样写字段，只是那张图是裂的 */
-  missingBlobs?: string[];
-}
-
-export function isOurBackupPayload(v: unknown): v is OurBackupPayload {
-  if (typeof v !== 'object' || v === null) return false;
-  const p = v as Record<string, unknown>;
-  if (p.format !== OUR_BACKUP_FORMAT || p.formatVersion !== OUR_BACKUP_FORMAT_VERSION) return false;
-  if (typeof p.exportedAt !== 'string') return false;
-  if (p.scope !== 'all' && !OUR_FEATURE_SCOPES.some((s) => s.id === p.scope)) return false;
-  if (typeof p.localStorage !== 'object' || p.localStorage === null) return false;
-  if (!Object.values(p.localStorage).every((x) => typeof x === 'string')) return false;
-  if (!Array.isArray(p.imageReceipts)) return false;
-  if (typeof p.blobs !== 'object' || p.blobs === null) return false;
-  if (!Object.values(p.blobs).every((x) => typeof x === 'string')) return false;
-  return true;
 }
 
 // ─── 盘点（导出前先看这台设备上有什么）────────────────────────────
@@ -184,24 +154,105 @@ export function surveyAllLocalStorage(): OurDataRawSurvey {
   return { keys, totalBytes };
 }
 
+// ─── 备份文件格式 ─────────────────────────────────────────────────
+
+export const OUR_BACKUP_FORMAT = 'sullyos-fork-features-backup';
+export const OUR_BACKUP_FORMAT_VERSION = 2;
+
+/** zip 里一个原文件的索引项（backup.json 的 blobIndex） */
+export interface OurBackupBlobEntry {
+  id: string;
+  /** Blob 的 mime（如 image/png）；可能为空串，导入时原样重建 */
+  type: string;
+  /** 字节数 */
+  size: number;
+}
+
+export interface OurBackupPayload {
+  format: typeof OUR_BACKUP_FORMAT;
+  formatVersion: number;
+  exportedAt: string;
+  scope: OurFeatureId | 'all';
+  /** key → 原始字符串（值本身已是 JSON 字符串，原样带走，不做二次解析） */
+  localStorage: Record<string, string>;
+  imageReceipts: ImageReceipt[];
+  /** 原文件索引（v2）；二进制在 zip 的 blobs/<id> */
+  blobIndex: OurBackupBlobEntry[];
+  /** 清单里有但这台设备上没有的 key（没用过就没有，不是丢数据） */
+  missingKeys?: string[];
+  /** 导出时柜子里已经找不到的编号（图已丢）——导入会照样写字段，只是那张图是裂的 */
+  missingBlobs?: string[];
+}
+
+/** v1 旧导出（纯 JSON + blobs base64），只读兼容 */
+export interface OurBackupPayloadV1 {
+  format: typeof OUR_BACKUP_FORMAT;
+  formatVersion: 1;
+  exportedAt: string;
+  scope: OurFeatureId | 'all';
+  localStorage: Record<string, string>;
+  imageReceipts: ImageReceipt[];
+  blobs: Record<string, string>;
+  missingBlobs?: string[];
+}
+
+export type OurBackupPayloadAny = OurBackupPayload | OurBackupPayloadV1;
+
+export function isOurBackupPayload(v: unknown): v is OurBackupPayloadAny {
+  if (typeof v !== 'object' || v === null) return false;
+  const p = v as Record<string, unknown>;
+  if (p.format !== OUR_BACKUP_FORMAT) return false;
+  if (p.formatVersion !== 1 && p.formatVersion !== OUR_BACKUP_FORMAT_VERSION) return false;
+  if (typeof p.exportedAt !== 'string') return false;
+  if (p.scope !== 'all' && !OUR_FEATURE_SCOPES.some((s) => s.id === p.scope)) return false;
+  if (typeof p.localStorage !== 'object' || p.localStorage === null) return false;
+  if (!Object.values(p.localStorage).every((x) => typeof x === 'string')) return false;
+  if (!Array.isArray(p.imageReceipts)) return false;
+  if (p.formatVersion === 2 && !Array.isArray(p.blobIndex)) return false;
+  if (p.formatVersion === 1 && (typeof p.blobs !== 'object' || p.blobs === null)) return false;
+  return true;
+}
+
 // ─── 导出 ─────────────────────────────────────────────────────────
 
-export async function exportOurData(scope: OurFeatureId | 'all'): Promise<OurBackupPayload> {
+export interface OurBackupBuild {
+  /** 展示用（谁占大头 / 缺了哪些 key 都从这里读） */
+  payload: OurBackupPayload;
+  zipBlob: Blob;
+}
+
+/**
+ * 导出：数据区进 backup.json，被引用的原文件直放 zip 的 blobs/<id>（STORE 不压缩）。
+ * 大文件不转 base64、不重编码——导出多大 = 原文件多大 ×（1 + 少量开销），画质不动。
+ */
+export async function exportOurData(scope: OurFeatureId | 'all'): Promise<OurBackupBuild> {
+  const allKeys = scopeLocalStorageKeys(scope);
   const localStorageData: Record<string, string> = {};
-  for (const key of scopeLocalStorageKeys(scope)) {
+  const missingKeys: string[] = [];
+  for (const key of allKeys) {
     const raw = localStorage.getItem(key);
-    if (raw !== null) localStorageData[key] = raw;
+    if (raw === null) {
+      missingKeys.push(key);
+      continue;
+    }
+    localStorageData[key] = raw;
   }
 
   const imageReceipts = scopeIncludesReceipts(scope) ? await DB.getAllImageReceipts() : [];
 
   const tokens = collectBlobTokens([...Object.values(localStorageData), JSON.stringify(imageReceipts)]);
-  const blobs: Record<string, string> = {};
+  const zip = new JSZip();
+  const blobIndex: OurBackupBlobEntry[] = [];
   const missingBlobs: string[] = [];
   for (const token of tokens) {
     const blob = await getBlobForRef(`blobref:${token}`);
-    if (blob) blobs[token] = await blobToDataUrl(blob);
-    else missingBlobs.push(token);
+    if (blob) {
+      // 转 ArrayBuffer 再进 zip（jszip 在部分环境不认 Blob 实例；内存峰值同上游 = 单个文件的字节）
+      zip.file(`blobs/${token}`, await blob.arrayBuffer());
+      blobIndex.push({ id: token, type: blob.type || '', size: blob.size });
+    } else {
+      missingBlobs.push(token);
+    }
   }
 
   const payload: OurBackupPayload = {
@@ -211,27 +262,72 @@ export async function exportOurData(scope: OurFeatureId | 'all'): Promise<OurBac
     scope,
     localStorage: localStorageData,
     imageReceipts,
-    blobs,
+    blobIndex,
+    missingKeys,
   };
   if (missingBlobs.length > 0) payload.missingBlobs = missingBlobs;
-  return payload;
+
+  zip.file('backup.json', JSON.stringify(payload, null, 2));
+  const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+  return { payload, zipBlob };
 }
 
-/** 下载备份 JSON（格式化输出）。文件名带日期，全量/分功能一个套路。 */
-export function downloadOurBackup(payload: OurBackupPayload): void {
-  const json = JSON.stringify(payload, null, 2);
+/** 下载备份 zip。文件名带日期，全量/分功能一个套路。 */
+export function downloadOurBackup(zipBlob: Blob, scope: OurFeatureId | 'all'): void {
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-  const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  const url = URL.createObjectURL(zipBlob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `our-data-backup_${payload.scope}_${stamp}.json`;
+  a.download = `our-data-backup_${scope}_${stamp}.zip`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-/** 读备份文件 → payload。格式不对直接抛错，调用方弹提示。 */
-export async function readOurBackupFile(file: Blob): Promise<OurBackupPayload> {
-  const text = await file.text();
+// ─── 导入 ─────────────────────────────────────────────────────────
+
+export interface OurBackupBundle {
+  payload: OurBackupPayloadAny;
+  /** 按编号取原文件：zip 读 blobs/<id>；旧 JSON 从内嵌 base64 解 */
+  getBlob: (id: string) => Promise<Blob | null>;
+}
+
+/** 读备份文件（zip 或旧版 JSON）→ 数据 + 按编号取原文件的通道。格式不对直接抛错。 */
+export async function readOurBackupFile(file: Blob): Promise<OurBackupBundle> {
+  const buf = await file.arrayBuffer();
+  // zip 魔数 PK（比 .name 后缀可靠：File/Blob 通吃）
+  const isZip = buf.byteLength >= 2 && new Uint8Array(buf, 0, 2)[0] === 0x50 && new Uint8Array(buf, 0, 2)[1] === 0x4b;
+  if (isZip) {
+    let zip: JSZip;
+    try {
+      zip = await JSZip.loadAsync(buf);
+    } catch {
+      throw new Error('备份 zip 读不了（文件损坏？）');
+    }
+    const entry = zip.file('backup.json');
+    if (!entry) throw new Error('备份里没有 backup.json（不是我们的备份？）');
+    let payload: unknown;
+    try {
+      payload = JSON.parse(await entry.async('string'));
+    } catch {
+      throw new Error('backup.json 不是合法的 JSON');
+    }
+    if (!isOurBackupPayload(payload)) throw new Error('备份文件不是我们的数据备份（格式或版本对不上）');
+    const index = payload.formatVersion === 2
+      ? new Map((payload as OurBackupPayload).blobIndex.map((b) => [b.id, b.type]))
+      : new Map<string, string>();
+    return {
+      payload,
+      getBlob: async (id: string) => {
+        const e = zip.file(`blobs/${id}`);
+        if (!e) return null;
+        const buf = await e.async('arraybuffer');
+        return new Blob([buf], { type: index.get(id) ?? '' });
+      },
+    };
+  }
+
+  // 旧版 v1 JSON（2026-09-04 之前的导出）
+  const text = new TextDecoder().decode(buf);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -239,10 +335,20 @@ export async function readOurBackupFile(file: Blob): Promise<OurBackupPayload> {
     throw new Error('备份文件不是合法的 JSON');
   }
   if (!isOurBackupPayload(parsed)) throw new Error('备份文件不是我们的数据备份（格式或版本对不上）');
-  return parsed;
+  const v1 = parsed as OurBackupPayloadV1;
+  return {
+    payload: v1,
+    getBlob: (id: string) => {
+      const dataUrl = v1.blobs?.[id];
+      if (!dataUrl) return Promise.resolve(null);
+      try {
+        return Promise.resolve(dataUrlToBlob(dataUrl));
+      } catch {
+        return Promise.resolve(null);
+      }
+    },
+  };
 }
-
-// ─── 导入 ─────────────────────────────────────────────────────────
 
 export interface OurImportReport {
   localStorageWritten: number;
@@ -257,8 +363,10 @@ export interface OurImportReport {
 /**
  * 导入：补写不破坏。localStorage 逐 key 写（配额失败记下来不中断）；
  * 近期接收按 id 写回（put，同 id 覆盖 = 快照恢复语义）；blob 已存在跳过、缺失按原编号放回柜子。
+ * 收尾广播 our-backup-imported：各 store 现场重读 localStorage，不用刷新页面。
  */
-export async function importOurData(payload: OurBackupPayload): Promise<OurImportReport> {
+export async function importOurData(bundle: OurBackupBundle): Promise<OurImportReport> {
+  const payload = bundle.payload;
   const report: OurImportReport = {
     localStorageWritten: 0,
     localStorageFailed: [],
@@ -287,17 +395,30 @@ export async function importOurData(payload: OurBackupPayload): Promise<OurImpor
     }
   }
 
-  for (const [token, dataUrl] of Object.entries(payload.blobs)) {
+  const blobIds: string[] = payload.formatVersion === 2
+    ? (payload as OurBackupPayload).blobIndex.map((b) => b.id)
+    : Object.keys((payload as OurBackupPayloadV1).blobs ?? {});
+  for (const id of blobIds) {
     try {
-      if (await getBlobForRef(`blobref:${token}`)) {
+      if (await getBlobForRef(`blobref:${id}`)) {
         report.blobsSkipped++;
         continue;
       }
-      await restoreBlobRef(`blobref:${token}`, dataUrlToBlob(dataUrl));
+      const blob = await bundle.getBlob(id);
+      if (!blob) {
+        report.blobsFailed.push(id);
+        continue;
+      }
+      await restoreBlobRef(`blobref:${id}`, blob);
       report.blobsRestored++;
     } catch {
-      report.blobsFailed.push(token);
+      report.blobsFailed.push(id);
     }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('our-backup-imported'));
+    window.dispatchEvent(new Event('couple-beauty-changed'));
   }
 
   return report;

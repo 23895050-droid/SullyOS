@@ -93,10 +93,10 @@ const NoxHomeApp: React.FC = () => {
   const [tab, setTab] = useState<'home' | 'couple' | 'feed' | 'settings'>('home');
   const [inner, setInner] = useState<string | null>(null); // b 页内页（diary = 日记页）
   const [beauty, setBeauty] = useState(loadCoupleBeauty);
-  // 活动卡文案 = 最近一条活动记录（2026-08-24 接真数据；没记录时用占位文案）
+  // 活动卡文案 = 我的最近一条活动记录（她的/共同的不上我的家——她 2026-09-04 定；没记录时用占位文案）
   const activityStore = useActivityStore();
-  const latestActivity = activityStore.events.length > 0 ? activityStore.events[activityStore.events.length - 1] : null;
-  const recentActivityText = latestActivity ? latestActivity.text : ROOM_TEXT.recentActivity;
+  const myActivity = [...activityStore.events].reverse().find((e) => e.owner === 'me') ?? null;
+  const recentActivityText = myActivity ? myActivity.text : ROOM_TEXT.recentActivity;
   // 美化区改图后实时刷新：同窗口自写 localStorage 不触发 storage 事件，靠自定义事件通知（不用退出去重进）
   useEffect(() => {
     const reload = () => setBeauty(loadCoupleBeauty());
