@@ -13,54 +13,11 @@ import { trackEvent } from '../utils/analytics';
 import { Sparkle } from '@phosphor-icons/react';
 import { ChatAppearanceEditor as ModularChatAppearanceEditor } from '../components/appearance/ChatAppearanceEditor';
 import AppIconEditor from '../components/appearance/AppIconEditor';
-import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
+import { shareOrDownloadBlob } from '../utils/shareExport';
 
 const CustomIconImage: React.FC<{ value: string; alt: string; preserveOutline?: boolean }> = ({ value, alt, preserveOutline = false }) => {
     const url = useBlobRefUrl(value);
     return url ? <img src={url} className={`w-full h-full ${preserveOutline ? 'object-contain' : 'object-cover rounded-2xl'}`} alt={alt} /> : null;
-};
-
-/**
- * 预设卡片顶部那条缩略图（壁纸打底 + 两个色块 + 装饰数量角标）。
- *
- * 预设是直接从 assets 表读出来的 JSON，没走 OSContext 那层壁纸解析，所以
- * `theme.wallpaper` 很可能还是个 `blobref:` 令牌，直接拼进 CSS 的 url() 加载不出来。
- * 这里过一道 useBlobRefUrl 把令牌换成 objectURL —— 它对 data: / http(s) / 渐变这类
- * 非令牌值是渲染期原样透传的，所以只有令牌会真的去读盘。
- * 因为 hook 不能写在 map 回调里，这块预览单独抽成组件，一个预设一份解析和回收。
- */
-const PresetPreview: React.FC<{ preset: AppearancePreset }> = ({ preset }) => {
-    const { hue, saturation, lightness, contentColor, desktopDecorations, wallpaper } = preset.theme;
-    const resolvedWallpaper = useBlobRefUrl(wallpaper);
-
-    const themeGradient = `linear-gradient(135deg, hsl(${hue}, ${saturation}%, ${lightness}%), hsl(${hue + 30}, ${saturation}%, ${Math.max(lightness - 15, 10)}%))`;
-    const isCssGradient = !!wallpaper
-        && (wallpaper.startsWith('linear-gradient') || wallpaper.startsWith('radial-gradient') || wallpaper.startsWith('conic-gradient'));
-
-    // 没设壁纸 → 主题色兜底；壁纸本身就是 CSS 渐变 → 原样用；否则当图片铺进 url()。
-    // 令牌还在读盘、或者图已经丢了时 resolvedWallpaper 是 undefined，同样退回主题色，
-    // 免得渲染出一个 url("undefined")。
-    let background: string;
-    if (!wallpaper) background = themeGradient;
-    else if (isCssGradient) background = wallpaper;
-    else background = resolvedWallpaper ? `url("${resolvedWallpaper}") center/cover` : themeGradient;
-
-    return (
-        <div className="h-14 relative overflow-hidden" style={{ background }}>
-            <div className="absolute inset-0 bg-black/10" />
-            <div className="absolute bottom-1.5 left-3 flex gap-1">
-                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: `hsl(${hue}, ${saturation}%, ${lightness}%)` }} />
-                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: contentColor || '#fff' }} />
-            </div>
-            {desktopDecorations && desktopDecorations.length > 0 && (
-                <div className="absolute bottom-1.5 right-3 text-[8px] text-white/80 bg-black/30 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
-                    {desktopDecorations.length} 装饰
-                </div>
-            )}
-        </div>
-    );
 };
 
 // Touch-friendly long-press wrapper. `onContextMenu` alone misses iOS Safari /
@@ -255,6 +212,47 @@ const buildAcnhLeaves = (): DesktopDecoration[] => ACNH_LEAF_LAYOUT.map((p, i) =
   zIndex: 5 + i, flip: p.flip,
 }));
 
+/**
+ * 预设卡片顶部那条缩略图（壁纸打底 + 两个色块 + 装饰数量角标）。
+ *
+ * 预设是直接从 assets 表读出来的 JSON，没走 OSContext 那层壁纸解析，所以
+ * `theme.wallpaper` 很可能还是个 `blobref:` 令牌，直接拼进 CSS 的 url() 加载不出来。
+ * 这里过一道 useBlobRefUrl 把令牌换成 objectURL —— 它对 data: / http(s) / 渐变这类
+ * 非令牌值是渲染期原样透传的，所以只有令牌会真的去读盘。
+ * 因为 hook 不能写在 map 回调里，这块预览单独抽成组件，一个预设一份解析和回收。
+ */
+const PresetPreview: React.FC<{ preset: AppearancePreset }> = ({ preset }) => {
+    const { hue, saturation, lightness, contentColor, desktopDecorations, wallpaper } = preset.theme;
+    const resolvedWallpaper = useBlobRefUrl(wallpaper);
+
+    const themeGradient = `linear-gradient(135deg, hsl(${hue}, ${saturation}%, ${lightness}%), hsl(${hue + 30}, ${saturation}%, ${Math.max(lightness - 15, 10)}%))`;
+    const isCssGradient = !!wallpaper
+        && (wallpaper.startsWith('linear-gradient') || wallpaper.startsWith('radial-gradient') || wallpaper.startsWith('conic-gradient'));
+
+    // 没设壁纸 → 主题色兜底；壁纸本身就是 CSS 渐变 → 原样用；否则当图片铺进 url()。
+    // 令牌还在读盘、或者图已经丢了时 resolvedWallpaper 是 undefined，同样退回主题色，
+    // 免得渲染出一个 url("undefined")。
+    let background: string;
+    if (!wallpaper) background = themeGradient;
+    else if (isCssGradient) background = wallpaper;
+    else background = resolvedWallpaper ? `url("${resolvedWallpaper}") center/cover` : themeGradient;
+
+    return (
+        <div className="h-14 relative overflow-hidden" style={{ background }}>
+            <div className="absolute inset-0 bg-black/10" />
+            <div className="absolute bottom-1.5 left-3 flex gap-1">
+                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: `hsl(${hue}, ${saturation}%, ${lightness}%)` }} />
+                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: contentColor || '#fff' }} />
+            </div>
+            {desktopDecorations && desktopDecorations.length > 0 && (
+                <div className="absolute bottom-1.5 right-3 text-[8px] text-white/80 bg-black/30 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
+                    {desktopDecorations.length} 装饰
+                </div>
+            )}
+        </div>
+    );
+};
+
 // --- Preset Manager Component ---
 interface PresetManagerProps {
     presets: AppearancePreset[];
@@ -303,45 +301,9 @@ const PresetManager: React.FC<PresetManagerProps> = ({ presets, onSave, onApply,
             const fileName = `appearance_${preset?.name || 'preset'}.zip`;
             const title = `外观预设 - ${preset?.name || 'preset'}`;
 
-            if (Capacitor.isNativePlatform()) {
-                // Native: 写到 Cache 再调系统分享
-                const base64 = await new Promise<string>((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(String(reader.result).split(',')[1] || '');
-                    reader.onerror = () => reject(reader.error);
-                    reader.readAsDataURL(blob);
-                });
-                await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache });
-                const uri = await Filesystem.getUri({ directory: Directory.Cache, path: fileName });
-                await Share.share({ title, files: [uri.uri] });
-            } else {
-                // Web: 先触发浏览器原生下载，再尝试拉起系统分享面板
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-
-                try {
-                    const file = new File([blob], fileName, { type: 'application/zip' });
-                    if (
-                        typeof navigator !== 'undefined' &&
-                        typeof navigator.share === 'function' &&
-                        (typeof (navigator as any).canShare !== 'function' || (navigator as any).canShare({ files: [file] }))
-                    ) {
-                        await navigator.share({ title, files: [file] });
-                    }
-                } catch (shareErr: any) {
-                    // 用户取消分享是正常情况，吞掉
-                    if (shareErr?.name !== 'AbortError') {
-                        console.warn('[Appearance] share failed', shareErr);
-                    }
-                }
-            }
-            addToast('预设已导出', 'success');
+            const result = await shareOrDownloadBlob({ blob, fileName, shareTitle: title });
+            if (result === 'cancelled') return;
+            addToast(result === 'shared' ? '已打开预设分享面板' : '预设已导出', 'success');
         } catch (e: any) {
             addToast(e.message || '导出失败', 'error');
         }
