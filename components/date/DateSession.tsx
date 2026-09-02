@@ -12,6 +12,7 @@ import { clearDateResumeAttempt } from '../../utils/dateSessionRecovery';
 import { VALID_EMOTIONS } from '../../utils/minimaxTts';
 import {
     canSynthesizeSpeech,
+    characterHasVoice,
     cleanTextForTtsProvider,
     stripTtsMarkupForDisplay,
     synthesizeSpeech,
@@ -21,6 +22,7 @@ import { getPendingReplyText } from '../../utils/pendingReply';
 import { fetchBlobForShare } from '../../utils/shareExport';
 import VoiceFavoriteActionSheet from '../voice/VoiceFavoriteActionSheet';
 import { getVoiceFavorite, makeVoiceFavoriteId, removeVoiceFavorite, saveVoiceFavorite } from '../../utils/voiceFavorites';
+import { MEETING_CONTINUE_DISPLAY_TEXT } from '../../utils/meetingContinue';
 
 // 语音情绪标记 [v:xxx]：跟立绘情绪 [emotion] 分开的独立通道。立绘的 happy 是
 // 夸张的表情、语音的 happy 是音色情绪，两者强度/语义差异大，不能一概而论。
@@ -111,7 +113,7 @@ interface DateSessionProps {
     messages: Message[]; // The DB messages for history/novel mode
     peekStatus: string;  // Initial text from the Peek phase
     initialState?: DateState; // Resume state
-    onSendMessage: (text: string) => Promise<string>; // Returns AI content
+    onSendMessage: (text: string, kind?: 'continue') => Promise<string>; // Returns AI content
     onReroll: () => Promise<string>;
     onExit: (currentState: DateState) => void;
     onEditMessage: (msg: Message) => void;
@@ -143,7 +145,39 @@ type DateVoiceFavoriteTarget = {
     voiceEmotion?: string;
 };
 
-const DateSession: React.FC<DateSessionProps> = ({
+const ReadingAvatar: React.FC<{ src?: string; name: string; light: boolean }> = ({ src, name, light }) => {
+    const [imageFailed, setImageFailed] = useState(false);
+    useEffect(() => setImageFailed(false), [src]);
+
+    // TokenImg 会把 blobref 令牌解析成可用 url，这里只判「有没有头像」和「加载失败没」
+    const canShowImage = !!src && !imageFailed;
+    return (
+        <div
+            className={`mt-1 h-9 w-9 shrink-0 overflow-hidden rounded-full ring-1 shadow-sm ${
+                light ? 'bg-stone-200 text-stone-500 ring-stone-300/70' : 'bg-white/10 text-white/70 ring-white/15'
+            }`}
+            aria-hidden="true"
+        >
+            {canShowImage ? (
+                <TokenImg
+                    value={src}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    onError={() => setImageFailed(true)}
+                />
+            ) : (
+                <span className="flex h-full w-full items-center justify-center text-xs font-bold">
+                    {(name || '·').trim().slice(0, 1) || '·'}
+                </span>
+            )}
+        </div>
+    );
+};
+
+const DateSession: React.FC<DateSessionProps> = ({ 
     onLoadMoreHistory,
     historyLoadLimit = 0,
     historyReachedEnd = true,
@@ -504,6 +538,9 @@ const DateSession: React.FC<DateSessionProps> = ({
         return { key: key || stray?.[0] || '', src: (key && sprites[key]) || stray?.[1] || char.avatar || '' };
     };
 
+    // 拿立绘的「字段值」反查它是哪个情绪键，靠的是跟 sprites 表里的值逐字相等。
+    // 所以 currentSprite state 里必须一直是原始字段值（blobref 令牌 / data: / 外链），
+    // 解析成 objectURL 只能发生在渲染那一刻（交给 TokenImg），否则这里永远查不到键。
     const inferSpriteKey = (src?: string, skinId?: string): string => {
         if (!src) return '';
         const sprites = getSpritesForSkin(skinId);
@@ -522,9 +559,6 @@ const DateSession: React.FC<DateSessionProps> = ({
         const legacyKey = inferSpriteKey(state.currentSprite, state.activeSkinSetId) || inferSpriteKey(state.currentSprite);
         if (legacyKey) return resolveSpriteByKey(legacyKey, state.activeSkinSetId);
         const fallback = resolveSpriteByKey(undefined, state.activeSkinSetId);
-        // 拿立绘的「字段值」反查它是哪个情绪键，靠的是跟 sprites 表里的值逐字相等。
-        // 所以 currentSprite state 里必须一直是原始字段值（blobref 令牌 / data: / 外链），
-        // 解析成 objectURL 只能发生在渲染那一刻（交给 TokenImg），否则这里永远查不到键。
         return { key: fallback.key, src: state.currentSprite || fallback.src };
     };
 
@@ -707,14 +741,14 @@ const DateSession: React.FC<DateSessionProps> = ({
         }
     };
 
-    const handleSend = async () => {
+    const submitTurn = async (kind?: 'continue') => {
         if (isTyping) return;
         const inputText = input.trim();
         // 本地失败输入优先，DB 时间线兜底。这样即使父组件刷新尚未落到这一帧，重试键也不会失效。
         const retryText = pendingRetryText || getPendingReplyText(messages);
-        if (!inputText && !retryText) return;
-        const text = inputText || retryText;
-        if (inputText) {
+        if (kind !== 'continue' && !inputText && !retryText) return;
+        const text = kind === 'continue' ? MEETING_CONTINUE_DISPLAY_TEXT : (inputText || retryText);
+        if (kind !== 'continue' && inputText) {
             setInput('');
             setShowInputBox(false);
         }
@@ -722,7 +756,7 @@ const DateSession: React.FC<DateSessionProps> = ({
         setIsShowingOpening(false); // First user interaction - opening phase is over
 
         try {
-            const aiContent = await onSendMessage(text);
+            const aiContent = await onSendMessage(text, kind);
             // 先剥出观测块更新 HUD，再解析剩余正文
             const { observation: obs, rest } = extractObservation(aiContent, { lenient: observeEnabled, custom: char.dateObserve?.custom });
             if (hasObservation(obs)) setObservation(obs);
@@ -742,6 +776,9 @@ const DateSession: React.FC<DateSessionProps> = ({
             setIsTyping(false);
         }
     };
+
+    const handleSend = () => { void submitTurn(); };
+    const handleContinue = () => { void submitTurn('continue'); };
 
     const handleRerollClick = async () => {
         if (isTyping) return;
@@ -905,19 +942,36 @@ const DateSession: React.FC<DateSessionProps> = ({
                 style={{ backgroundImage: bgImageUrl ? `url(${bgImageUrl})` : 'none' }}
             ></div>
 
-            {/* Menu Layer — 常驻只留「输入」+「菜单」两钮，其余操作收进带文字标签的下拉菜单 */}
+            {/* Menu Layer — 继续按钮单独在左；菜单 / 输入上下叠在最右列。
+                这样第二行的输入按钮贴右，不会压住阅读模式批量操作栏的中间区域。 */}
             <div className="absolute top-0 right-0 p-4 pt-12 z-[100] flex flex-col items-end gap-2 pointer-events-auto">
-                <div className="flex gap-3">
-                    <button onClick={(e) => { e.stopPropagation(); setShowInputBox(!showInputBox); setShowMenu(false); setShowVoiceLangPicker(false); }} className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${showInputBox ? 'bg-primary border-primary text-white' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}>
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
+                <div className="flex items-start gap-3">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setShowMenu(false); setShowVoiceLangPicker(false); handleContinue(); }}
+                        disabled={isTyping}
+                        className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center border bg-black/30 backdrop-blur-md border-white/20 text-white shadow-lg active:scale-95 transition-all hover:bg-white/20 disabled:opacity-40"
+                        title={`本轮不主动行动，让${char.name}继续陪伴并推进见面`}
+                        aria-label="继续当前见面"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5"><path fillRule="evenodd" d="M4.5 5.653c0-1.427 1.529-2.33 2.779-1.643l11.54 6.347c1.295.712 1.295 2.573 0 3.286L7.28 19.99c-1.25.687-2.779-.217-2.779-1.643V5.653Z" clipRule="evenodd" /></svg>
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); setShowMenu(prev => !prev); setShowVoiceLangPicker(false); }} className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${showMenu ? 'bg-white text-black border-white' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}>
-                        {showMenu ? (
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-                        ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" /></svg>
-                        )}
-                    </button>
+                    <div className="flex flex-col gap-2">
+                        <button onClick={(e) => { e.stopPropagation(); setShowMenu(prev => !prev); setShowVoiceLangPicker(false); }} className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${showMenu ? 'bg-white text-black border-white' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}>
+                            {showMenu ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" /></svg>
+                            )}
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setShowInputBox(!showInputBox); setShowMenu(false); setShowVoiceLangPicker(false); }}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${showInputBox ? 'bg-primary border-primary text-white' : 'bg-black/30 backdrop-blur-md border-white/20 text-white hover:bg-white/20'}`}
+                            title={showInputBox ? '收起输入框' : '展示输入框'}
+                            aria-label={showInputBox ? '收起输入框' : '展示输入框'}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
+                        </button>
+                    </div>
                 </div>
 
                 {showMenu && (
@@ -1077,7 +1131,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                             {visibleSessionMessages.map((msg) => (
                                 <div
                                     key={msg.id}
-                                    className={`group relative rounded-xl transition-colors -mx-4 px-4 py-2 ${char.dateLightReading ? 'active:bg-stone-100' : 'active:bg-white/5'}`}
+                                    className={`group relative rounded-xl transition-colors -mx-4 px-4 py-2 ${isBatchSelectMode ? 'pl-10' : ''} ${char.dateLightReading ? 'active:bg-stone-100' : 'active:bg-white/5'}`}
                                     onClick={(e) => {
                                         if (!isBatchSelectMode) return;
                                         e.stopPropagation();
@@ -1098,16 +1152,29 @@ const DateSession: React.FC<DateSessionProps> = ({
                                         </div>
                                     )}
                                     {msg.role === 'user' ? (
-                                        <p className={`whitespace-pre-wrap font-serif text-[16px] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
+                                        <div className="flex min-w-0 items-start justify-end gap-3">
+                                            <p className={`min-w-0 flex-1 whitespace-pre-wrap font-serif text-[16px] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
+                                            {char.dateReadingShowAvatars && (
+                                                <ReadingAvatar
+                                                    src={userProfile.perCharAvatars?.[char.id] || userProfile.avatar}
+                                                    name={userProfile.name}
+                                                    light={!!char.dateLightReading}
+                                                />
+                                            )}
+                                        </div>
                                     ) : (() => {
                                         // 观测协议：从这条回复里剥出观测块，正文上方渲染独立卡片，正文本身不显示块文本
                                         const { observation: msgObs, rest: msgBody } = extractObservation(msg.content || '', { lenient: observeEnabled, custom: char.dateObserve?.custom });
                                         return (
-                                        <div>
-                                            {observeEnabled && hasObservation(msgObs) && (
-                                                <ObserveHUD observation={msgObs} variant="card" charName={char.name} config={char.dateObserve} />
+                                        <div className="flex min-w-0 items-start gap-3">
+                                            {char.dateReadingShowAvatars && (
+                                                <ReadingAvatar src={char.avatar} name={char.name} light={!!char.dateLightReading} />
                                             )}
-                                            {(msgBody || '').split('\n').map((line, idx) => {
+                                            <div className="min-w-0 flex-1">
+                                                {observeEnabled && hasObservation(msgObs) && (
+                                                    <ObserveHUD observation={msgObs} variant="card" charName={char.name} config={char.dateObserve} />
+                                                )}
+                                                {(msgBody || '').split('\n').map((line, idx) => {
                                                 const cleanLine = cleanTextForDisplay(line);
                                                 if (!cleanLine) return null;
                                                 const lineIsDialogue = isDialogueLine(line);
@@ -1167,7 +1234,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                                                         )}
                                                     </div>
                                                 );
-                                            })}
+                                                })}
+                                            </div>
                                         </div>
                                         ); })()}
                                 </div>
@@ -1239,8 +1307,8 @@ const DateSession: React.FC<DateSessionProps> = ({
                     </div>
                 )}
                 {showInputBox && (
-                    <div className={`w-[90%] max-w-lg backdrop-blur-xl rounded-2xl p-2 flex gap-2 shadow-2xl animate-fade-in mb-8 pointer-events-auto ${char.dateLightReading ? 'bg-stone-100 border border-stone-300' : 'bg-white/10 border border-white/20'}`} onClick={(e) => e.stopPropagation()}>
-                        <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder={isTyping ? "等待回应..." : "输入对话..."} disabled={isTyping} className={`flex-1 bg-transparent px-4 py-3 outline-none font-light resize-none h-14 no-scrollbar leading-tight ${char.dateLightReading ? 'text-stone-800 placeholder:text-stone-400' : 'text-white placeholder:text-white/30'}`} autoFocus />
+                    <div className={`w-[90%] min-w-0 max-w-lg backdrop-blur-xl rounded-2xl p-2 flex gap-2 shadow-2xl animate-fade-in mb-8 pointer-events-auto ${char.dateLightReading ? 'bg-stone-100 border border-stone-300' : 'bg-white/10 border border-white/20'}`} onClick={(e) => e.stopPropagation()}>
+                        <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder={isTyping ? "等待回应..." : "输入对话..."} disabled={isTyping} className={`min-w-0 flex-1 bg-transparent px-3 sm:px-4 py-3 outline-none font-light resize-none h-14 no-scrollbar leading-tight ${char.dateLightReading ? 'text-stone-800 placeholder:text-stone-400' : 'text-white placeholder:text-white/30'}`} autoFocus />
                         {(() => {
                             const retryText = pendingRetryText || getPendingReplyText(messages);
                             const canRetry = !input.trim() && !isTyping && !!retryText;
@@ -1248,7 +1316,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                                 <button
                                     onClick={handleSend}
                                     disabled={(!input.trim() && !canRetry) || isTyping}
-                                    className="px-6 bg-white text-black rounded-xl font-bold text-sm hover:bg-slate-200 disabled:opacity-50 transition-colors h-14 flex items-center justify-center"
+                                    className="shrink-0 px-4 sm:px-6 bg-white text-black rounded-xl font-bold text-sm hover:bg-slate-200 disabled:opacity-50 transition-colors h-14 flex items-center justify-center"
                                 >
                                     {canRetry ? '重试' : '发送'}
                                 </button>

@@ -4,8 +4,8 @@ import { useOS } from '../../context/OSContext';
 import { CharacterProfile, SpriteConfig, SkinSet, DateStyleConfig } from '../../types';
 import { processImageToBlob } from '../../utils/file';
 import { putImageBlob, useBlobRefUrl } from '../../utils/blobRef';
-import TokenImg from '../os/TokenImg';
 import { pickDateFallbackSprite } from '../../utils/dateSprites';
+import TokenImg from '../os/TokenImg';
 import { DATE_STYLE_PRESETS } from '../../utils/datePrompts';
 import ObserveSettings from './ObserveSettings';
 
@@ -93,7 +93,6 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
         [...REQUIRED_EMOTIONS, ...(char.customDateSprites || [])],
         char.avatar,
     );
-    const currentSpriteImgUrl = useBlobRefUrl(currentSpriteImg);
 
     const triggerUpload = (target: 'bg' | 'sprite', emotionKey?: string) => {
         setUploadTarget(target);
@@ -249,8 +248,8 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
             <div className="h-64 bg-black relative overflow-hidden shrink-0 border-b border-slate-200">
                     <div className="absolute inset-0 bg-cover bg-center opacity-60" style={{ backgroundImage: dateBackgroundUrl ? `url("${dateBackgroundUrl}")` : 'none' }}></div>
                     <div className="absolute inset-0 flex items-end justify-center pointer-events-none">
-                        <img 
-                        src={currentSpriteImgUrl}
+                        <TokenImg
+                        value={currentSpriteImg}
                         className="max-h-[90%] object-contain transition-transform"
                         style={{ 
                             transform: `translate(${tempSpriteConfig.x}%, ${tempSpriteConfig.y}%) scale(${tempSpriteConfig.scale})`
@@ -278,17 +277,37 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
                     </div>
                 </Section>
 
-                <section className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                    <div className="flex items-center justify-between">
-                        <div>
+                <section className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-100">
+                    <div className="flex items-center justify-between gap-4 p-4">
+                        <div className="min-w-0">
                             <h3 className="text-xs font-bold text-slate-400 uppercase">浅色阅读模式</h3>
                             <p className="text-[11px] text-slate-400 mt-1">小说视图使用浅色背景，减少眼睛疲劳</p>
                         </div>
                         <button
                             onClick={() => updateCharacter(char.id, { dateLightReading: !char.dateLightReading })}
-                            className={`w-12 h-7 rounded-full transition-colors relative ${char.dateLightReading ? 'bg-primary' : 'bg-slate-200'}`}
+                            type="button"
+                            role="switch"
+                            aria-checked={!!char.dateLightReading}
+                            aria-label="切换浅色阅读模式"
+                            className={`w-12 h-7 shrink-0 rounded-full transition-colors relative ${char.dateLightReading ? 'bg-primary' : 'bg-slate-200'}`}
                         >
                             <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform ${char.dateLightReading ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+                        </button>
+                    </div>
+                    <div className="flex items-center justify-between gap-4 p-4">
+                        <div className="min-w-0">
+                            <h3 className="text-xs font-bold text-slate-400 uppercase">阅读模式显示头像</h3>
+                            <p className="text-[11px] text-slate-400 mt-1">在双方的见面记录旁显示对应头像</p>
+                        </div>
+                        <button
+                            onClick={() => updateCharacter(char.id, { dateReadingShowAvatars: !char.dateReadingShowAvatars })}
+                            type="button"
+                            role="switch"
+                            aria-checked={!!char.dateReadingShowAvatars}
+                            aria-label="切换阅读模式头像"
+                            className={`w-12 h-7 shrink-0 rounded-full transition-colors relative ${char.dateReadingShowAvatars ? 'bg-primary' : 'bg-slate-200'}`}
+                        >
+                            <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform ${char.dateReadingShowAvatars ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
                         </button>
                     </div>
                 </section>
