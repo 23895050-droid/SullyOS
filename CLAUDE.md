@@ -33,3 +33,23 @@
 [`utils/buildInfo.ts`](./utils/buildInfo.ts) 里的 `APP_VERSION`（形如 `v3.0 (Ambient Presence)`）是手工维护的，**做完一轮大功能或者性能优化就改一下**。
 
 它有两个用处：设置页底部显示的就是它；统计还拿版本号那半截当标签，面板按它切分数据。不改的话新旧版本的数字堆在同一个标签下，「这次优化有没有让首屏变快」「新版铺开多少了」就都答不出来。括号里的代号只在界面上显示，不进标签。构建 hash（`BUILD_LABEL`）是自动生成的，不用管。
+
+## 追更状态机（2026-09-02 更新，追上游前先读这里）
+
+> 本仓库是 qegj567-cloud/SullyOS 的 fork。上游两个作者：**NMJ**（qegj567-cloud 账号，偏前端：语音/MCP/见面/外观/协同）与 **Tosd0**（偏存储/后端：存储令牌线/amsg2），两人都用 Claude Code/Codex 提交。**fork 里绝大多数代码是上游的**——冲突裁决先 `git show <hash> --format="%an %ad"` 查作者日期，别把上游旧中间态当「我们的决定」。我们自己的东西只有：相机/相册/NoxHome（含情侣空间）/小助手/音乐 + 她明说过的修复。详见外部计划 `C:\Users\Administrator\.claude\plans\kind-singing-pine.md`（含 9 条已跳清单与补做要点）。
+
+| 功能线 | 上游最新提交 | fork 状态 |
+|---|---|---|
+| 语音线（TTS 供应商/收藏） | 67a87e49 + 8a71c053 语音部分 | ✅ 已搬（P1-P4）；跳 github 备份/journal 外观/分享迁移/Chat 边缘续载/发图 sourceMessageId（见计划已跳清单） |
+| MCP 线 | 8df8e594 + 926ad17f | ✅ **与上游零漂移**（协议协商/接线台/destructive 保护/多步任务策略） |
+| 见面线（DateSession/DateSettings/DateApp） | upstream/master | ✅ 对齐（剥掉协作 hunk）；DateApp 零漂移 |
+| 聊天模式/外观批 | 2510b97f + 2ef1e245 | ✅ 已搬（模式切换/气泡外观/主动消息日程回传/时间感知）；**CallApp idle-nudge + callPreferences 簇未搬**（call 线她定不搬） |
+| 预加载系统 | 8a71c053 重写 | ✅ 已搬（preloadableLazy + 空闲串行预热 + 15 秒卡死判定） |
+| 剧情线（诊断/采样开关） | c72a8065 + 16e4e875 | ✅ 早已在 fork（08-31 轻量批 cc0226be 的 #589/#590） |
+| 存储线 | 53a79002（特性分支） | ✅ C0-C4 已搬；master 线补件（7e1c5624 等）随「顺手补」逐步收编 |
+| Claude 中转兼容重试 | 2510b97f 内 claudeProxyCompat | ✅ 已摘 |
+| **协作/协同**（CollaborationWindow +2269 等） | 3d738e75 + a850f484 | ⏳ **Q1 待做**（3d738e75 还动 Chat +261/OSContext +106/MessageItem +65；a850f484 剧情 +96 同批） |
+| 陪伴桌面/Live2D/CallApp 大改 | 0addf2fb 起 | ❌ 她定不搬（Live2D 逐角色画图、视频走官端） |
+| 记忆系统/七夕/amsg2 网络降级/emitResult | e69631cc / 089f91ad / e4714884 / 6a24c2de+7d46e9d6 | ⏳ 独立功能批，待她定序 |
+
+**规矩**：每阶段 = 一个提交 + 门禁全绿（`pnpm exec tsc --noEmit` 零错误 / `pnpm vitest run` 仅剩 2 个上游基线失败 amsgStateSync.gaps+check-lockfile-links / `pnpm build`）+ 停下验收她点头。**core.autocrlf=false**（本仓库已设）——git 写文件保持 LF，否则源码锚点测试全挂。搬完更新本表 + 计划文件。
