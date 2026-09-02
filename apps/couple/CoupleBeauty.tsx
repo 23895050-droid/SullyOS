@@ -6,6 +6,7 @@ import { ArrowCounterClockwise, ImageSquare, CaretDown } from '@phosphor-icons/r
 import { putImageBlob, useBlobRefUrl } from '../../utils/blobRef';
 import PromptSettings from '../../components/settings/PromptSettings';
 import MountSettings from './MountSettings';
+import DataBackupPanel from './DataBackupPanel';
 import { deleteBlobRef } from '../../utils/blobRef';
 import { updateDiaryApi, updateDiaryFont, useDiaryStore } from './diaryStore';
 import { useCouplePaletteStore, setCouplePalette, resetCouplePalette, saveCouplePreset, loadCouplePreset, deleteCouplePreset } from './couplePaletteStore';
@@ -376,6 +377,10 @@ const CoupleBeauty: React.FC = () => {
       <div style={{ fontSize: 20, fontWeight: 700, color: '#3a2a33', padding: '0 24px 16px' }}>设置</div>
       <div className="flex flex-col gap-3 px-5">
         {/* 每类折叠（2026-08-30 她要求：设置页点开再展开，别一长列） */}
+        <BeautyFold title="数据备份">
+          <DataBackupPanel scope="all" />
+        </BeautyFold>
+
         <BeautyFold title="情侣空间 · 图片与皮肤色">
           <Slot label="宣告区背景图" desc="头像后面的那块大背景，支持本地图片替换" value={beauty.headerBg} onPick={(f) => pick('headerBg', f)} onReset={() => reset('headerBg')} />
           <Slot label="胶囊条背景图" desc="歌曲卡片下方的横向胶囊条" value={beauty.capsuleBg} onPick={(f) => pick('capsuleBg', f)} onReset={() => reset('capsuleBg')} />
