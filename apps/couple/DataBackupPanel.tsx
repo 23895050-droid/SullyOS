@@ -3,7 +3,7 @@
 // 走法：点导出 → 一个格式化 JSON 文件直接下载；点导入 → 选文件 → 看备份信息确认 → 导入 → 逐项报告。
 import React, { useRef, useState } from 'react';
 import {
-  exportOurData, downloadOurBackup, importOurData, surveyOurData, surveyAllLocalStorage, readOurBackupFile,
+  exportOurData, downloadOurBackup, importOurData, surveyOurData, surveyAllLocalStorage, readOurBackupFile, collectBlobTokens,
   OUR_FEATURE_SCOPES, type OurFeatureId, type OurBackupPayload, type OurImportReport, type OurDataSurvey, type OurDataRawSurvey,
 } from '../../utils/ourDataBackup';
 
@@ -36,7 +36,36 @@ const fmtTime = (iso: string): string => {
 
 /** 备份文件里装了什么，一行说完 */
 const summaryLine = (p: OurBackupPayload): string =>
-  `${Object.keys(p.localStorage).length} 个数据区、${p.imageReceipts.length} 条近期接收、${Object.keys(p.blobs).length} 张图`;
+  `${Object.keys(p.localStorage).length} 个数据区、${p.imageReceipts.length} 条近期接收、${Object.keys(p.blobs).length} 个文件`;
+
+const fromLabel = (keys: string[]): string =>
+  keys.length === 0 ? '未知来源' : keys.map((k) => (k === 'image_receipts' ? '近期接收' : KEY_SCOPE_LABEL[k] ?? k)).join('、');
+
+/** 备份里谁占了大头：文字部分多大 + 最大的 3 个文件各自多大、被谁引用（一眼看出 20MB 是谁） */
+const backupDetail = (p: OurBackupPayload): string => {
+  const lsBytes = Object.values(p.localStorage).reduce((s, v) => s + new Blob([v]).size, 0);
+  const blobTotal = Object.values(p.blobs).reduce((s, v) => s + v.length, 0);
+  const sources = new Map<string, string[]>();
+  for (const [key, v] of Object.entries(p.localStorage)) {
+    for (const t of collectBlobTokens([v])) {
+      const arr = sources.get(t) ?? [];
+      if (!arr.includes(key)) arr.push(key);
+      sources.set(t, arr);
+    }
+  }
+  for (const r of p.imageReceipts) {
+    const t = r.blobRef.replace('blobref:', '');
+    const arr = sources.get(t) ?? [];
+    if (!arr.includes('image_receipts')) arr.push('image_receipts');
+    sources.set(t, arr);
+  }
+  const top = Object.entries(p.blobs)
+    .map(([t, dataUrl]) => ({ t, bytes: dataUrl.length, from: sources.get(t) ?? [] }))
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 3)
+    .map((x) => `${fromLabel(x.from)}（${fmtSize(x.bytes)}）`);
+  return `文字部分 ${fmtSize(lsBytes)}；文件共 ${fmtSize(blobTotal)}，最大：${top.length > 0 ? top.join('、') : '无'}`;
+};
 
 const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) => {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
@@ -124,8 +153,11 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
       </div>
 
       {status.kind === 'exported' && (
-        <div style={muted}>
-          ✅ 已下载备份（{scopeLabel(status.payload.scope)}，{summaryLine(status.payload)}，文件约 {status.sizeMb.toFixed(1)} MB）。{missingNote(status.payload)}
+        <div className="flex flex-col gap-0.5">
+          <div style={muted}>
+            ✅ 已下载备份（{scopeLabel(status.payload.scope)}，{summaryLine(status.payload)}，文件约 {status.sizeMb.toFixed(1)} MB）。{missingNote(status.payload)}
+          </div>
+          <div style={muted}>{backupDetail(status.payload)}</div>
         </div>
       )}
 
@@ -134,6 +166,7 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
           <div style={{ fontSize: 11, color: '#3a2a33', lineHeight: 1.6 }}>
             「{status.fileName}」：{fmtTime(status.payload.exportedAt)} 导出，范围 {scopeLabel(status.payload.scope)}，含 {summaryLine(status.payload)}。{missingNote(status.payload)}
           </div>
+          <div style={muted}>{backupDetail(status.payload)}</div>
           <div style={muted}>导入会补写并覆盖同名数据（以备份为准），点击确认后开始。</div>
           <div className="flex items-center gap-2">
             <button type="button" style={accentBtn} onClick={doImport}>确认导入</button>
