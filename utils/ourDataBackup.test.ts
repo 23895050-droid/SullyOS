@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   OUR_FEATURE_SCOPES, OUR_BACKUP_FORMAT, OUR_BACKUP_FORMAT_VERSION,
   scopeLocalStorageKeys, scopeIncludesReceipts, collectBlobTokens,
-  exportOurData, importOurData, surveyOurData, readOurBackupFile, isOurBackupPayload,
+  exportOurData, importOurData, surveyOurData, surveyAllLocalStorage,
+  readOurBackupFile, isOurBackupPayload,
   type OurBackupPayload,
 } from './ourDataBackup';
 import type { ImageReceipt } from '../types';
@@ -143,6 +144,21 @@ describe('surveyOurData', () => {
 
     expect((await surveyOurData('receipts')).receiptsCount).toBe(2);
     expect((await surveyOurData('music')).receiptsCount).toBe(0);
+  });
+});
+
+describe('surveyAllLocalStorage', () => {
+  it('列全部 key（含清单外的），大的在前，known 标记对', () => {
+    localStorage.setItem('couple_todos_v3', 'x'.repeat(10));
+    localStorage.setItem('upstream_key_whatever', 'y'.repeat(50));
+
+    const survey = surveyAllLocalStorage();
+
+    expect(survey.keys).toEqual([
+      { key: 'upstream_key_whatever', bytes: 50, known: false },
+      { key: 'couple_todos_v3', bytes: 10, known: true },
+    ]);
+    expect(survey.totalBytes).toBe(60);
   });
 });
 

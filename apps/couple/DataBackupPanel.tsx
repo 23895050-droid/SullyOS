@@ -3,8 +3,8 @@
 // 走法：点导出 → 一个格式化 JSON 文件直接下载；点导入 → 选文件 → 看备份信息确认 → 导入 → 逐项报告。
 import React, { useRef, useState } from 'react';
 import {
-  exportOurData, downloadOurBackup, importOurData, surveyOurData, readOurBackupFile,
-  OUR_FEATURE_SCOPES, type OurFeatureId, type OurBackupPayload, type OurImportReport, type OurDataSurvey,
+  exportOurData, downloadOurBackup, importOurData, surveyOurData, surveyAllLocalStorage, readOurBackupFile,
+  OUR_FEATURE_SCOPES, type OurFeatureId, type OurBackupPayload, type OurImportReport, type OurDataSurvey, type OurDataRawSurvey,
 } from '../../utils/ourDataBackup';
 
 type Status =
@@ -14,7 +14,7 @@ type Status =
   | { kind: 'picked'; payload: OurBackupPayload; fileName: string }
   | { kind: 'importing' }
   | { kind: 'imported'; report: OurImportReport; payload: OurBackupPayload }
-  | { kind: 'surveyed'; survey: OurDataSurvey }
+  | { kind: 'surveyed'; survey: OurDataSurvey; raw?: OurDataRawSurvey }
   | { kind: 'error'; message: string };
 
 const scopeLabel = (id: OurFeatureId | 'all'): string =>
@@ -78,7 +78,8 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
   const doSurvey = async () => {
     try {
       const survey = await surveyOurData(scope);
-      setStatus({ kind: 'surveyed', survey });
+      const raw = scope === 'all' ? surveyAllLocalStorage() : undefined;
+      setStatus({ kind: 'surveyed', survey, raw });
     } catch {
       setStatus({ kind: 'error', message: '盘点失败，请重试' });
     }
@@ -170,6 +171,7 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
             这台设备上：数据区 {status.survey.keys.length} 个（共 {fmtSize(status.survey.totalBytes)}）
             {status.survey.receiptsCount > 0 && `、近期接收 ${status.survey.receiptsCount} 条`}
           </div>
+          <div style={muted}>当前地址：{window.location.origin}</div>
           {status.survey.keys.length > 0 && (
             <div className="flex flex-col gap-0.5">
               {status.survey.keys.slice(0, 10).map((k) => (
@@ -184,6 +186,20 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
           {status.survey.missingKeys.length > 0 && (
             <div style={muted}>
               这台设备上没有：{status.survey.missingKeys.map((k) => KEY_SCOPE_LABEL[k] ?? k).join('、')}
+            </div>
+          )}
+          {status.raw && (
+            <div className="flex flex-col gap-0.5" style={{ borderTop: '1px dashed #f2d3e0', paddingTop: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#3a2a33' }}>
+                全部存储共 {status.raw.keys.length} 个 key（{fmtSize(status.raw.totalBytes)}），含原版数据，大的在前：
+              </div>
+              {status.raw.keys.slice(0, 12).map((k) => (
+                <div key={k.key} className="flex items-center justify-between" style={{ fontSize: 11, color: '#3a2a33' }}>
+                  <span>{k.known ? `${KEY_SCOPE_LABEL[k.key] ?? ''} · ` : '原版 · '}{k.key}</span>
+                  <span style={{ color: k.bytes > 1024 * 1024 ? '#c25a82' : '#9a7a8a', fontVariantNumeric: 'tabular-nums' }}>{fmtSize(k.bytes)}</span>
+                </div>
+              ))}
+              {status.raw.keys.length > 12 && <div style={muted}>…还有 {status.raw.keys.length - 12} 个没列</div>}
             </div>
           )}
         </div>

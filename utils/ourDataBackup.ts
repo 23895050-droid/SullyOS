@@ -152,6 +152,38 @@ export async function surveyOurData(scope: OurFeatureId | 'all'): Promise<OurDat
   return { keys, missingKeys, receiptsCount, totalBytes };
 }
 
+// ─── 全部存储原始清单（排错用：这台设备 localStorage 里真实存在的每个 key）────────────
+
+export interface OurDataRawKey {
+  key: string;
+  bytes: number;
+  /** 在我们功能清单里的 = 导出会收；不在的 = 原版/其他数据，导出不收 */
+  known: boolean;
+}
+
+export interface OurDataRawSurvey {
+  keys: OurDataRawKey[];
+  totalBytes: number;
+}
+
+/** 把 localStorage 里每一个 key 原样列出来（含原版的数据），大的在前。 */
+export function surveyAllLocalStorage(): OurDataRawSurvey {
+  const known = new Set(scopeLocalStorageKeys('all'));
+  const keys: OurDataRawKey[] = [];
+  let totalBytes = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key) continue;
+    const raw = localStorage.getItem(key);
+    if (raw === null) continue;
+    const bytes = new Blob([raw]).size;
+    keys.push({ key, bytes, known: known.has(key) });
+    totalBytes += bytes;
+  }
+  keys.sort((a, b) => b.bytes - a.bytes);
+  return { keys, totalBytes };
+}
+
 // ─── 导出 ─────────────────────────────────────────────────────────
 
 export async function exportOurData(scope: OurFeatureId | 'all'): Promise<OurBackupPayload> {
