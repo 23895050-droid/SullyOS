@@ -48,7 +48,7 @@
 | 剧情线（诊断/采样开关） | c72a8065 + 16e4e875 | ✅ 早已在 fork（08-31 轻量批 cc0226be 的 #589/#590） |
 | 存储线 | 53a79002（特性分支） | ✅ C0-C4 已搬；master 线补件（7e1c5624 等）随「顺手补」逐步收编 |
 | Claude 中转兼容重试 | 2510b97f 内 claudeProxyCompat | ✅ 已摘 |
-| **协作/协同**（CollaborationWindow +2269 等） | 3d738e75 + a850f484 | ✅ 已搬（5b6c129e：分支 5 提交缺口补完 + #620 重roll/长按删消息 + #623 文件交付/参考图；injectMemoryPalace 降级保留——recall-router 在记忆系统批；CheckPhone +105 = Q2 待她拍板） |
+| **协作/协同**（CollaborationWindow +2269 等） | 3d738e75 + a850f484 | ✅ 已搬（5b6c129e：分支 5 提交缺口补完 + #620 重roll/长按删消息 + #623 文件交付/参考图；28325bdd：查手机长按同步私聊/已同步置灰；injectMemoryPalace 降级保留——recall-router 在记忆系统批） |
 | 陪伴桌面/Live2D/CallApp 大改 | 0addf2fb 起 | ❌ 她定不搬（Live2D 逐角色画图、视频走官端） |
 | 记忆系统/七夕/amsg2 网络降级/emitResult | e69631cc / 089f91ad / e4714884 / 6a24c2de+7d46e9d6 | ⏳ 独立功能批，待她定序 |
 
