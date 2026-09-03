@@ -1387,6 +1387,10 @@ interface MessageItemProps {
     /** 思维链卡片在多选模式下有独立勾选框，与 isSelected 分开。 */
     isThinkingSelected?: boolean;
     onToggleThinkingSelect?: (id: number) => void;
+    /** 图片消息：点击查看大图 */
+    onPreviewImage?: (m: Message) => void;
+    /** 图片消息：下载图片 */
+    onDownloadImage?: (m: Message) => void;
     // Translation (AI messages only, bilingual content parsed from %%BILINGUAL%%)
     translationEnabled?: boolean;
     translationExpanded?: boolean;
@@ -1449,6 +1453,8 @@ const MessageItem = React.memo(({
     onToggleSelect,
     isThinkingSelected,
     onToggleThinkingSelect,
+    onPreviewImage,
+    onDownloadImage,
     translationEnabled,
     translationExpanded,
     isShowingTarget,
@@ -1858,6 +1864,206 @@ const MessageItem = React.memo(({
                         </div>
                     </div>
                 )}
+                {/* Camera a2 一起看照片摘要 — 漂亮的卡片，可编辑 */}
+        if (m.metadata?.source === 'camera_a2') {
+            const lines = displayText.split('\n').filter(Boolean);
+            const header = lines[0] || '📷 一起看照片';
+            const body = lines.slice(1).join('\n').trim();
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md" style={{ border: '1.5px solid rgba(236,72,153,0.25)', background: 'linear-gradient(180deg, #fdf2f8 0%, #fff 30%, #fce7f3 100%)' }}>
+                            <div className="px-4 pt-3 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(236,72,153,0.15)', background: 'linear-gradient(135deg, rgba(236,72,153,0.08), rgba(219,39,119,0.04))' }}>
+                                <span className="text-xl">📷</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#be185d' }}>一起看照片 · 相机</div>
+                                </div>
+                            </div>
+                            {body && (
+                                <div className="px-4 py-3">
+                                    <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#475569' }}>
+                                        {body}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 日记转发卡片（diary_forward：批阅 + 原文打包，笔记纸样式，与粉色 couple 卡区分）
+        if (m.metadata?.source === 'diary_forward') {
+            const card = (m.metadata.forwardCard || {}) as { kind?: string; title?: string; subtitle?: string; original?: string; review?: string };
+            const SERIF = "Georgia, 'Times New Roman', 'Songti SC', 'STKaiti', 'KaiTi', serif";
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div
+                            className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md relative"
+                            style={{ border: '1.5px solid #e4d7bf', background: 'linear-gradient(180deg, #fffdf6 0%, #faf4e4 100%)' }}
+                        >
+                            {/* 横线纸底 */}
+                            <div className="absolute inset-0 pointer-events-none" style={{ background: 'repeating-linear-gradient(transparent, transparent 23px, rgba(139,110,80,0.08) 23px, rgba(139,110,80,0.08) 24px)' }} />
+                            <div className="absolute left-7 top-0 bottom-0 pointer-events-none" style={{ width: 1, background: 'rgba(196,110,132,0.25)' }} />
+                            <div className="relative px-3 pt-2.5 pb-2 pl-9 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,110,80,0.15)' }}>
+                                <span className="text-base">📔</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#8a5a3b' }}>日记 · {card.kind || '批阅'}</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#4a3a2e' }}>{card.title || ''}</div>
+                                </div>
+                                {card.subtitle && <div className="text-[9px] shrink-0" style={{ color: '#b5a68c' }}>{card.subtitle}</div>}
+                            </div>
+                            <div className="relative p-3 pl-9">
+                                {card.original ? (
+                                    <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#4a4036', fontFamily: SERIF }}>{card.original}</div>
+                                ) : null}
+                                {card.review ? (
+                                    <div className="mt-2 pt-2" style={{ borderTop: '1px dashed rgba(139,110,80,0.25)' }}>
+                                        <div className="text-[9px] font-bold tracking-wider" style={{ color: '#b08a5a', marginBottom: 3 }}>批阅</div>
+                                        <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#7a5a3a', fontFamily: SERIF }}>{card.review}</div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 和 Ta 转发卡片（together_forward：回忆暖橙 / 约定淡蓝；角色只读文字描述，不读图）
+        if (m.metadata?.source === 'together_forward') {
+            const card = (m.metadata.forwardCard || {}) as { kind?: string; title?: string; subtitle?: string; body?: string; feelings?: string; photosDesc?: string; color?: string };
+            const isMemory = card.kind === '回忆';
+            const accent = card.color || (isMemory ? '#e08e5e' : '#5b9cd6');
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div
+                            className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md relative"
+                            style={{ border: '1.5px solid rgba(180,160,160,0.25)', background: isMemory ? 'linear-gradient(180deg, #fffdf8 0%, #fdf3e8 100%)' : 'linear-gradient(180deg, #fbfdff 0%, #eef4fc 100%)' }}
+                        >
+                            <div className="absolute left-0 top-0 bottom-0" style={{ width: 3, background: accent }} />
+                            <div className="relative px-3 pt-2.5 pb-2 pl-4 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,110,80,0.12)' }}>
+                                <span className="text-base">{isMemory ? '📷' : '🤝'}</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: accent }}>和 Ta · {card.kind || '事件'}</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#3a3a3a' }}>{card.title || ''}</div>
+                                </div>
+                                {card.subtitle && <div className="text-[9px] shrink-0" style={{ color: '#b0a8ab' }}>{card.subtitle}</div>}
+                            </div>
+                            <div className="relative p-3 pl-4">
+                                <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#475569' }}>{card.body || displayText}</div>
+                                {card.photosDesc ? (
+                                    <div className="mt-2 text-[10px] leading-relaxed whitespace-pre-wrap" style={{ color: '#8a7a6e', background: 'rgba(255,255,255,0.65)', borderRadius: 8, padding: '6px 8px' }}>
+                                        📷 {card.photosDesc}
+                                    </div>
+                                ) : null}
+                                {card.feelings ? (
+                                    <div className="mt-2 pt-2" style={{ borderTop: '1px dashed rgba(139,110,80,0.2)' }}>
+                                        <div className="text-[9px] font-bold tracking-wider" style={{ color: '#b08a5a', marginBottom: 3 }}>感受记录</div>
+                                        <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#6a5a4e' }}>{card.feelings}</div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 情侣空间转发卡片（couple_forward：生理期/待办/活动/纪念日，AI 只读 content 文本标记）
+        if (m.metadata?.source === 'couple_forward') {
+            const card = (m.metadata.forwardCard || {}) as { kind?: string; title?: string; subtitle?: string; body?: string };
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md" style={{ border: '1.5px solid #e8d5de', background: 'linear-gradient(180deg, #ffffff 0%, #fdf2f8 100%)' }}>
+                            <div className="px-3 pt-2.5 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,139,139,0.15)' }}>
+                                <span className="text-base">💌</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#8b8b8b' }}>转发 · {card.kind || '情侣空间'}</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#383639' }}>{card.title || ''}</div>
+                                </div>
+                                {card.subtitle && <div className="text-[9px] shrink-0" style={{ color: '#b0a8ab' }}>{card.subtitle}</div>}
+                            </div>
+                            <div className="p-3">
+                                <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#475569' }}>{card.body || displayText}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 相册转发卡片 — 模拟照片卡（AI 只读 content 文本标记）
+        if (m.metadata?.source === 'album_forward') {
+            const card = (m.metadata.forwardCard || {}) as { thumbnail?: string; charName?: string; timestamp?: number; summary?: string };
+            const d = card.timestamp ? new Date(card.timestamp) : null;
+            const dateStr = d ? `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日` : '';
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md" style={{ border: '1.5px solid #e0d1d4', background: 'linear-gradient(180deg, #ffffff 0%, #fdf2f8 100%)' }}>
+                            <div className="px-3 pt-2.5 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,139,139,0.15)' }}>
+                                <span className="text-base">📸</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#8b8b8b' }}>转发 · 历史照片</div>
+                                    <div className="text-[11px] font-semibold" style={{ color: '#383639' }}>{card.charName || '角色'}</div>
+                                </div>
+                                {dateStr && <div className="text-[9px] shrink-0" style={{ color: '#b0a8ab' }}>{dateStr}</div>}
+                            </div>
+                            <div className="p-3 flex gap-2.5">
+                                {card.thumbnail && (
+                                    <img src={card.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0 bg-slate-100" loading="lazy" decoding="async" />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#475569', display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                        {card.summary || displayText}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
                 <div className="flex justify-center my-6 px-10 w-full" {...interactionProps}>
                     <div className="flex items-center gap-1.5 bg-slate-200/40 backdrop-blur-md text-slate-500 px-3 py-1 rounded-full shadow-sm border border-white/20 select-none cursor-pointer active:scale-95 transition-transform">
                         {/* Optional Icon based on content */}
@@ -3362,17 +3568,73 @@ const MessageItem = React.memo(({
     }
 
     if (m.type === 'image') {
+        const genStatus = (m.metadata as any)?.imageGenStatus as string | undefined;
+        const genDesc = (m.metadata as any)?.imageGenDescription as string | undefined;
+        const genError = (m.metadata as any)?.imageGenError as string | undefined;
+
+        // 生图失败 — 灰色卡片 + 快捷操作
+        if (genStatus === 'failed') {
+            return commonLayout(
+                <div className="relative group">
+                    <div className="px-4 py-4 rounded-2xl bg-slate-100 border border-red-200/60 text-center min-w-[160px] max-w-[220px] space-y-2">
+                        <div className="text-slate-300 text-2xl">🖼️‍💥</div>
+                        {genDesc ? (
+                            <p className="text-[10px] text-slate-500 leading-relaxed line-clamp-3">{genDesc}</p>
+                        ) : (
+                            <p className="text-xs text-slate-400 italic">图片生成失败</p>
+                        )}
+                        {genError && (
+                            <p className="text-[9px] text-red-400 leading-relaxed line-clamp-2">{genError}</p>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // 加载中 — 骨架动画
+        if (genStatus === 'pending') {
+            return commonLayout(
+                <div className="relative group">
+                    <div className="w-[160px] h-[160px] rounded-2xl bg-slate-200 animate-pulse flex items-center justify-center">
+                        <div className="flex flex-col items-center gap-2">
+                            <div className="w-6 h-6 border-2 border-slate-300 border-t-slate-400 rounded-full animate-spin"></div>
+                            <span className="text-[10px] text-slate-400">生成中…</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 成功 — 正常图片 + 点击预览 + hover 下载
+        const openPreview = () => {
+            if (selectionMode || longPressTriggeredRef.current) return;
+            onPreviewImage?.(m);
+        };
         return commonLayout(
             <div className="relative group">
                 {m.content ? (
-                    <TokenImg
-                        value={m.content}
-                        className="max-w-[200px] max-h-[300px] rounded-2xl"
-                        alt="Uploaded"
-                        loading={isLatestMessage ? 'eager' : 'lazy'}
-                        decoding="async"
-                        onLoad={() => onMediaLoad?.(m.id)}
-                    />
+                    <>
+                        <TokenImg
+                            value={m.content}
+                            className="max-w-[200px] max-h-[300px] rounded-2xl cursor-zoom-in"
+                            alt={genDesc || '聊天图片'}
+                            loading={isLatestMessage ? 'eager' : 'lazy'}
+                            decoding="async"
+                            draggable={false}
+                            onClick={openPreview}
+                            onLoad={() => onMediaLoad?.(m.id)}
+                        />
+                        {onDownloadImage && (
+                            <button
+                                type="button"
+                                aria-label="下载图片"
+                                onClick={(e) => { e.stopPropagation(); onDownloadImage(m); }}
+                                className="absolute bottom-1.5 right-1.5 z-10 w-7 h-7 rounded-full bg-black/55 text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity active:scale-90"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                            </button>
+                        )}
+                    </>
                 ) : (
                     <div className="px-4 py-6 rounded-2xl bg-slate-100 text-slate-400 text-xs italic text-center min-w-[120px]">[图片已丢失]</div>
                 )}

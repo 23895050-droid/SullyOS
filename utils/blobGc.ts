@@ -57,11 +57,13 @@ import { DB } from './db';
 import { blobStore } from './blobStore';
 import { tryAcquireMaintenanceLock, releaseMaintenanceLock, currentMaintenanceHolder } from './maintenanceLock';
 
-// 引用面里的 17 张表。名字与 db.ts 的 STORE_* 常量值一一对应
+// 引用面里的 18 张表。名字与 db.ts 的 STORE_* 常量值一一对应
 // （STORE_CHARACTERS / STORE_MESSAGES / STORE_CC_PARTS / STORE_SONGS / STORE_GALLERY /
 //   STORE_ASSETS / STORE_THEMES / STORE_EMOJIS / STORE_USER / STORE_SOCIAL_POSTS /
 //   STORE_GROUPS / STORE_CHAR_GROUPS / STORE_STORY_THEATER_MASKS / STORE_BANK_DATA /
-//   STORE_GUIDEBOOK / STORE_LIFE_SIM / pixel_home_assets）。
+//   STORE_GUIDEBOOK / STORE_LIFE_SIM / pixel_home_assets / image_receipts）。
+// image_receipts 是 fork 自己加的表（相机/相册「近期接收」原图），上游清单没有它——
+// 不入清单会被当孤儿删掉全部相机原图。
 // 全部是 inline keyPath（都用 'id'），所以 blobDedupe 的 putStoreRows 能原样写回。
 // 导出仅供测试核对拼写：名字写错时 getStoreRowsPage 的 contains 兜底会静默返回空页，
 // 等于那个面没扫、无任何报错——blobGc.test.ts 有一条守卫断言每个名字真实存在。
@@ -83,6 +85,7 @@ export const REF_SOURCE_STORES = [
     'guidebook',
     'life_sim',
     'pixel_home_assets',
+    'image_receipts',
 ] as const;
 
 // 每批读多少行。批间事务各自独立（见 DB.getStoreRowsPage 注释），内存峰值只有一批。

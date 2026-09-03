@@ -38,6 +38,56 @@ export enum AppID {
   VRWorld = 'vrworld', // 彼方 — 角色自主登入的虚拟世界（定时驱动，房间里看小说/听歌/留言，产出活动卡注入聊天+记忆）
   CharCreatorDev = 'char_creator_dev', // 捏脸系统开发模式 — 仅开发模式可见，向捏人器指定类目追加自定义部件
   WorldHome = 'world_home', // 家园 — 同世界观多角色共同生活的大世界（观测驱动演绎，每角色独立 LLM 调用 + NPC 世界引擎）
+  ImageGen = 'image_gen', // 生图相机 — AI 图片生成
+  ImageReceipts = 'image_receipts', // 近期接收 — 独立原图备份站
+  Album = 'album', // 我的相册 — 留档卡片 + 原图备份 + 角色相册
+  NoxHome = 'nox_home', // Nox 的单间 — 我的家主页（Angelica 设计，底图蒙版 + 玻璃卡片）
+  Assistant = 'assistant', // 小助手 — 工作向小 AI（专属 API 槽；当前工作是美化预设，以后可能做别的活）
+}
+
+// ── Image Generation ──
+
+export type ImageGenReferenceMode = 'none' | 'face_lock' | 'style_ref' | 'image_pad';
+
+export interface ImageGenPreset {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
+export interface ImageGenerationSettings {
+  enabled: boolean;
+  requestMode: 'direct';  // 浏览器直连（以后可扩展 Worker 代理）
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  size: string;
+  quality: string;
+  /** 日常分享（非自拍）默认尺寸，空=跟随全局 size。常用：1792x1024（16:9） */
+  landscapeSize: string;
+  /** 自拍/锁脸默认尺寸，空=跟随全局 size。常用：1024x1024（1:1） */
+  selfieSize: string;
+  presets: ImageGenPreset[];
+  defaultPresetId: string | null;
+  /** [photo:selfie:...] 自拍时默认使用的前缀预设 id，空=使用 defaultPresetId */
+  defaultSelfiePresetId: string | null;
+  // 相机活动同步到聊天上下文
+  syncCameraToChat: boolean;
+  // 提示词生成（a4）用的小模型配置
+  promptGenApiKey: string;
+  promptGenBaseUrl: string;
+  promptGenModel: string;
+}
+
+/** 近期接收 — 独立原图备份站。生图成功时自动写入，与聊天消息解耦，各删各的。 */
+export interface ImageReceipt {
+  id: string;           // 同 blobRef 的 id（img_xxx）
+  blobRef: string;      // blobref:xxx 令牌
+  charId: string;
+  description: string;  // 生图描述
+  timestamp: number;
+  mimeType: string;
+  isSelfie: boolean;
 }
 
 export interface SystemLog {

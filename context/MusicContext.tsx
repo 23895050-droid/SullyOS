@@ -16,6 +16,8 @@ import { DB } from '../utils/db';
 import { getProxyWorkerUrl, DEFAULT_PROXY_WORKER, PROXY_WORKER_CHANGED_EVENT } from '../utils/proxyWorker';
 import type { PostProcessMusicHooks } from '../utils/applyAssistantPostProcessing';
 import { resolveRefToDataUrl } from '../utils/blobRef';
+import { flushTogetherSession, recordLocalPlay } from '../apps/couple/musicStore';
+import { generateTogetherSummary } from '../utils/musicSummary';
 
 /* ───────────── 类型 ───────────── */
 export type MusicQuality = 'standard' | 'higher' | 'exhigh' | 'lossless' | 'hires';
@@ -163,6 +165,10 @@ export interface MusicPlaybackSnapshot {
   playing: boolean;
   lyric: LyricLine[];
   activeLyricIdx: number;
+  /** 没时间轴的纯文本歌词原文（有轴歌词 parse 后这里为空）——她定：不删歌词，注入整段 */
+  plainLyric: string;
+  /** 彻底没歌词时拉的热评兜底（2-3 条截 60 字；评论只是别人的耳朵） */
+  hotComments: string[];
   listeningTogetherWith: string[];
   cfg: MusicCfg;
   recentTrackChange?: RecentTrackChange | null;
@@ -178,6 +184,32 @@ export const loadMusicPlaybackSnapshot = (): MusicPlaybackSnapshot | null => __m
  */
 let __musicHooks: PostProcessMusicHooks | null = null;
 export const loadMusicHooks = (): PostProcessMusicHooks | null => __musicHooks;
+
+/**
+ * 一起听会话缓冲（批 2）——模块槽，MusicProvider 维护：
+ * 第一个伙伴加入时开缓冲（记当前曲），之后切歌换曲 +1；退出时 flushTogetherSession 落库。
+ * 供非 React 调用者（挂载块/总结卡等）读取当前会话概况。
+ */
+export interface TogetherTrackCount {
+  id: number;
+  name: string;
+  artists: string;
+  count: number;
+  albumPic?: string;
+}
+export interface TogetherSessionBuffer {
+  startedAt: number;
+  songs: TogetherTrackCount[];
+}
+let __musicTogetherState: TogetherSessionBuffer | null = null;
+export const loadMusicTogetherState = (): TogetherSessionBuffer | null => __musicTogetherState;
+
+/**
+ * 播放请求模块槽（批 2）——MusicProvider 把 playSong 闭包写到这里，
+ * 总结卡点击某首歌时经它播放（MessageItem 在 React 边界外拿不到 useMusic）。
+ */
+let __musicPlayRequest: ((song: Song) => void) | null = null;
+export const loadMusicPlayRequest = (): ((song: Song) => void) | null => __musicPlayRequest;
 
 const saveCfg = (cfg: MusicCfg) => {
   try { localStorage.setItem(LS_CFG_KEY, JSON.stringify(cfg)); } catch {}
@@ -255,6 +287,9 @@ export const musicApi = {
   },
   lyric(cfg: MusicCfg, id: number) {
     return musicApi.call(cfg, '/lyric', { id });
+  },
+  comments(cfg: MusicCfg, id: number) {
+    return musicApi.call(cfg, '/comment/music', { id, limit: 10 });
   },
   loginStatus(cfg: MusicCfg) {
     return musicApi.call(cfg, '/login/status', {});
@@ -337,6 +372,10 @@ interface MusicContextType {
   lyric: LyricLine[];
   tlyric: LyricLine[];
   activeLyricIdx: number;
+  /** 没时间轴的纯文本歌词原文（有轴歌为空串） */
+  plainLyric: string;
+  /** 彻底没歌词时拉的热评（2-3 条截 60 字） */
+  hotComments: string[];
 
   // 用户
   profile: NeteaseProfile | null;
@@ -356,11 +395,16 @@ interface MusicContextType {
   toggleLike: () => Promise<void>;
 
   // 一起听 — 当前哪些 char 和 user 一起听（仅视觉状态，不影响播放）
-  // 歌曲切换 / 结束时自动清空
+  // 切歌不散伙（批 2）；显式退出走 endListeningTogether
   listeningTogetherWith: string[];
   addListeningPartner: (charId: string) => void;
   removeListeningPartner: (charId: string) => void;
   clearListeningPartners: () => void;
+  /**
+   * 一起听统一退出出口（批 2）：清名单 → 会话缓冲 flush 进 store（含播放计数）→ 触发总结卡。
+   * charId 不传 = 全部伙伴一起结束。MiniPlayer × / 播放页 × / exit 标签都走这里。
+   */
+  endListeningTogether: (charId?: string) => Promise<void>;
   /** 最近一次一起听途中换歌的记录（供 prompt 注入"察觉换歌"，不触发主动消息） */
   recentTrackChange: RecentTrackChange | null;
 
@@ -470,6 +514,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 歌词
   const [lyric, setLyric] = useState<LyricLine[]>([]);
   const [tlyric, setTlyric] = useState<LyricLine[]>([]);
+  const [plainLyric, setPlainLyric] = useState('');
+  const [hotComments, setHotComments] = useState<string[]>([]);
   const activeLyricIdx = useMemo(() => {
     if (!lyric.length) return -1;
     let i = 0;
@@ -565,24 +611,83 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 播放模式
   const [playMode, setPlayMode] = useState<PlayMode>('loop');
 
-  // 一起听 - char 加入后在 miniPlayer / 播放页显示徽标；切歌 / 结束自动清空
+  // 一起听 - char 加入后在 miniPlayer / 播放页显示徽标；切歌不散伙；显式退出走 endListeningTogether
   const [listeningTogetherWith, setListeningTogetherWith] = useState<string[]>([]);
+  const currentRef = useRef(current);
+  currentRef.current = current;
+  const togetherBufRef = useRef<TogetherSessionBuffer | null>(null);
   const addListeningPartner = useCallback((charId: string) => {
-    setListeningTogetherWith(prev => prev.includes(charId) ? prev : [...prev, charId]);
+    setListeningTogetherWith(prev => {
+      if (prev.includes(charId)) return prev;
+      // 第一个伙伴加入 → 开新会话缓冲，把当前曲记作第一首（没在播就只开空缓冲）
+      if (prev.length === 0) {
+        const buf: TogetherSessionBuffer = { startedAt: Date.now(), songs: [] };
+        const cur = currentRef.current;
+        if (cur) buf.songs.push({ id: cur.id, name: cur.name, artists: cur.artists, count: 1, albumPic: cur.albumPic });
+        togetherBufRef.current = buf;
+        __musicTogetherState = buf;
+      }
+      return [...prev, charId];
+    });
   }, []);
   const removeListeningPartner = useCallback((charId: string) => {
+    // 纯状态移除（不 flush）——正常结束请走 endListeningTogether，会话数据才不会丢
     setListeningTogetherWith(prev => prev.filter(id => id !== charId));
   }, []);
   const clearListeningPartners = useCallback(() => {
     setListeningTogetherWith(prev => prev.length ? [] : prev);
   }, []);
 
-  // 切歌后清空上一首的"一起听"。只结束状态，不触发主动消息 ——
-  // 换歌信息记进 recentTrackChange，char 下一轮正常回复时经 prompt 注入察觉，
-  // 自行决定是否重新加入。
+  /**
+   * 一起听统一退出出口（批 2）：每位伙伴 flush 一份会话（曲目缓冲 + 播放计数）→ 触发总结卡。
+   * 退出后清名单；缓冲在所有伙伴都退出后复位。播放失败也走这里（音频 error handler）。
+   */
+  const endListeningTogether = useCallback(async (charId?: string) => {
+    const partners = charId
+      ? listeningTogetherRef.current.filter(id => id === charId)
+      : [...listeningTogetherRef.current];
+    // 退出一起听 = 退出聊歌（2026-08-30 她定）：广播被退出的伙伴，聊歌框听到就收尾退回。
+    if (partners.length > 0) {
+      window.dispatchEvent(new CustomEvent<string[]>('music-together-exited', { detail: partners }));
+    }
+    const buf = togetherBufRef.current;
+    const endedAt = Date.now();
+    for (const pid of partners) {
+      if (buf && buf.songs.length > 0) {
+        const session = flushTogetherSession(pid, buf.songs.map((s) => ({
+          neteaseId: s.id,
+          name: s.name,
+          artists: s.artists ? s.artists.split(/[/、,]+/).map((x) => x.trim()).filter(Boolean) : [],
+          count: s.count,
+          albumPic: s.albumPic,
+        })), buf.startedAt, endedAt);
+        const res = await generateTogetherSummary(session);
+        if (res.status === 'pending') {
+          toast('会话已保存，配好总结 API 后可在音乐设置页补生成', 'info');
+        }
+      }
+    }
+    if (charId) {
+      setListeningTogetherWith(prev => {
+        const next = prev.filter(id => id !== charId);
+        if (next.length === 0) { togetherBufRef.current = null; __musicTogetherState = null; }
+        return next;
+      });
+    } else {
+      setListeningTogetherWith([]);
+      togetherBufRef.current = null;
+      __musicTogetherState = null;
+    }
+  }, [toast]);
+
+  // 换歌信息记进 recentTrackChange，char 下一轮正常回复时经 prompt 注入察觉。
+  // 批 2：切歌不再清名单——一起听一直持续到显式退出；会话缓冲跟着换曲累计。
   const previousSongRef = useRef<Song | null>(null);
   const listeningTogetherRef = useRef(listeningTogetherWith);
   listeningTogetherRef.current = listeningTogetherWith;
+  // 音频 error 事件在一次性 effect 里闭包，走 ref 调到最新出口
+  const endTogetherRef = useRef<(charId?: string) => void>(() => {});
+  endTogetherRef.current = (cid?: string) => { void endListeningTogether(cid); };
   const [recentTrackChange, setRecentTrackChange] = useState<RecentTrackChange | null>(null);
   useEffect(() => {
     const previousSong = previousSongRef.current;
@@ -594,8 +699,14 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           charIds: [...wasListening],
           at: Date.now(),
         });
+        // 会话缓冲：同一首连续播 count+1，新歌追加
+        const buf = togetherBufRef.current;
+        if (buf && current) {
+          const last = buf.songs[buf.songs.length - 1];
+          if (last && last.id === current.id) last.count += 1;
+          else buf.songs.push({ id: current.id, name: current.name, artists: current.artists, count: 1, albumPic: current.albumPic });
+        }
       }
-      setListeningTogetherWith([]);
     }
     previousSongRef.current = current;
   }, [current]);
@@ -618,8 +729,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const onPause = () => setPlaying(false);
     const onTime = () => setProgress(a.currentTime);
     const onMeta = () => setDuration(a.duration || 0);
-    // 播放出错 → 清掉 playing 状态 + 清掉"一起听"伙伴（防止 UI 卡在残留状态）
-    const onErr = () => { setPlaying(false); setListeningTogetherWith([]); toast('播放失败', 'error'); };
+    // 播放出错 → 清掉 playing 状态 + 走统一出口结束"一起听"（会话照常落库，防 UI 卡残留）
+    const onErr = () => { setPlaying(false); endTogetherRef.current(undefined); toast('播放失败', 'error'); };
     const onEnd = () => { endedHandlerRef.current(); };
 
     a.addEventListener('play', onPlay);
@@ -659,7 +770,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
 
-    setLoadingSong(true); setLyric([]); setTlyric([]); setProgress(0); setDuration(0);
+    setLoadingSong(true); setLyric([]); setTlyric([]); setPlainLyric(''); setHotComments([]); setProgress(0); setDuration(0);
     try {
       // ── Local-source branch ── 本地生成的歌（写歌 App 出歌）从 IndexedDB 取 blob
       if (song.local && song.localAssetKey) {
@@ -755,9 +866,38 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const a = audioRef.current!;
       a.src = url.replace(/^http:\/\//i, 'https://');
       a.play().catch(() => {});
+      // 播放记录（2026-08-30 她要求：音乐信息不依赖导入，每次真播放都记——
+      // 一起听中的播放走会话 flush 统一计数，这里跳过不重复记）
+      if (!song.local && listeningTogetherRef.current.length === 0) {
+        recordLocalPlay({ id: song.id, name: song.name, artists: song.artists, albumPic: song.albumPic });
+      }
       if (lyricRes) {
-        setLyric(parseLyric(lyricRes?.lrc?.lyric || ''));
+        const rawLrc = lyricRes?.lrc?.lyric || '';
+        const parsed = parseLyric(rawLrc);
+        setLyric(parsed);
         setTlyric(parseLyric(lyricRes?.tlyric?.lyric || ''));
+        if (parsed.length === 0 && rawLrc.trim()) {
+          // 纯文本歌词（没时间轴）——原文保留不丢，注入整段
+          setPlainLyric(rawLrc);
+          setHotComments([]);
+        } else {
+          setPlainLyric('');
+          if (!rawLrc.trim()) {
+            // 彻底没歌词（纯音乐/冷门/新歌）——拉热评兜底（2-3 条，别人的耳朵）
+            musicApi.comments(cfgRef.current, song.id)
+              .then((res: any) => {
+                const tops = Array.isArray(res?.data?.topComments) ? res.data.topComments : Array.isArray(res?.data?.hotComments) ? res.data.hotComments : [];
+                setHotComments(
+                  tops
+                    .map((c: any) => (c?.content || '').replace(/\s+/g, ' ').trim())
+                    .filter(Boolean)
+                    .slice(0, 3)
+                    .map((t: string) => (t.length > 60 ? t.slice(0, 60) + '…' : t)),
+                );
+              })
+              .catch(() => setHotComments([]));
+          }
+        }
       }
       // 媒体会话（锁屏 / 通知栏）
       if ('mediaSession' in navigator) {
@@ -875,11 +1015,13 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       playing,
       lyric,
       activeLyricIdx,
+      plainLyric,
+      hotComments,
       listeningTogetherWith,
       cfg,
       recentTrackChange,
     };
-  }, [current, playing, lyric, activeLyricIdx, listeningTogetherWith, cfg, recentTrackChange]);
+  }, [current, playing, lyric, activeLyricIdx, plainLyric, hotComments, listeningTogetherWith, cfg, recentTrackChange]);
 
   // 把整组 musicHooks 写到模块级 slot — useChatAI 和 instant push activeMsgRuntime 都从这里取.
   // current / addListeningPartner 变化时刷新闭包, 保证读到的是最新 React state.
@@ -897,10 +1039,14 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           albumPic: current.albumPic,
           duration: current.duration,
           fee: current.fee,
+          listeningTogetherWith,
         };
       },
       joinListeningTogether: (cid: string) => {
         addListeningPartner(cid);
+      },
+      endListeningTogether: (cid: string) => {
+        void endListeningTogether(cid);
       },
       addSongToCharPlaylist: async (cid, song, target) => {
         try {
@@ -979,18 +1125,28 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       },
     };
-  }, [current, addListeningPartner]);
+  }, [current, addListeningPartner, endListeningTogether, listeningTogetherWith]);
+
+  // 播放请求模块槽（批 2）——总结卡点歌走这里：把 playSong 闭包写到模块级
+  useEffect(() => {
+    __musicPlayRequest = (song: Song) => {
+      void playSong(song, { replaceQueue: [song] });
+    };
+    return () => { __musicPlayRequest = null; };
+  }, [playSong]);
 
   const value: MusicContextType = {
     cfg, setCfg, effectiveWorkerUrl,
     queue, setQueue, idx, current,
     playing, progress, duration, loadingSong,
     lyric, tlyric, activeLyricIdx,
+    plainLyric, hotComments,
     profile, refreshProfile,
     playSong, togglePlay, nextSong, prevSong, seek,
     playMode, setPlayMode,
     liked, toggleLike,
     listeningTogetherWith, addListeningPartner, removeListeningPartner, clearListeningPartners,
+    endListeningTogether,
     recentTrackChange,
     toast, setToastHandler,
     localAlbumSongs, addLocalSong, removeLocalSong,

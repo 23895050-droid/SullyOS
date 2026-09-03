@@ -10,6 +10,8 @@ import TokenImg from '../components/os/TokenImg';
 import { isImageValue } from '../utils/blobRef';
 import { safeResponseJson, extractJson } from '../utils/safeApi';
 import { normalizeMessageContent } from '../utils/messageFormat';
+import { getPrompt } from '../utils/promptRegistry';
+import { DIARY_LANGS } from '../utils/diaryMath';
 import { injectMemoryPalace, ingestDiaryToPalace, type DiaryIngestResult } from '../utils/memoryPalace/pipeline';
 import { getRoomLabel } from '../utils/memoryPalace/types';
 import { Sparkle, Archive } from '@phosphor-icons/react';
@@ -104,6 +106,11 @@ const JournalApp: React.FC = () => {
 
     // Editor State
     const [isThinking, setIsThinking] = useState(false);
+    // 交换日记语言（2026-08-24）：1-3 种混用，与情侣空间日记页同款
+    const [exchangeLangs, setExchangeLangs] = useState<string[]>(['简体中文']);
+    const toggleExchangeLang = (l: string) => {
+        setExchangeLangs((prev) => (prev.includes(l) ? prev.filter((x) => x !== l) : prev.length < 3 ? [...prev, l] : prev));
+    };
     const [archivingId, setArchivingId] = useState<string | null>(null);
     const [archiveResult, setArchiveResult] = useState<{
         date: string;
@@ -471,23 +478,24 @@ const JournalApp: React.FC = () => {
                 return `[${new Date(m.timestamp).toLocaleTimeString()}] ${m.role === 'user' ? 'User' : 'You'}: ${content}`;
             }).join('\n');
 
+            // 提示词走注册表（设置·提示词管理·日记），与情侣空间日记页同一份；语言 exchangeLangs 现选 1-3 种
+            const diaryPrompt = getPrompt('喊他写日记')
+                .replace(/\{\{char\}\}/g, selectedChar.name)
+                .replace(/\{\{user\}\}/g, userProfile.name)
+                .replace(/\{\{lang\}\}/g, exchangeLangs.join('、'));
             systemPrompt += `### [Exchange Diary Mode Instructions]
 你正在和用户进行【交换日记】互动。
 
 ### 关键：最近发生的互动 (Recent Context)
 这是你们最近在聊天软件或见面时的对话记录。请**务必**阅读这些记录，并在日记中提及今天发生的具体事情（例如聊过的话题、去过的地方、用户发过的图片）。
-不要只写空泛的回复，还要说一些用户不知道的，你自己没有说过的想法，和你自己独立于用户经历过的今天的事情。
 [RECENT LOGS START]
 ${recentContext}
 [RECENT LOGS END]
 
 ### 任务
-1. 阅读用户今天的日记 (${currentEntry.date})。
-2. 以你的角色口吻写一篇**回复日记**。
-   - 首先结合上文的聊天记录，回应用户的内容。
-   - 最重要的是分享你的生活，此条为必须项**务必说至少一件用户不知道的，你今天做的事情，尽量与用户无关！用户希望看到角色完全独立的一面**。
-   - 语言风格在符合设定的基础上，应该更加书面化和诗意，不过一切以角色性格优先。
-3. 选择适合你心情的信纸和贴纸。
+阅读用户今天的日记 (${currentEntry.date})，以你的角色口吻写一篇**回复日记**——先结合聊天记录回应用户的内容，再分享至少一件用户不知道的、你今天独立经历的小事。
+
+${diaryPrompt}
 
 ### 关于贴纸 (Stickers)
 你可以使用默认的 Emoji，也可以使用【Custom Stickers】。
@@ -497,9 +505,9 @@ ${customStickerContext}
 ### 输出格式 (必须是纯 JSON)
 - 只输出这个 JSON 对象本身，前后不要有任何多余文字。
 - text 是一个 JSON 字符串：内部的换行必须写成 \\n，引号必须写成 \\"，反斜杠必须写成 \\\\。**绝对不要**在字符串里直接放真实换行或未转义的引号，否则会解析失败。
-Structure:
+- 在上面提示词的 JSON 基础上，额外带两个字段：
 {
-  "text": "日记正文第一段\\n\\n第二段...",
+  ...,
   "paperStyle": "one of: ${styleOptions}",
   "stickers": ["sticker1", "http://custom-sticker-url..."] (从默认列表或 Custom Stickers 中选0-3个)
 }`;
@@ -513,7 +521,8 @@ Structure:
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: `Users Diary:\n${currentEntry.userPage.text}` }
                     ],
-                    temperature: 0.85
+                    temperature: 0.85,
+                    max_tokens: 16000
                 })
             });
 
@@ -808,6 +817,17 @@ ${charPart}
             ) : (
                 <>
                     <p className="text-sm">写完日记后，点击下方按钮<br/>邀请 {selectedChar?.name} 交换日记。</p>
+                    <div className="flex flex-wrap justify-center gap-1.5 mt-2">
+                        {DIARY_LANGS.map((l) => {
+                            const on = exchangeLangs.includes(l);
+                            return (
+                                <button key={l} type="button" onClick={() => toggleExchangeLang(l)} className={`px-2.5 py-1 rounded-full text-[10px] font-medium border-0 cursor-pointer transition-colors ${on ? 'bg-amber-500 text-white' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}>
+                                    {l}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p className="text-[10px] text-white/30">可选 1-3 种语言，混着写也没问题</p>
                     <button
                         onClick={handleExchange}
                         className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-white text-sm font-bold rounded-full shadow-[0_0_20px_rgba(245,158,11,0.3)] active:scale-95 transition-all mt-2"

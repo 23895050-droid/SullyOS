@@ -15,6 +15,8 @@ const SELF_HANDLED: AppID[] = [
     AppID.Call, AppID.VoiceDesigner, AppID.Guidebook, AppID.LifeSim, AppID.MemoryPalace,
     AppID.Handbook, AppID.QQBridge, AppID.HotNews, AppID.WorldHome, AppID.CharCreatorDev,
     AppID.SpecialMoments,
+    // fork 新增（2026-08-13 相机/相册全家桶 + 2026-08-18 Nox 的单间 + 2026-08-30 小助手）：
+    AppID.ImageGen, AppID.ImageReceipts, AppID.Album, AppID.NoxHome, AppID.Assistant,
 ];
 
 describe('shellHandlesSafeArea', () => {

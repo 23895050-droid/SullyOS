@@ -6,7 +6,7 @@
  * 默认折叠：只显示一个带封面的小圆球，点开才展开完整控制条；
  * 小球可拖动、可长按隐藏；切到新歌时会自动再出现。
  */
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { Play, Pause, SkipForward, SkipBack, CaretDown, X } from '@phosphor-icons/react';
 import { useOS } from '../../context/OSContext';
 import { useMusic } from '../../context/MusicContext';
@@ -145,6 +145,28 @@ const GlobalMiniPlayer: React.FC = () => {
     if (expandedBottom == null) return;
     try { localStorage.setItem(EXPANDED_BOTTOM_KEY, String(expandedBottom)); } catch {}
   }, [expandedBottom]);
+
+  // 展开条初次挂载：持久化的 expandedBottom 可能来自另一台设备 / 别的窗口尺寸
+  // （比如桌面上拖得很高存下的值，手机上比整个屏幕还高）→ 条会渲染在屏幕外，
+  // 表现就是「点小球后播放器直接消失」。按当前父容器实际尺寸夹一次，把条拉回视野。
+  useLayoutEffect(() => {
+    if (!expanded) return;
+    const el = expandedRef.current;
+    const parent = el?.parentElement as HTMLElement | null;
+    if (!el || !parent) return;
+    const parentRect = parent.getBoundingClientRect();
+    const selfRect = el.getBoundingClientRect();
+    const { insetTop, insetBottom } = computeInsets(parent);
+    const raw = expandedBottom ?? 12;
+    const clamped = clampExpandedBottom(raw, {
+      parentH: parentRect.height,
+      selfH: selfRect.height,
+      insetTop,
+      insetBottom,
+    });
+    if (clamped !== raw) setExpandedBottom(clamped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
 
   // 展开态：拖把手垂直拖动；点击则收起
   const onExpandedHandleDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -297,7 +319,7 @@ const GlobalMiniPlayer: React.FC = () => {
     return (
       <div
         ref={wrapRef}
-        className="absolute z-[55] pointer-events-none"
+        className="mz-globalmini absolute z-[55] pointer-events-none"
         style={positional}
       >
         <button
@@ -306,7 +328,7 @@ const GlobalMiniPlayer: React.FC = () => {
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
           onContextMenu={(e) => e.preventDefault()}
-          className="pointer-events-auto relative w-10 h-10 rounded-full overflow-hidden active:scale-95 transition-transform touch-none select-none"
+          className="mz-globalmini-ball pointer-events-auto relative w-10 h-10 rounded-full overflow-hidden active:scale-95 transition-transform touch-none select-none"
           style={{
             boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
             border: '1px solid rgba(255,255,255,0.25)',
@@ -347,11 +369,11 @@ const GlobalMiniPlayer: React.FC = () => {
   return (
     <div
       ref={expandedRef}
-      className="absolute left-3 right-3 z-[55] pointer-events-none"
+      className="mz-globalmini-expanded absolute left-3 right-3 z-[55] pointer-events-none"
       style={{ bottom: expandedBottom != null ? expandedBottom : 12 }}
     >
       <div
-        className="pointer-events-auto flex items-center gap-2.5 rounded-2xl pl-1.5 pr-2.5 py-2 relative overflow-hidden animate-fade-in"
+        className="mz-globalmini-bar pointer-events-auto flex items-center gap-2.5 rounded-2xl pl-1.5 pr-2.5 py-2 relative overflow-hidden animate-fade-in"
         style={{
           background: 'rgba(20, 24, 35, 0.65)',
           backdropFilter: 'blur(24px) saturate(1.6)',

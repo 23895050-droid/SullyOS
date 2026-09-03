@@ -32,6 +32,7 @@ import ActiveMsgGlobalSettingsModal from '../components/settings/ActiveMsgGlobal
 import { syncAmsgLlmCredentials, syncAmsgToolConfig, syncAmsgToolConfigAndPrompts } from '../utils/amsgStateSync';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import VersionInfo from '../components/settings/VersionInfo';
+import ImageGenSettings from '../components/settings/ImageGenSettings';
 import { isPushVapidReady } from '../utils/pushVapid';
 import ApiCallLogModal from '../components/settings/ApiCallLogModal';
 import StorageUsagePanel from '../components/settings/StorageUsagePanel';
@@ -3479,6 +3480,8 @@ const Settings: React.FC = () => {
             </div>
         </SettingsSection>
         )}
+
+        <ImageGenSettings />
 
         <VersionInfo />
 

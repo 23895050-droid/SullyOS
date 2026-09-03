@@ -4,15 +4,25 @@ import { useOS } from '../context/OSContext';
 import { useMusic, musicApi, normalizeCookie, toHttps, Song } from '../context/MusicContext';
 import { DB } from '../utils/db';
 import { trackEvent } from '../utils/analytics';
-import { Gear, User as UserIcon, Crosshair, Play as PlayIcon, Pause as PauseIcon } from '@phosphor-icons/react';
+import { Gear, User as UserIcon, Crosshair, Play as PlayIcon, Pause as PauseIcon, MusicNote, X, Headphones, ChatCircleText, CaretDown } from '@phosphor-icons/react';
 import {
   C, Sparkle, CrossStar, MizuHeader, SearchBar, SongRow, MiniPlayer,
   VinylDisc, GlassProgress, PlayControls, BokehBg,
-  MetaChip, SubActions,
+  MetaChip, SubActions, TogetherHeader, NightTogetherStrip, InviteTogetherModal,
 } from './music/MusicUI';
 import NeteaseProfilePage from './music/NeteaseProfilePage';
 import CharVisitPage from './music/CharVisitPage';
 import { shareOrDownloadBlob } from '../utils/shareExport';
+import PlaylistHomePage from './music/PlaylistHomePage';
+import MusicChatBox from './music/MusicChatBox';
+import { useMusicStore, importMusicJson, exportMusicJson, setCssGlobal, setCssPage, clearCssPage, setCssPerChar, clearCssPerChar, setLyricInject, setMusicApi, setChatBg, setChatShowAvatar, setCssPreset, setMusicPalette, resetMusicPalette, addPendingInvite, pendingInviteOf } from './couple/musicStore';
+import DataBackupPanel from './couple/DataBackupPanel';
+import { buildPaletteCss, MUSIC_PALETTE_KEYS, MUSIC_PALETTE_DEFAULTS, SURFACE_DEFAULT_PCT, GLASS_DEFAULT_PCT } from '../utils/musicPalette';
+import { putImageBlob } from '../utils/blobRef';
+import { MUSIC_NIGHT_PRESET_CSS } from '../utils/musicNightPreset';
+import { getMountConfig } from '../utils/noxhomeMount';
+import { maybeGeneratePendingSummaries } from '../utils/musicSummary';
+import ConfirmDialog from '../components/os/ConfirmDialog';
 
 // ------------------------- 工具 -------------------------
 const fmtTime = (s: number) => {
@@ -22,7 +32,39 @@ const fmtTime = (s: number) => {
   return `${m}:${ss.toString().padStart(2, '0')}`;
 };
 
-type View = 'search' | 'settings' | 'player' | 'profile' | 'visit_char';
+type View = 'search' | 'settings' | 'player' | 'profile' | 'visit_char' | 'playlist' | 'chat';
+
+// 调色台标签（2026-08-30）：与 utils/musicPalette MUSIC_PALETTE_KEYS 一一对应
+const PALETTE_LABELS: Record<string, string> = {
+  bg: '页面底色', bgDeep: '渐变深层', bgTint: '最深紫雾',
+  primary: '主色', accent: '渐变第二色', soft: '容器浅底', glow: '发光色',
+  sakura: '樱花粉', lavender: '薰衣草', deep: '渐变深紫', text: '正文', muted: '弱文字',
+  faint: '超弱文字', vip: 'VIP', danger: '危险色',
+};
+
+// ── 设置页折叠卡（2026-08-30 她要求：每个类别折叠起来，点开再展开，别一长列） ──
+const SettingsFold: React.FC<{ title: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({ title, right, children }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-2xl shizuku-glass overflow-hidden" style={{ boxShadow: `0 2px 16px ${C.glow}08` }}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(!open); } }}
+        className="flex items-center justify-between gap-2 cursor-pointer select-none"
+        style={{ padding: '14px 14px' }}
+      >
+        <span className="text-[10px] tracking-wider flex items-center gap-1.5" style={{ color: C.muted }}>{title}</span>
+        <span className="flex items-center gap-2 shrink-0">
+          <span onClick={(e) => e.stopPropagation()}>{right}</span>
+          <CaretDown size={12} weight="bold" style={{ color: C.faint, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s ease' }} />
+        </span>
+      </div>
+      {open && <div className="px-3.5 pb-3.5 pt-1">{children}</div>}
+    </div>
+  );
+};
 
 // ========================= 主组件 =========================
 const MusicApp: React.FC = () => {
@@ -33,7 +75,7 @@ const MusicApp: React.FC = () => {
     lyric, tlyric, activeLyricIdx,
     profile, playSong, togglePlay, nextSong, prevSong, seek,
     liked, toggleLike, setToastHandler,
-    listeningTogetherWith, removeListeningPartner,
+    listeningTogetherWith, removeListeningPartner, endListeningTogether,
     addLocalSong, removeLocalSong, localAlbumSongs,
     playMode, setPlayMode,
     regeneratingId, regeneratingStatus,
@@ -99,9 +141,159 @@ const MusicApp: React.FC = () => {
   const [showLyricSync, setShowLyricSync] = useState(false);
   const [syncDraft, setSyncDraft] = useState<number[]>([]);
   const [visitCharId, setVisitCharId] = useState<string | null>(null);
+  // ── 一起听（批 2）：她发起邀请（选角色）→ 轻确认退出 ──
+  const [showInvitePicker, setShowInvitePicker] = useState(false);
+  const [confirmEndChar, setConfirmEndChar] = useState<string | null>(null);
+  const [pendingSummariesBusy, setPendingSummariesBusy] = useState(false);
+  // 聊歌框对象：一起听伙伴 > 从歌单页进的角色 > 挂载角色
+  const [chatCharId, setChatCharId] = useState<string | null>(null);
+
+  /** 方向 A：她发起邀请 → 系统邀请卡（等 AI accept/decline）+ pendingInvites 记录 */
+  const sendInvite = async (c: { id: string; name: string }) => {
+    setShowInvitePicker(false);
+    // 同一个角色还挂着未回应的邀请 → 不再堆新卡（一卡多等会重复进模型上下文，还容易把它看晕）
+    if (pendingInviteOf(c.id)) {
+      addToast(`${c.name} 还没回应上一次邀请，先等等 Ta`, 'info');
+      return;
+    }
+    const song = current
+      ? { songId: current.id, name: current.name, artists: current.artists, album: current.album, albumPic: current.albumPic, duration: current.duration, fee: current.fee }
+      : null;
+    // 卡正文是写给角色看的：邀请 + 回应协议内联在卡里（2026-08-27 她定：一起听交互不常驻
+    // 指令集，接受/婉拒的协议就住在邀请卡里）。卡在界面上渲染自己的样式，这段正文只进模型。
+    const uName = userProfile?.name || '她';
+    const respondGuide = '愿意接受就在这条回复的任意位置带上 [[MUSIC_ACTION:accept]]；想婉拒就带上 [[MUSIC_ACTION:decline]]。带上标签后照常说话就好，标签会被自动替换成卡片。';
+    const cardId = await DB.saveMessage({
+      charId: c.id,
+      role: 'system',
+      type: 'music_invite',
+      content: song
+        ? `[${uName} 邀请你一起听《${song.name}》。${respondGuide}]`
+        : `[${uName} 邀请你一起听首歌。${respondGuide}]`,
+      metadata: { source: 'music_invite', invite: { direction: 'user', song, inviteSongName: song?.name, status: 'pending' } },
+    });
+    addPendingInvite({ charId: c.id, direction: 'user', inviteSongName: song?.name, cardMessageId: String(cardId) });
+    addToast(`已邀请 ${c.name} 一起听`, 'info');
+    trackEvent('邀请角色一起听');
+  };
+
+  /** 退出确认：charId 有值 = 只结束和这一个；null = 全部结束（统一出口） */
+  const requestEndTogether = (charId: string | null) => setConfirmEndChar(charId);
+  const doEndTogether = (charId: string | null) => {
+    setConfirmEndChar(null);
+    void endListeningTogether(charId ?? undefined);
+    trackEvent('结束一起听');
+  };
+  // ── 角色歌单主页（2026-08-26）：charId = 拜访的角色 → 挂载角色 → 第一个角色 ──
+  const musicStore = useMusicStore();
+  const playlistCharId = visitCharId || getMountConfig().charId || characters[0]?.id || '';
+  // ── CSS 预设注入（2026-08-26 分页版；2026-08-30 加调色台层）：内置预设(夜色) → 调色台 → 基础(全局) → 当前页面 → 角色覆盖 ──
+  // 内置预设排最前，用户自己的 CSS 在后 → 后注入的覆盖预设，可自行微调
+  const cssScopeCharId = view === 'visit_char' ? (visitCharId ?? '') : view === 'playlist' ? playlistCharId : '';
+  const nightPreset = musicStore.cssPreset === 'night';
+  const paletteCss = buildPaletteCss(musicStore.palette);
+  useEffect(() => {
+    const layers = [
+      nightPreset ? MUSIC_NIGHT_PRESET_CSS : '',
+      paletteCss,
+      musicStore.cssGlobal,
+      musicStore.cssPages[view] ?? '',
+      cssScopeCharId ? (musicStore.cssPerChar[cssScopeCharId] ?? '') : '',
+    ].filter(Boolean);
+    const css = layers.join('\n');
+    let el = document.getElementById('mz-css-preset') as HTMLStyleElement | null;
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'mz-css-preset';
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
+    if (!css && el.parentNode) el.parentNode.removeChild(el);
+    return () => {
+      const tag = document.getElementById('mz-css-preset');
+      if (tag && tag.textContent === css && tag.parentNode) tag.parentNode.removeChild(tag);
+    };
+  }, [nightPreset, paletteCss, musicStore.cssGlobal, musicStore.cssPages, musicStore.cssPerChar, view, cssScopeCharId]);
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<Song[]>([]);
   const [searching, setSearching] = useState(false);
+  // ── 导入导出（CC 歌单） ──
+  const [importText, setImportText] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
+  // ── 结束总结 API 槽（从家里设置页搬来） ──
+  const [musicApiForm, setMusicApiForm] = useState({ baseUrl: musicStore.api?.baseUrl ?? '', apiKey: musicStore.api?.apiKey ?? '', model: musicStore.api?.model ?? '' });
+  // ── 自定义 CSS 预设（分页：基础 + 六页 + 角色页每角色覆盖） ──
+  const [cssScope, setCssScope] = useState<'base' | 'search' | 'player' | 'profile' | 'playlist' | 'visit_char' | 'settings' | 'chat' | 'miniplayer' | 'cards'>('base');
+  const [cssCharId, setCssCharId] = useState('');
+  const [cssDraft, setCssDraft] = useState('');
+  const cssCurrentValue = () => {
+    if (cssScope === 'base') return musicStore.cssGlobal;
+    if (cssScope === 'visit_char' && cssCharId) return musicStore.cssPerChar[cssCharId] ?? '';
+    return musicStore.cssPages[cssScope] ?? '';
+  };
+  const pickCssScope = (scope: typeof cssScope) => {
+    setCssScope(scope);
+    const v = scope === 'base'
+      ? musicStore.cssGlobal
+      : scope === 'visit_char' && cssCharId
+        ? (musicStore.cssPerChar[cssCharId] ?? '')
+        : (musicStore.cssPages[scope] ?? '');
+    setCssDraft(v);
+  };
+  const pickCssChar = (id: string) => {
+    setCssCharId(id);
+    setCssDraft(id ? (musicStore.cssPerChar[id] ?? '') : (musicStore.cssPages.visit_char ?? ''));
+  };
+  const saveCss = () => {
+    if (cssScope === 'base') setCssGlobal(cssDraft);
+    else if (cssScope === 'visit_char' && cssCharId) setCssPerChar(cssCharId, cssDraft);
+    else setCssPage(cssScope, cssDraft);
+    addToast('CSS 已保存', 'success');
+  };
+  const resetCss = () => {
+    if (cssScope === 'base') setCssGlobal('');
+    else if (cssScope === 'visit_char' && cssCharId) clearCssPerChar(cssCharId);
+    else clearCssPage(cssScope);
+    setCssDraft('');
+    addToast('已恢复默认样式', 'success');
+  };
+  const handleImport = async (raw?: unknown) => {
+    if (!playlistCharId) { addToast('先选一个角色再导入', 'error'); return; }
+    if (importBusy) return;
+    setImportBusy(true);
+    try {
+      // raw 只认字符串（文件读取传入）；按钮点击传进来的是事件对象，一律用 textarea 的 importText
+      const payload = typeof raw === 'string' ? raw : importText;
+      const result = await importMusicJson(playlistCharId, payload);
+      if (result.errors.length > 0 && result.imported === 0) {
+        addToast(`导入失败：${result.errors[0]}`, 'error');
+        return;
+      }
+      const mapped = result.mappedToPlaylists.length > 0 ? `，进了：${result.mappedToPlaylists.join('、')}` : '';
+      addToast(`导入 ${result.imported} 首${result.skipped > 0 ? `（重复跳过 ${result.skipped}）` : ''}${mapped}`, 'success');
+      setImportText('');
+      trackEvent('导入 CC 歌单');
+    } catch (e: any) {
+      addToast(`导入失败：${e.message}`, 'error');
+    } finally {
+      setImportBusy(false);
+    }
+  };
+  const handleImportFile = (file: File) => {
+    file.text().then((t) => { setImportText(t); handleImport(t); }).catch(() => addToast('文件读不出来', 'error'));
+  };
+  const handleExport = () => {
+    const charName = characters.find((c) => c.id === playlistCharId)?.name;
+    const json = exportMusicJson(charName);
+    const blob = new Blob([json], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `sully-music-export-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    addToast('已导出（新增播放记录 + 全部印象）', 'success');
+    trackEvent('导出音乐数据给 CC');
+  };
   const lyricBoxRef = useRef<HTMLDivElement | null>(null);
 
   // 歌词自动滚动：把 current line 对齐到滚动容器视觉中心
@@ -147,14 +339,22 @@ const MusicApp: React.FC = () => {
 
   // ════════════════ 搜索页 ════════════════
   const renderSearch = () => (
-    <div className="flex flex-col h-full relative"
-      style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
+    <div className="mz-search flex flex-col h-full relative"
+      style={{ background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDeep} 50%, ${C.bgTint} 100%)` }}>
       <BokehBg />
       <MizuHeader
         title="未来音楽"
         onClose={closeApp}
         right={
           <div className="flex items-center gap-1">
+            <button
+              onClick={() => setView('playlist')}
+              className="p-1.5 rounded-full transition-all"
+              style={{ color: C.primary }}
+              title="角色歌单"
+            >
+              <MusicNote size={16} weight="bold" />
+            </button>
             <button
               onClick={() => setView('profile')}
               className="p-1.5 rounded-full transition-all"
@@ -195,7 +395,7 @@ const MusicApp: React.FC = () => {
           <button
             onClick={() => setView('profile')}
             className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] cursor-pointer"
-            style={{ background: `${C.vip}18`, color: C.vip, border: `1px solid ${C.vip}30` }}
+            style={{ background: `rgba(var(--mz-vip-rgb, 212,160,106), 0.09)`, color: C.vip, border: `1px solid rgba(var(--mz-vip-rgb, 212,160,106), 0.19)` }}
           >
             未登录 — 点击登录网易云
           </button>
@@ -244,7 +444,7 @@ const MusicApp: React.FC = () => {
           userAvatar={userProfile?.avatar}
           userName={userProfile?.name}
           companions={companions}
-          onKickCompanion={charId => { removeListeningPartner(charId); trackEvent('结束和角色的一起听'); }}
+          onKickCompanion={charId => { requestEndTogether(charId); trackEvent('结束和角色的一起听'); }}
           charsWithSong={charsWithSong}
           regenStatus={isCurrentRegenerating ? regeneratingStatus : undefined}
         />
@@ -264,10 +464,53 @@ const MusicApp: React.FC = () => {
   const renderPlayer = () => {
     if (!current) return null;
     return (
-      <div className="flex flex-col h-full relative"
-        style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 60%, ${C.bgDeep} 100%)` }}>
+      <div className="mz-player flex flex-col h-full relative"
+        style={{ background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDeep} 50%, ${C.bgTint} 100%)` }}>
         <BokehBg />
-        <MizuHeader title="Now Playing" onBack={() => setView('search')} />
+        <MizuHeader title="Now Playing" onBack={() => setView('search')} right={
+          <div className="flex items-center gap-1.5">
+            {/* 聊歌入口：只有在一起听中才出现（没邀请人跟谁聊） */}
+            {companions.length > 0 && (
+              <button
+                onClick={() => { setChatCharId(companions[0]?.id ?? playlistCharId); setView('chat'); trackEvent('打开聊歌框'); }}
+                aria-label="聊歌"
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
+                style={{ color: C.primary, border: '1px solid rgba(255,255,255,0.45)', background: C.glass }}
+              >
+                <ChatCircleText size={15} weight="duotone" />
+              </button>
+            )}
+            {/* 一起听：未开始=邀请，进行中=点亮态 */}
+            {companions.length === 0 ? (
+              <button
+                onClick={() => { setShowInvitePicker(true); trackEvent('打开一起听邀请'); }}
+                aria-label="邀请一起听"
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
+                style={{ color: C.sakura, border: `1px solid rgba(var(--mz-sakura-rgb, 244,194,207), 0.45)`, background: C.glass }}
+              >
+                <Headphones size={15} weight="duotone" />
+              </button>
+            ) : (
+              <button
+                onClick={() => addToast(`${companions[0]?.name || 'Ta'} 正在和你一起听`, 'info')}
+                aria-label="正在一起听"
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
+                style={{ color: '#fff', background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`, boxShadow: `0 2px 8px rgba(var(--mz-sakura-rgb, 244,194,207), 0.35)` }}
+              >
+                <Headphones size={15} weight="fill" />
+              </button>
+            )}
+          </div>
+        } />
+
+        {/* 夜色预设：双人状态区（重叠头像 + 弧线 + 状态文本，附件图一） */}
+        {nightPreset && companions.length > 0 && (
+          <NightTogetherStrip
+            userAvatar={userProfile.avatar}
+            userName={userProfile.name}
+            companion={companions[0]}
+          />
+        )}
 
         <div className="flex-1 flex flex-col items-center px-5 pt-4 pb-3 relative z-10 overflow-hidden">
           <div className="shrink-0 mt-1 relative">
@@ -279,7 +522,7 @@ const MusicApp: React.FC = () => {
                   background: `radial-gradient(circle, rgba(0,0,0,0.55) 30%, rgba(0,0,0,0.35) 70%)`,
                   backdropFilter: 'blur(6px)',
                   WebkitBackdropFilter: 'blur(6px)',
-                  boxShadow: `0 0 30px ${C.glow}80`,
+                  boxShadow: `0 0 30px rgba(var(--mz-glow-rgb, 205,198,233), 0.5)`,
                   animation: 'shizuku-glow 2s ease-in-out infinite',
                 }}
               >
@@ -300,8 +543,8 @@ const MusicApp: React.FC = () => {
           {isCurrentRegenerating && (
             <div className="mt-3 px-3 py-1.5 rounded-full flex items-center gap-2 text-[10px] tracking-wider"
               style={{
-                background: `linear-gradient(135deg, ${C.primary}15, ${C.lavender}25)`,
-                border: `1px solid ${C.glow}60`,
+                background: `linear-gradient(135deg, rgba(var(--mz-primary-rgb, 128,124,157), 0.08), rgba(var(--mz-lavender-rgb, 207,195,232), 0.15))`,
+                border: `1px solid rgba(var(--mz-glow-rgb, 205,198,233), 0.38)`,
                 color: C.primary,
               }}
             >
@@ -370,11 +613,11 @@ const MusicApp: React.FC = () => {
                             color: active ? undefined : C.faint,
                             ...(active
                               ? {
-                                  background: `linear-gradient(135deg, ${C.primary} 0%, ${C.accent} 50%, #9a6bc5 100%)`,
+                                  background: `linear-gradient(135deg, ${C.primary} 0%, ${C.accent} 50%, ${C.deep} 100%)`,
                                   WebkitBackgroundClip: 'text',
                                   WebkitTextFillColor: 'transparent',
                                   backgroundClip: 'text',
-                                  filter: `drop-shadow(0 0 14px ${C.glow}a0) drop-shadow(0 0 4px ${C.sakura}80)`,
+                                  filter: `drop-shadow(0 0 14px rgba(var(--mz-glow-rgb, 205,198,233), 0.63)) drop-shadow(0 0 4px rgba(var(--mz-sakura-rgb, 244,194,207), 0.5))`,
                                 }
                               : {}),
                           }}
@@ -430,6 +673,35 @@ const MusicApp: React.FC = () => {
             />
           </div>
 
+          {/* 一起听状态条（批 2）：正在一起听时出现——双头像 + 聊歌入口 + 结束
+              夜色预设下不显示（底部是胶囊切换台，这个条和附件设计不符） */}
+          {!nightPreset && companions.length > 0 && (
+            <div className="shrink-0 mt-3 w-full max-w-sm">
+              <TogetherHeader
+                userAvatar={userProfile?.avatar}
+                userName={userProfile?.name}
+                companions={companions}
+                onKick={(id) => requestEndTogether(id)}
+              />
+              <div className="flex items-center justify-center gap-2 -mt-1.5">
+                <button
+                  onClick={() => { setChatCharId(companions[0]?.id ?? playlistCharId); setView('chat'); trackEvent('打开聊歌框'); }}
+                  className="rounded-full px-3 py-1 text-[10px] font-semibold transition-all active:scale-95"
+                  style={{ color: C.primary, border: `1px solid rgba(var(--mz-lavender-rgb, 207,195,232), 0.4)`, background: C.glass }}
+                >
+                  💬 聊这首歌
+                </button>
+                <button
+                  onClick={() => requestEndTogether(null)}
+                  className="rounded-full px-3 py-1 text-[10px] font-medium transition-all active:scale-95"
+                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)', background: C.glass }}
+                >
+                  结束一起听
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="shrink-0 mt-3 w-full">
             <SubActions
               liked={liked}
@@ -447,8 +719,49 @@ const MusicApp: React.FC = () => {
             />
           </div>
         </div>
+
+        {/* 夜色预设：底部「听歌 | 聊歌」胶囊切换台（附件图一） */}
+        {nightPreset && (
+          <div className="shrink-0 relative z-10 flex items-center justify-center pb-[calc(var(--safe-bottom)+10px)]">
+            <div className="flex items-center rounded-full px-1 py-1"
+              style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)' }}>
+              <button
+                className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] font-semibold transition-all"
+                style={{ background: 'rgba(255,255,255,0.16)', color: '#fff' }}
+              >
+                <MusicNote size={12} weight="duotone" /> 听歌
+              </button>
+              <button
+                onClick={() => { setChatCharId(companions[0]?.id ?? playlistCharId); setView('chat'); }}
+                className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] transition-all"
+                style={{ color: 'rgba(255,255,255,0.55)' }}
+              >
+                <ChatCircleText size={12} weight="duotone" /> 聊歌
+              </button>
+            </div>
+            {companions.length > 0 && (
+              <button
+                onClick={() => requestEndTogether(null)}
+                className="absolute right-4 w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90"
+                style={{ color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.15)' }}
+                aria-label="结束一起听"
+                title="结束一起听"
+              >
+                <X size={11} weight="bold" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
+  };
+
+  // ════════════════ 聊歌框（批 2：独立会话，对象 = 一起听伙伴 > 挂载角色） ════════════════
+  const renderChat = () => {
+    const partnerId = chatCharId || getMountConfig().charId || characters[0]?.id || '';
+    const partner = characters.find((c) => c.id === partnerId);
+    if (!partner) return null;
+    return <MusicChatBox charId={partner.id} onBack={() => setView('player')} />;
   };
 
   // ════════════════ 设置页 ════════════════
@@ -460,19 +773,15 @@ const MusicApp: React.FC = () => {
     };
     const followsCentral = !cfg.workerUrl.trim();
     return (
-      <div className="flex flex-col h-full relative"
-        style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
+      <div className="mz-settings flex flex-col h-full relative"
+        style={{ background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDeep} 50%, ${C.bgTint} 100%)` }}>
         <BokehBg />
         <MizuHeader title="设置" onBack={() => setView('search')} />
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5 text-sm relative z-10 shizuku-scrollbar">
-          <div className="rounded-2xl p-3.5 shizuku-glass" style={{ boxShadow: `0 2px 16px ${C.glow}08` }}>
-            <div className="text-[10px] mb-2 tracking-wider flex items-center justify-between" style={{ color: C.muted }}>
-              <span className="flex items-center gap-1.5"><Sparkle size={6} color={C.glow} delay={0} /> 服务地址</span>
-              {!followsCentral && (
-                <button onClick={() => setDraft({ workerUrl: '' })}
-                  className="text-[9px] underline" style={{ color: C.muted }}>改回跟随中心</button>
-              )}
-            </div>
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.glow} delay={0} /> 服务地址</span>} right={cfg.workerUrl.trim() !== getProxyWorkerUrl() ? (
+            <button onClick={() => setDraft({ workerUrl: getProxyWorkerUrl() })}
+              className="text-[9px] underline border-0 bg-transparent cursor-pointer" style={{ color: C.muted }}>恢复默认</button>
+          ) : null}>
             <input className="w-full rounded-xl px-3 py-2 outline-none text-xs shizuku-glass" value={cfg.workerUrl}
               onChange={e => setDraft({ workerUrl: e.target.value })} placeholder={effectiveWorkerUrl}
               style={{ color: C.text }} />
@@ -481,22 +790,16 @@ const MusicApp: React.FC = () => {
                 ? <>跟随「设置 → 网络代理」：{effectiveWorkerUrl}</>
                 : <>只在音乐里用这个地址，「设置 → 网络代理」改了也不跟</>}
             </div>
-          </div>
-          <div className="rounded-2xl p-3.5 shizuku-glass" style={{ boxShadow: `0 2px 16px ${C.glow}08` }}>
-            <div className="text-[10px] mb-2 tracking-wider flex items-center gap-1.5" style={{ color: C.muted }}>
-              <Sparkle size={6} color={C.sakura} delay={0.5} /> 会员 Cookie
-            </div>
+          </SettingsFold>
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.sakura} delay={0.5} /> 会员 Cookie</span>}>
             <textarea className="w-full rounded-xl px-3 py-2 outline-none text-[10px] shizuku-glass" rows={3} value={cfg.cookie}
               onChange={e => setDraft({ cookie: e.target.value })} placeholder="MUSIC_U=xxx 或直接粘贴值..."
               style={{ color: C.text, fontFamily: 'monospace', resize: 'none' }} />
             <div className="text-[9px] mt-1.5 italic" style={{ color: C.faint }}>
               也可以在「我的」页面里扫码 / 手机号登录，自动填入 cookie
             </div>
-          </div>
-          <div className="rounded-2xl p-3.5 shizuku-glass" style={{ boxShadow: `0 2px 16px ${C.glow}08` }}>
-            <div className="text-[10px] mb-2 tracking-wider flex items-center gap-1.5" style={{ color: C.muted }}>
-              <Sparkle size={6} color={C.lavender} delay={1} /> 音质
-            </div>
+          </SettingsFold>
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.lavender} delay={1} /> 音质</span>}>
             <div className="grid grid-cols-5 gap-1.5">
               {(['standard', 'higher', 'exhigh', 'lossless', 'hires'] as const).map(q => (
                 <button key={q} onClick={() => { setDraft({ quality: q }); trackEvent('切换音质档位', { quality: q }); }}
@@ -505,14 +808,506 @@ const MusicApp: React.FC = () => {
                     background: cfg.quality === q ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
                     color: cfg.quality === q ? 'white' : C.muted,
                     border: cfg.quality === q ? '1px solid transparent' : `1px solid rgba(255,255,255,0.3)`,
-                    boxShadow: cfg.quality === q ? `0 2px 12px ${C.glow}30` : 'none',
+                    boxShadow: cfg.quality === q ? `0 2px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` : 'none',
                     backdropFilter: 'blur(8px)',
                   }}
                 >{q}</button>
               ))}
             </div>
             <div className="text-[9px] mt-1.5 italic" style={{ color: C.faint }}>lossless / hires 需要黑胶 SVIP</div>
-          </div>
+          </SettingsFold>
+          {/* ── 我们的数据备份（2026-09-04 分功能入口） ── */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.sakura} delay={0.8} /> 数据备份</span>}>
+            <DataBackupPanel scope="music" />
+          </SettingsFold>
+          {/* ── 导入导出（2026-08-26：CC↔Sully 第一个数据同步区） ── */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.primary} delay={0.3} /> 导入导出（Claude Code 歌单）</span>}>
+            {/* 角色选择 */}
+            <div className="flex items-center gap-1.5 flex-wrap mb-2">
+              {characters.slice(0, 8).map((c) => {
+                const selected = playlistCharId === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setVisitCharId(c.id)}
+                    className="rounded-full px-3 py-1.5 transition-all"
+                    style={{
+                      fontSize: 10, fontWeight: 600,
+                      background: selected ? C.primary : C.glass,
+                      color: selected ? '#fff' : C.muted,
+                      border: `1px solid ${selected ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                    }}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+            <textarea
+              className="w-full rounded-xl px-3 py-2 outline-none text-[10px] shizuku-glass"
+              rows={3}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder={'粘贴 Claude Code 导出的 JSON（schema: sully-music-import-v1）'}
+              style={{ color: C.text, fontFamily: 'monospace', resize: 'none' }}
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={() => handleImport()}
+                disabled={importBusy}
+                className="flex-1 py-2 rounded-xl text-[10px] font-semibold text-white transition-all disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})` }}
+              >
+                {importBusy ? '导入中…' : '粘贴导入'}
+              </button>
+              <label className="flex-1 py-2 rounded-xl text-[10px] font-semibold text-center cursor-pointer"
+                style={{ color: C.primary, border: `1px solid rgba(var(--mz-primary-rgb, 128,124,157), 0.27)` }}>
+                选择文件导入
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleImportFile(f);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
+            <button
+              onClick={handleExport}
+              className="w-full mt-2 py-2 rounded-xl text-[10px] font-semibold"
+              style={{ color: C.vip, border: `1px solid rgba(var(--mz-vip-rgb, 212,160,106), 0.19)` }}
+            >
+              导出给 Claude Code（播放记录 + 印象）
+            </button>
+            {musicStore.importBatches.length > 0 && (
+              <div className="mt-2 pt-2" style={{ borderTop: `1px dashed rgba(var(--mz-faint-rgb, 188,184,204), 0.2)` }}>
+                <div className="text-[9px] mb-1 tracking-wider" style={{ color: C.faint }}>最近导入</div>
+                {musicStore.importBatches.slice(0, 3).map((b) => (
+                  <div key={b.id} className="text-[9px] leading-relaxed" style={{ color: C.muted }}>
+                    {b.importedAt.slice(0, 16).replace('T', ' ')} · {b.songCount} 首{b.skippedCount > 0 ? ` · 重复跳过 ${b.skippedCount}` : ''}{b.note ? ` · ${b.note}` : ''}
+                  </div>
+                ))}
+              </div>
+            )}
+          </SettingsFold>
+
+          {/* ── 歌词注入（2026-08-26 她定：随用随调试的调音台，长期试错区） ── */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.primary} delay={0.1} /> 歌词注入（模型读到的歌词）</span>}>
+            <div className="text-[9px] mb-2 italic" style={{ color: C.faint }}>
+              位置参照世界书式挂载原则（0 角色设定前 / 1 角色设定后 / 4 聊天记录指定深度＝插在倒数第 N 条消息前）。改完下一条消息生效，随用随调。
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-[10px]" style={{ color: C.text }}>窗口半径（当前行 ±N）</div>
+                <div className="text-[9px]" style={{ color: C.faint }}>前后各 N 行，0 = 只看当前行</div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setLyricInject({ windowRadius: Math.max(0, (musicStore.lyricInject.windowRadius ?? 2) - 1) })}
+                  className="w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)' }}
+                >−</button>
+                <div className="min-w-[20px] text-center text-[12px] font-bold" style={{ color: C.text }}>{musicStore.lyricInject.windowRadius ?? 2}</div>
+                <button
+                  type="button"
+                  onClick={() => setLyricInject({ windowRadius: Math.min(8, (musicStore.lyricInject.windowRadius ?? 2) + 1) })}
+                  className="w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)' }}
+                >+</button>
+              </div>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px]" style={{ color: C.text }}>全量歌词位置</div>
+              <div className="flex items-center gap-1">
+                {([[0, '角色设定前'], [1, '角色设定后'], [4, '聊天深度']] as const).map(([pos, label]) => (
+                  <button
+                    key={pos}
+                    type="button"
+                    onClick={() => setLyricInject({ fullLyricPos: pos })}
+                    className="rounded-full px-2.5 py-1 text-[9px] font-semibold transition-all"
+                    style={{
+                      background: (musicStore.lyricInject.fullLyricPos ?? 1) === pos ? C.primary : C.glass,
+                      color: (musicStore.lyricInject.fullLyricPos ?? 1) === pos ? '#fff' : C.muted,
+                      border: (musicStore.lyricInject.fullLyricPos ?? 1) === pos ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px]" style={{ color: C.text }}>当前窗口位置</div>
+              <div className="flex items-center gap-1">
+                {([[1, '角色设定后'], [4, '聊天深度']] as const).map(([pos, label]) => (
+                  <button
+                    key={pos}
+                    type="button"
+                    onClick={() => setLyricInject({ windowPos: pos })}
+                    className="rounded-full px-2.5 py-1 text-[9px] font-semibold transition-all"
+                    style={{
+                      background: (musicStore.lyricInject.windowPos ?? 4) === pos ? C.primary : C.glass,
+                      color: (musicStore.lyricInject.windowPos ?? 4) === pos ? '#fff' : C.muted,
+                      border: (musicStore.lyricInject.windowPos ?? 4) === pos ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-[10px]" style={{ color: C.text }}>窗口深度（倒数第 N 条消息前）</div>
+                <div className="text-[9px]" style={{ color: C.faint }}>窗口位置选「聊天深度」时生效，照世界书 depth</div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setLyricInject({ windowDepth: Math.max(0, (musicStore.lyricInject.windowDepth ?? 4) - 1) })}
+                  className="w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)' }}
+                >−</button>
+                <div className="min-w-[20px] text-center text-[12px] font-bold" style={{ color: C.text }}>{musicStore.lyricInject.windowDepth ?? 4}</div>
+                <button
+                  type="button"
+                  onClick={() => setLyricInject({ windowDepth: Math.min(8, (musicStore.lyricInject.windowDepth ?? 4) + 1) })}
+                  className="w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)' }}
+                >+</button>
+              </div>
+            </div>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-[10px]" style={{ color: C.text }}>注入全量歌词</div>
+                <div className="text-[9px]" style={{ color: C.faint }}>关掉后模型只读窗口，不读整首</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLyricInject({ fullLyric: !(musicStore.lyricInject.fullLyric ?? true) })}
+                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all"
+                style={{
+                  background: (musicStore.lyricInject.fullLyric ?? true) ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
+                  color: (musicStore.lyricInject.fullLyric ?? true) ? '#fff' : C.muted,
+                  border: (musicStore.lyricInject.fullLyric ?? true) ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                }}
+              >
+                {(musicStore.lyricInject.fullLyric ?? true) ? '已开启' : '已关闭'}
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[10px]" style={{ color: C.text }}>关键词触发</div>
+                <div className="text-[9px]" style={{ color: C.faint }}>最近 4 条提到歌/歌词/这首歌名字才给窗口，没提不注入</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLyricInject({ keywordTrigger: !(musicStore.lyricInject.keywordTrigger ?? true) })}
+                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all"
+                style={{
+                  background: (musicStore.lyricInject.keywordTrigger ?? true) ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
+                  color: (musicStore.lyricInject.keywordTrigger ?? true) ? '#fff' : C.muted,
+                  border: (musicStore.lyricInject.keywordTrigger ?? true) ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                }}
+              >
+                {(musicStore.lyricInject.keywordTrigger ?? true) ? '已开启' : '已关闭'}
+              </button>
+            </div>
+          </SettingsFold>
+
+          {/* ── 结束总结 API（2026-08-26 她定：从家里设置页搬来，音乐的事都在音乐 App 配） ── */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.sakura} delay={0.4} /> 一起听结束总结 API（独立槽）</span>}>
+            <div className="text-[9px] mb-2 italic" style={{ color: C.faint }}>
+              一起听结束时生成总结卡用。留空 = 退出时提示「会话已保存，配置后补生成」。聊歌、印象生成走主 API，不在这里配。
+            </div>
+            <div className="flex flex-col mb-2" style={{ gap: 6 }}>
+              <input value={musicApiForm.baseUrl} onChange={(e) => setMusicApiForm({ ...musicApiForm, baseUrl: e.target.value })} placeholder="总结 API Base URL（已带 /v1）" className="shizuku-input text-[10px]" style={{ background: C.glass, color: C.text, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
+              <input value={musicApiForm.apiKey} onChange={(e) => setMusicApiForm({ ...musicApiForm, apiKey: e.target.value })} placeholder="总结 API Key" className="shizuku-input text-[10px]" style={{ background: C.glass, color: C.text, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
+              <input value={musicApiForm.model} onChange={(e) => setMusicApiForm({ ...musicApiForm, model: e.target.value })} placeholder="总结模型名" className="shizuku-input text-[10px]" style={{ background: C.glass, color: C.text, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
+            </div>
+            <button
+              type="button"
+              onClick={() => { setMusicApi({ baseUrl: musicApiForm.baseUrl.trim(), apiKey: musicApiForm.apiKey.trim(), model: musicApiForm.model.trim() }); addToast('音乐总结 API 已保存', 'success'); }}
+              className="rounded-full w-full border-0 cursor-pointer"
+              style={{ padding: '8px 0', fontSize: 11, fontWeight: 700, color: '#fff', background: `linear-gradient(135deg, ${C.primary}, ${C.accent})` }}
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              disabled={pendingSummariesBusy}
+              onClick={() => {
+                setPendingSummariesBusy(true);
+                void maybeGeneratePendingSummaries()
+                  .then((r) => {
+                    setPendingSummariesBusy(false);
+                    if (r.togetherDone + r.chatDone > 0) {
+                      addToast(`补生成完成：总结卡 ${r.togetherDone} 张、聊歌小结 ${r.chatDone} 段`, 'success');
+                    } else {
+                      addToast('没有可补的内容（或 API 未配置）', 'info');
+                    }
+                  })
+                  .catch(() => { setPendingSummariesBusy(false); addToast('补生成失败', 'error'); });
+              }}
+              className="rounded-full w-full border-0 cursor-pointer mt-2 disabled:opacity-50"
+              style={{ padding: '7px 0', fontSize: 10, fontWeight: 600, color: C.primary, border: `1px solid rgba(var(--mz-lavender-rgb, 207,195,232), 0.4)`, background: C.glass }}
+            >
+              {pendingSummariesBusy ? '补生成中…' : '补生成没落下的总结卡'}
+            </button>
+          </SettingsFold>
+
+          {/* ── 聊歌页背景自设（2026-08-30 她要求：聊歌页背景开放自设；头像开关同批） ── */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.lavender} delay={0.8} /> 聊歌页</span>} right={<span className="text-[9px]" style={{ color: C.faint }}>背景图 + 底色 + 头像开关，即时生效</span>}>
+            {/* 头像开关（2026-08-30）：气泡旁显示你和 Ta 的头像 */}
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-[10px]" style={{ color: C.text }}>显示头像</div>
+                <div className="text-[9px]" style={{ color: C.faint }}>气泡旁带上你和 Ta 的头像，页面更满一点</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setChatShowAvatar(musicStore.chatShowAvatar === false)}
+                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all"
+                style={{
+                  background: musicStore.chatShowAvatar !== false ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
+                  color: musicStore.chatShowAvatar !== false ? '#fff' : C.muted,
+                  border: musicStore.chatShowAvatar !== false ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                }}
+              >
+                {musicStore.chatShowAvatar !== false ? '已开启' : '已关闭'}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="flex-1 rounded-xl px-3 py-2 text-center text-[10px] cursor-pointer transition-all"
+                style={{ color: C.primary, background: C.glass, border: '1px dashed rgba(var(--mz-primary-rgb, 128,124,157), 0.4)' }}>
+                上传背景图
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const ref = await putImageBlob(file);
+                      setChatBg(ref, musicStore.chatBgColor);
+                      addToast('聊歌背景已更新', 'success');
+                    } catch {
+                      addToast('背景图保存失败', 'error');
+                    }
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={!musicStore.chatBgImage}
+                onClick={() => { setChatBg(undefined, musicStore.chatBgColor); addToast('背景图已撤下', 'info'); }}
+                className="rounded-xl px-3 py-2 text-[10px] transition-all disabled:opacity-40"
+                style={{ color: C.muted, background: C.glass, border: '1px solid rgba(255,255,255,0.3)' }}
+              >
+                撤图
+              </button>
+              <input
+                type="color"
+                value={musicStore.chatBgColor || '#fdf4f7'}
+                onChange={(e) => setChatBg(musicStore.chatBgImage, e.target.value)}
+                className="w-9 h-9 rounded-lg cursor-pointer"
+                style={{ border: '1px solid rgba(255,255,255,0.35)', background: C.glass }}
+                aria-label="聊歌背景底色"
+              />
+            </div>
+            {musicStore.chatBgColor && (
+              <div className="text-[9px] mt-1.5 italic" style={{ color: C.faint }}>
+                底色 {musicStore.chatBgColor} · 想回到默认就把它清掉（切到 #fdf4f7 即默认底色）
+              </div>
+            )}
+          </SettingsFold>
+
+          {/* ── 调色台（2026-08-30 她要求：音乐页那个紫色整个可调，这一页所有颜色都放进来） ── */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.sakura} delay={0.6} /> 调色台（整页配色）</span>} right={
+            <button
+              type="button"
+              onClick={() => { resetMusicPalette(); addToast('配色已恢复默认', 'success'); }}
+              className="text-[9px] underline border-0 cursor-pointer"
+              style={{ color: C.muted, background: 'transparent' }}
+            >
+              恢复默认
+            </button>
+          }>
+            <div className="text-[9px] mb-2 italic" style={{ color: C.faint }}>
+              改完即时生效。调色盖在内置预设（夜色）之上，自己手写的 CSS 仍然盖过调色台。透明拼接用的 -rgb 变量自动同步，不用管。
+            </div>
+            <div className="grid grid-cols-4 gap-1.5 mb-2.5">
+              {MUSIC_PALETTE_KEYS.map((key) => (
+                <div key={key} className="flex flex-col items-center gap-0.5 rounded-xl px-1 py-1.5"
+                  style={{ background: 'rgba(255,255,255,0.5)' }}>
+                  <span className="text-[8px]" style={{ color: C.muted }}>{PALETTE_LABELS[key]}</span>
+                  <input
+                    type="color"
+                    value={musicStore.palette?.[key] ?? MUSIC_PALETTE_DEFAULTS[key]}
+                    onChange={(e) => setMusicPalette({ [key]: e.target.value })}
+                    className="w-7 h-7 rounded-md cursor-pointer"
+                    style={{ border: '1px solid rgba(255,255,255,0.45)', background: 'transparent' }}
+                    aria-label={`${PALETTE_LABELS[key]}调色`}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div>
+                <div className="text-[9px]" style={{ color: C.text }}>玻璃面白度（surface）</div>
+                <div className="text-[8px]" style={{ color: C.faint }}>气泡/面板的白色玻璃深浅</div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="range" min={0} max={100} step={5}
+                  value={Number(musicStore.palette?.surface ?? SURFACE_DEFAULT_PCT)}
+                  onChange={(e) => setMusicPalette({ surface: e.target.value })}
+                  style={{ width: 90 }}
+                />
+                <span className="text-[9px] tabular-nums" style={{ color: C.muted }}>{musicStore.palette?.surface ?? SURFACE_DEFAULT_PCT}%</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[9px]" style={{ color: C.text }}>玻璃面白度（glass）</div>
+                <div className="text-[8px]" style={{ color: C.faint }}>按钮/轨道等浅玻璃</div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="range" min={0} max={100} step={5}
+                  value={Number(musicStore.palette?.glass ?? GLASS_DEFAULT_PCT)}
+                  onChange={(e) => setMusicPalette({ glass: e.target.value })}
+                  style={{ width: 90 }}
+                />
+                <span className="text-[9px] tabular-nums" style={{ color: C.muted }}>{musicStore.palette?.glass ?? GLASS_DEFAULT_PCT}%</span>
+              </div>
+            </div>
+          </SettingsFold>
+
+          {/* ── 自定义 CSS（2026-08-26 她的意见：放音乐设置页顺手） ── */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.sakura} delay={0.2} /> 自定义 CSS（换肤 / 深度定制）</span>} right={<span className="text-[9px]" style={{ color: C.faint }}>写法说明见 docs/music-css-presets.md</span>}>
+            <div className="text-[9px] mb-2 italic" style={{ color: C.faint }}>
+              基础 = 全局变量（--mz-*），作用所有页面；每个页面单独一份，互不干扰；角色页可以再按角色覆盖。三层按「基础 → 当前页 → 角色」叠加。
+            </div>
+            {/* 内置预设（2026-08-30）：沉浸夜色 = 播放页/聊歌页深色版，选上后自己写的 CSS 仍叠加在上 */}
+            <div className="flex items-center gap-1.5 flex-wrap mb-2">
+              <span className="text-[9px] mr-1" style={{ color: C.faint }}>内置预设</span>
+              {([
+                [undefined, '默认'],
+                ['night', '沉浸夜色'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setCssPreset(key)}
+                  className="rounded-full px-3 py-1.5 transition-all"
+                  style={{
+                    fontSize: 10, fontWeight: 600,
+                    background: (musicStore.cssPreset ?? undefined) === key ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
+                    color: (musicStore.cssPreset ?? undefined) === key ? '#fff' : C.muted,
+                    border: `1px solid ${(musicStore.cssPreset ?? undefined) === key ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap mb-1">
+              {([
+                ['base', '基础'],
+                ['search', '搜索页'],
+                ['player', '播放页'],
+                ['profile', '我的页'],
+                ['playlist', '歌单页'],
+                ['visit_char', '角色页'],
+                ['chat', '聊歌页'],
+                ['miniplayer', '悬浮窗'],
+                ['cards', '聊天卡片'],
+                ['settings', '设置页'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => pickCssScope(key)}
+                  className="rounded-full px-3 py-1.5 transition-all"
+                  style={{
+                    fontSize: 10, fontWeight: 600,
+                    background: cssScope === key ? C.primary : C.glass,
+                    color: cssScope === key ? '#fff' : C.muted,
+                    border: `1px solid ${cssScope === key ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {cssScope === 'visit_char' && (
+              <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                <span className="text-[9px]" style={{ color: C.faint }}>给谁：</span>
+                <button
+                  type="button"
+                  onClick={() => pickCssChar('')}
+                  className="rounded-full px-3 py-1 transition-all"
+                  style={{
+                    fontSize: 10, fontWeight: 600,
+                    background: cssCharId === '' ? C.primary : C.glass,
+                    color: cssCharId === '' ? '#fff' : C.muted,
+                    border: `1px solid ${cssCharId === '' ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                  }}
+                >
+                  所有角色
+                </button>
+                {characters.slice(0, 8).map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => pickCssChar(c.id)}
+                    className="rounded-full px-3 py-1 transition-all"
+                    style={{
+                      fontSize: 10, fontWeight: 600,
+                      background: cssCharId === c.id ? C.primary : C.glass,
+                      color: cssCharId === c.id ? '#fff' : C.muted,
+                      border: `1px solid ${cssCharId === c.id ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                    }}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <textarea
+              className="w-full rounded-xl px-3 py-2 outline-none text-[10px] shizuku-glass"
+              rows={5}
+              value={cssDraft}
+              onChange={(e) => setCssDraft(e.target.value)}
+              placeholder={'例如（换成明显不同的颜色一眼能看出来）：\n:root { --mz-primary: #2f6f4f; --mz-primary-rgb: 47,111,79; --mz-accent: #57a87f; --mz-glow: #8fd0ab; --mz-glow-rgb: 143,208,171; }\n\n换色同时改 -rgb 变量（透明色用得上）。'}
+              style={{ color: C.text, fontFamily: 'monospace', resize: 'vertical', minHeight: 90 }}
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={saveCss}
+                className="flex-1 py-2 rounded-xl text-[10px] font-semibold text-white"
+                style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})` }}
+              >
+                应用并保存
+              </button>
+              {cssCurrentValue() ? (
+                <button
+                  type="button"
+                  onClick={resetCss}
+                  className="py-2 px-4 rounded-xl text-[10px] font-semibold"
+                  style={{ color: C.vip, border: `1px solid ${C.vip}30` }}
+                >
+                  恢复默认
+                </button>
+              ) : null}
+            </div>
+          </SettingsFold>
+
           <div className="space-y-3 pt-1">
             <button
               onClick={async () => {
@@ -533,11 +1328,11 @@ const MusicApp: React.FC = () => {
                 alert(lines.join('\n'));
               }}
               className="w-full py-2.5 rounded-2xl text-[10px] tracking-wider shizuku-glass transition-all"
-              style={{ color: C.vip, border: `1px solid ${C.vip}30` }}
+              style={{ color: C.vip, border: `1px solid rgba(var(--mz-vip-rgb, 212,160,106), 0.19)` }}
             >诊断（搜索晴天）</button>
             <button onClick={commit}
               className="w-full py-3 rounded-2xl text-xs text-white tracking-wider transition-all relative overflow-hidden"
-              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px ${C.glow}30` }}>
+              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}>
               <span className="relative z-10">保存</span>
               <div className="absolute inset-0 pointer-events-none" style={{
                 background: `linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.25) 50%, transparent 70%)`,
@@ -551,10 +1346,13 @@ const MusicApp: React.FC = () => {
   };
 
   return (
-    <div className="absolute inset-0 overflow-hidden">
-      {view === 'search' && renderSearch()}
-      {view === 'player' && renderPlayer()}
-      {view === 'settings' && renderSettings()}
+    <div className={`mz-app absolute inset-0 overflow-hidden${nightPreset ? ' mz-night' : ''}`}>
+      {/* 视图切换过渡（2026-08-30）：听歌 ↔ 聊歌切页淡入，不再硬切 */}
+      <div key={view} className="absolute inset-0 animate-fade-in" style={{ animationDuration: '260ms' }}>
+        {view === 'search' && renderSearch()}
+        {view === 'player' && renderPlayer()}
+        {view === 'settings' && renderSettings()}
+        {view === 'chat' && renderChat()}
       {view === 'profile' && (
         <NeteaseProfilePage
           onBack={closeApp}
@@ -602,7 +1400,7 @@ const MusicApp: React.FC = () => {
 
         return (
           <div className="absolute inset-0 z-50 flex flex-col"
-            style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 60%, ${C.bgDeep} 100%)` }}>
+            style={{ background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDeep} 50%, ${C.bgTint} 100%)` }}>
             <BokehBg />
             {/* Header */}
             <div className="relative z-10 shizuku-glass-strong"
@@ -617,7 +1415,7 @@ const MusicApp: React.FC = () => {
                   style={{
                     background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
                     color: 'white',
-                    boxShadow: `0 2px 10px ${C.glow}50`,
+                    boxShadow: `0 2px 10px rgba(var(--mz-glow-rgb, 205,198,233), 0.31)`,
                   }}>保存</button>
               </div>
             </div>
@@ -630,7 +1428,7 @@ const MusicApp: React.FC = () => {
                   style={{
                     background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
                     color: 'white',
-                    boxShadow: `0 3px 12px ${C.glow}50`,
+                    boxShadow: `0 3px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.31)`,
                   }}
                 >
                   {playing ? <PauseIcon size={14} weight="fill" /> : <PlayIcon size={14} weight="fill" />}
@@ -678,10 +1476,10 @@ const MusicApp: React.FC = () => {
                         className="flex items-center gap-2 rounded-xl px-2.5 py-2 transition-all"
                         style={{
                           background: isActive
-                            ? `linear-gradient(135deg, ${C.glow}25, ${C.lavender}18)`
+                            ? `linear-gradient(135deg, rgba(var(--mz-glow-rgb, 205,198,233), 0.15), rgba(var(--mz-lavender-rgb, 207,195,232), 0.09))`
                             : 'rgba(255,255,255,0.5)',
                           border: `1px solid ${isActive ? C.glow + '60' : C.faint + '30'}`,
-                          boxShadow: isActive ? `0 2px 12px ${C.glow}30` : 'none',
+                          boxShadow: isActive ? `0 2px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` : 'none',
                         }}
                       >
                         <span className="text-[9px] tabular-nums w-5 text-center shrink-0" style={{ color: C.faint }}>{i + 1}</span>
@@ -689,8 +1487,8 @@ const MusicApp: React.FC = () => {
                           onClick={() => tapCurrent(i)}
                           className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-all"
                           style={{
-                            background: `${C.primary}15`,
-                            border: `1px solid ${C.primary}30`,
+                            background: `rgba(var(--mz-primary-rgb, 128,124,157), 0.08)`,
+                            border: `1px solid rgba(var(--mz-primary-rgb, 128,124,157), 0.19)`,
                             color: C.primary,
                           }}
                           title="把这一句设到当前播放时间"
@@ -730,6 +1528,15 @@ const MusicApp: React.FC = () => {
         );
       })()}
 
+      {view === 'playlist' && (
+        <PlaylistHomePage
+          charId={playlistCharId}
+          onBack={() => setView('profile')}
+          onOpenPlayer={() => setView('player')}
+          onOpenSettings={() => setView('settings')}
+          onOpenChat={() => { setChatCharId(playlistCharId); setView('chat'); trackEvent('打开聊歌框'); }}
+        />
+      )}
       {view === 'visit_char' && visitCharId && (
         <CharVisitPage
           charId={visitCharId}
@@ -737,6 +1544,32 @@ const MusicApp: React.FC = () => {
           onOpenPlayer={() => setView('player')}
         />
       )}
+
+      {/* 一起听邀请专用弹层（2026-08-30：不再复用转发选人器——标题/当前歌/角色卡片都是邀请观感） */}
+      {showInvitePicker && (
+        <InviteTogetherModal
+          songName={current?.name}
+          artists={current?.artists}
+          characters={characters.map((c) => ({ id: c.id, name: c.name, avatar: c.avatar }))}
+          onPick={(c) => void sendInvite(c)}
+          onClose={() => setShowInvitePicker(false)}
+        />
+      )}
+
+      {/* 结束一起听轻确认（统一出口，×/结束按钮都走这里） */}
+      <ConfirmDialog
+        isOpen={confirmEndChar !== null}
+        title="结束一起听"
+        message={confirmEndChar
+          ? `结束和 ${characters.find((c) => c.id === confirmEndChar)?.name || 'Ta'} 的这次一起听？会留下这次一起听的总结卡。`
+          : '结束这次一起听？会留下这次一起听的总结卡。'}
+        confirmText="结束"
+        cancelText="再听会儿"
+        variant="info"
+        onConfirm={() => doEndTogether(confirmEndChar)}
+        onCancel={() => setConfirmEndChar(null)}
+      />
+      </div>
     </div>
   );
 };

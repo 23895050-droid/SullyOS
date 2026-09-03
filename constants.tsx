@@ -36,6 +36,9 @@ import {
   Planet,
   Wrench,
   HouseLine,
+  ImageSquare,
+  MoonStars,
+  MagicWand,
 } from '@phosphor-icons/react';
 
 // SVG 图标库 - Phosphor Icons
@@ -76,6 +79,11 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   VRWorld: ({ className }) => <Planet className={className} weight="regular" />,
   CharCreatorDev: ({ className }) => <Wrench className={className} weight="regular" />,
   WorldHome: ({ className }) => <HouseLine className={className} weight="regular" />,
+  ImageReceipts: ({ className }) => <Images className={className} weight="regular" />,
+  Camera: ({ className }) => <Camera className={className} weight="regular" />,
+  Album: ({ className }) => <ImageSquare className={className} weight="regular" />,
+  NoxHome: ({ className }) => <MoonStars className={className} weight="regular" />,
+  Assistant: ({ className }) => <MagicWand className={className} weight="regular" />,
 };
 
 export const INSTALLED_APPS: AppConfig[] = [
@@ -105,6 +113,10 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.HotNews, name: '热点', icon: 'HotNews', color: 'red' },
   { id: AppID.FAQ, name: '使用帮助', icon: 'FAQ', color: 'indigo' },
   { id: AppID.Gallery, name: '相册', icon: 'Gallery', color: 'orange' },
+  { id: AppID.ImageReceipts, name: '近期接收', icon: 'ImageReceipts', color: 'sky' },
+  { id: AppID.Album, name: '我的相册', icon: 'Album', color: 'pink' },
+  { id: AppID.NoxHome, name: 'Nox 的家', icon: 'NoxHome', color: 'indigo' },
+  { id: AppID.ImageGen, name: '相机', icon: 'Camera', color: 'amber' },
   { id: AppID.XhsFreeRoam, name: '自由活动', icon: 'XhsFreeRoam', color: 'rose' },
   { id: AppID.XhsStock, name: '小红书图库', icon: 'XhsStock', color: 'red' },
   { id: AppID.ThemeMaker, name: '气泡工坊', icon: 'ThemeMaker', color: 'purple' },
@@ -114,6 +126,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.LifeSim, name: '都市人生', icon: 'LifeSim', color: 'purple' },
   { id: AppID.SpecialMoments, name: '特别时光', icon: 'SpecialMoments', color: 'pink' },
   { id: AppID.Music, name: '音乐', icon: 'Music', color: 'rose' },
+  { id: AppID.Assistant, name: '小助手', icon: 'Assistant', color: 'fuchsia' },
   { id: AppID.CharCreatorDev, name: '捏脸·开发', icon: 'CharCreatorDev', color: 'amber' }, // 仅开发模式显示（Launcher 过滤）
   // { id: AppID.QQBridge, name: 'QQ 桥', icon: 'QQBridge', color: 'sky' }, // Hidden temporarily
 ];

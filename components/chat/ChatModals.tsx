@@ -117,6 +117,14 @@ interface ChatModalsProps {
     onSetChatVoiceLang?: (lang: string) => void;
     // Voice generation from long-press
     onGenerateVoice?: () => void;
+    // Image re-roll (生图重roll)
+    onRerollImage?: () => void;
+    // Image download & preview (图片下载+大图预览)
+    onDownloadImage?: () => void;
+    onArchiveImage?: () => void;
+    archivingImage?: boolean;
+    archiveImageFailed?: boolean;
+    onPreviewImage?: () => void;
     voiceAvailable?: boolean; // true if char has voiceProfile configured
     onDownloadVoice?: () => void;
     voiceDownloadable?: boolean; // true if the selected message already has generated voice
@@ -263,7 +271,8 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     xhsEnabled, onToggleXhs,
     htmlModeEnabled, onToggleHtmlMode, htmlModeCustomPrompt, setHtmlModeCustomPrompt,
     chatVoiceEnabled, onToggleChatVoice, chatVoiceAutoPlay, onToggleChatVoiceAutoPlay, chatVoiceLang, onSetChatVoiceLang,
-    onGenerateVoice, voiceAvailable, onDownloadVoice, voiceDownloadable, voiceCollectable, onToggleVoiceFavorite, voiceFavorited,
+    onGenerateVoice, voiceAvailable, onDownloadVoice, voiceDownloadable, voiceCollectable, onToggleVoiceFavorite, voiceFavorited, onRerollImage,
+    onDownloadImage, onPreviewImage, onArchiveImage, archivingImage, archiveImageFailed,
     scheduleData, isScheduleGenerating, onScheduleEdit, onScheduleDelete, onScheduleReroll, onScheduleCoverChange,
     onScheduleStyleChange, onPlayTheater,
     isScheduleFeatureEnabled, onToggleScheduleFeature,
@@ -1003,6 +1012,38 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         <button onClick={() => { onToggleVoiceFavorite(); setModalType('none'); }} className={`w-full py-3 font-medium rounded-2xl transition-colors flex items-center justify-center gap-2 ${voiceFavorited ? 'bg-amber-100 text-amber-700 active:bg-amber-200' : 'bg-amber-50 text-amber-600 active:bg-amber-100'}`}>
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill={voiceFavorited ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="m11.48 3.499-2.13 4.316-4.763.692c-.963.14-1.348 1.323-.651 2.002l3.447 3.36-.814 4.744c-.165.96.842 1.691 1.703 1.238L12.532 17.6l4.26 2.24c.862.453 1.869-.278 1.704-1.238l-.814-4.744 3.447-3.36c.697-.679.312-1.862-.651-2.002l-4.763-.692-2.13-4.316c-.43-.873-1.675-.873-2.105.011Z" /></svg>
                             {voiceFavorited ? '取消收藏语音' : '收藏语音'}
+                        </button>
+                    )}
+                    {selectedMessage?.type === 'image' && onPreviewImage && (
+                        <button onClick={() => { onPreviewImage(); setModalType('none'); }} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25v-4.5m0 4.5h-4.5m4.5 0L15 15" /></svg>
+                            查看大图
+                        </button>
+                    )}
+                    {selectedMessage?.type === 'image' && onDownloadImage && (
+                        <button onClick={() => { onDownloadImage(); setModalType('none'); }} className="w-full py-3 bg-sky-50 text-sky-600 font-medium rounded-2xl active:bg-sky-100 transition-colors flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                            下载图片
+                        </button>
+                    )}
+                    {selectedMessage?.type === 'image' && onArchiveImage && (
+                        <button
+                            onClick={() => { if (!archivingImage) onArchiveImage(); }}
+                            disabled={archivingImage}
+                            className={`w-full py-3 font-medium rounded-2xl transition-colors flex items-center justify-center gap-2 ${archiveImageFailed ? 'bg-rose-50 text-rose-600 active:bg-rose-100' : archivingImage ? 'bg-teal-50 text-teal-400 cursor-wait' : 'bg-teal-50 text-teal-600 active:bg-teal-100'}`}
+                        >
+                            {archivingImage ? (
+                                <svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+                            )}
+                            {archivingImage ? '留档中…' : archiveImageFailed ? '留档失败，点击重试' : '留档'}
+                        </button>
+                    )}
+                    {selectedMessage?.type === 'image' && selectedMessage?.metadata?.imageGenDescription && onRerollImage && (
+                        <button onClick={() => { onRerollImage(); setModalType('none'); }} className="w-full py-3 bg-violet-50 text-violet-600 font-medium rounded-2xl active:bg-violet-100 transition-colors flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" /></svg>
+                            重新生图
                         </button>
                     )}
                     <button onClick={onDeleteMessage} className="w-full py-3 bg-red-50 text-red-500 font-medium rounded-2xl active:bg-red-100 transition-colors flex items-center justify-center gap-2">

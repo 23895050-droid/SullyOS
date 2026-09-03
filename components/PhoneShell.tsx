@@ -26,6 +26,10 @@ const GroupChat = lazyApp(() => import('../apps/GroupChat'));
 const ThemeMaker = lazyApp(() => import('../apps/ThemeMaker'));
 const Appearance = lazyApp(() => import('../apps/Appearance'));
 const Gallery = lazyApp(() => import('../apps/Gallery'));
+const ImageReceiptsApp = lazyApp(() => import('../apps/ImageReceiptsApp'));
+const AlbumApp = lazyApp(() => import('../apps/AlbumApp'));
+const CameraApp = lazyApp(() => import('../apps/Camera'));
+const NoxHomeApp = lazyApp(() => import('../apps/NoxHomeApp'));
 const DateApp = lazyApp(() => import('../apps/DateApp'));
 const UserApp = lazyApp(() => import('../apps/UserApp'));
 const JournalApp = lazyApp(() => import('../apps/JournalApp'));
@@ -44,6 +48,7 @@ const XhsFreeRoamApp = lazyApp(() => import('../apps/XhsFreeRoamApp'));
 const BrowserApp = lazyApp(() => import('../apps/BrowserApp'));
 const SongwritingApp = lazyApp(() => import('../apps/SongwritingApp'));
 const MusicApp = lazyApp(() => import('../apps/MusicApp'));
+const AssistantApp = lazyApp(() => import('../apps/AssistantApp'));
 const CallApp = lazyApp(() => import('../apps/CallApp'));
 const VoiceDesignerApp = lazyApp(() => import('../apps/VoiceDesignerApp'));
 const GuidebookApp = lazyApp(() => import('../apps/GuidebookApp'));
@@ -77,13 +82,13 @@ let idlePreloadCursor = 0;
 const APP_BY_ID: Partial<Record<AppID, PreloadableLazy>> = {
   [AppID.Settings]: Settings, [AppID.Character]: Character, [AppID.Chat]: Chat,
   [AppID.GroupChat]: GroupChat, [AppID.ThemeMaker]: ThemeMaker, [AppID.Appearance]: Appearance,
-  [AppID.Gallery]: Gallery, [AppID.Date]: DateApp, [AppID.User]: UserApp,
+  [AppID.Gallery]: Gallery, [AppID.ImageReceipts]: ImageReceiptsApp, [AppID.Album]: AlbumApp, [AppID.ImageGen]: CameraApp, [AppID.NoxHome]: NoxHomeApp, [AppID.Date]: DateApp, [AppID.User]: UserApp,
   [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
   [AppID.CheckPhone]: CheckPhone, [AppID.Social]: SocialApp, [AppID.Study]: StudyApp,
   [AppID.FAQ]: FAQApp, [AppID.Game]: GameApp, [AppID.Worldbook]: WorldbookApp,
   [AppID.Novel]: NovelApp, [AppID.Bank]: BankApp, [AppID.XhsStock]: XhsStockApp,
   [AppID.XhsFreeRoam]: XhsFreeRoamApp, [AppID.Browser]: BrowserApp, [AppID.Songwriting]: SongwritingApp,
-  [AppID.Music]: MusicApp, [AppID.Call]: CallApp, [AppID.VoiceDesigner]: VoiceDesignerApp,
+  [AppID.Music]: MusicApp, [AppID.Assistant]: AssistantApp, [AppID.Call]: CallApp, [AppID.VoiceDesigner]: VoiceDesignerApp,
   [AppID.Guidebook]: GuidebookApp, [AppID.LifeSim]: LifeSimApp, [AppID.MemoryPalace]: MemoryPalaceApp,
   [AppID.Handbook]: HandbookApp, [AppID.QQBridge]: QQBridge, [AppID.HotNews]: HotNewsApp,
   [AppID.VRWorld]: VRWorldApp, [AppID.CharCreatorDev]: CharCreatorDevApp, [AppID.SpecialMoments]: SpecialMomentsApp,
@@ -112,6 +117,7 @@ import { Capacitor } from '@capacitor/core';
 import { isIOSStandaloneWebApp, resolveStatusBarMode } from '../utils/iosStandalone';
 import AppErrorBoundary from './os/AppErrorBoundary';
 import GlobalMiniPlayer from './os/GlobalMiniPlayer';
+import GlobalMusicCssPreset from './os/GlobalMusicCssPreset';
 import PersonaSimIndicator from './os/PersonaSimIndicator';
 import DreamSimIndicator from './os/DreamSimIndicator';
 import ErrorDialog from './os/ErrorDialog';
@@ -958,7 +964,11 @@ const PhoneShell: React.FC = () => {
       case AppID.ThemeMaker: return <ThemeMaker />;
       case AppID.Appearance: return <Appearance />;
       case AppID.Gallery: return <Gallery />;
-      case AppID.Date: return <DateApp />; 
+      case AppID.ImageReceipts: return <ImageReceiptsApp />;
+      case AppID.Album: return <AlbumApp />;
+      case AppID.ImageGen: return <CameraApp />;
+      case AppID.NoxHome: return <NoxHomeApp />;
+      case AppID.Date: return <DateApp />;
       case AppID.User: return <UserApp />;
       case AppID.Journal: return <JournalApp />; 
       case AppID.Schedule: return <ScheduleApp />;
@@ -976,6 +986,7 @@ const PhoneShell: React.FC = () => {
       case AppID.Browser: return <BrowserApp />;
       case AppID.Songwriting: return <SongwritingApp />;
       case AppID.Music: return <MusicApp />;
+      case AppID.Assistant: return <AssistantApp />;
       case AppID.Call: return <CallApp />;
       case AppID.VoiceDesigner: return <VoiceDesignerApp />;
       case AppID.Guidebook: return <GuidebookApp />;
@@ -1065,6 +1076,8 @@ const PhoneShell: React.FC = () => {
 
           {/* Overlays: Global Mini Player (when music is playing in background) */}
           <GlobalMiniPlayer />
+          {/* 全局音乐 CSS 预设注入（悬浮窗跟基础 + 悬浮窗两层预设走） */}
+          <GlobalMusicCssPreset />
 
           {/* Overlays: 人格模拟生成全局指示条 */}
           <PersonaSimIndicator />

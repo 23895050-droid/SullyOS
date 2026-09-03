@@ -6,6 +6,8 @@ import { sanitizeForBubble } from './sanitize';
 import { extractTransferCommands } from './transferFormat';
 import { executeLifeDirectives } from './lifeRecords';
 import { wallClockToTimestamp } from './timezone';
+import { addPendingInvite, getMusicStore, keywordInviteAllowed, pendingInviteOf, removePendingInvite } from '../apps/couple/musicStore';
+import { detectMusicExitIntent, detectMusicInviteIntent, detectSongMentions } from './musicMountContent';
 import { CollaborationStore } from '../features/collaboration/store';
 import {
     collaborationFileMessageMetadata,
@@ -21,6 +23,8 @@ export interface MusicActionSnapshot {
     albumPic: string;
     duration: number;
     fee: number;
+    /** 此刻和 user 一起听的 char 名单（批 2 状态机用：判断"已在一起听"） */
+    listeningTogetherWith: string[];
 }
 
 /**
@@ -41,6 +45,8 @@ export interface MusicActionHooks {
     getListeningSnapshot: () => MusicActionSnapshot | null;
     /** 将 charId 加入"一起听"名单（chatParser 不维护状态，只通知） */
     joinListeningTogether: (charId: string) => void;
+    /** 批 2：一起听统一退出出口（exit 标签 / 用户点 × 都走它） */
+    endListeningTogether: (charId: string) => void;
     /**
      * 把 song 加到 char 的歌单。
      * 返回 { playlistTitle, created } —— created=true 表示这次是新建了歌单。
@@ -106,6 +112,7 @@ const resolveFrozenSongSnapshot = async (
                 albumPic: hit.albumPic,
                 duration: hit.duration,
                 fee: hit.fee,
+                listeningTogetherWith: [],
             };
         }
     } catch (e) {
@@ -119,6 +126,7 @@ const resolveFrozenSongSnapshot = async (
         albumPic: '',
         duration: 0,
         fee: 0,
+        listeningTogetherWith: [],
     };
 };
 
@@ -277,53 +285,136 @@ export const ChatParser = {
             }
         }
 
-        // MUSIC_ACTION — char 对 user 正在听的歌表态（只处理第一次出现，每条消息最多一次插卡）
-        // 支持的格式（后两种是为了让 char 自己挑歌单 / 新建歌单）：
-        //   [[MUSIC_ACTION:join]]
+        // MUSIC_ACTION — 一起听状态机：全显式（邀请卡→接受/拒绝/退出），原版
+        // "提听歌就莫名一起听"（LLM 自主 join）已删除。
+        // 支持的格式（| 分隔参数，避免和 : 冲突——标题里很容易出现 :）：
         //   [[MUSIC_ACTION:add]]                              → 默认放第一个歌单
         //   [[MUSIC_ACTION:add|歌单标题]]                      → 放进现有歌单（标题匹配）
         //   [[MUSIC_ACTION:add_new|新歌单标题|可选描述]]        → 新建歌单
-        //   [[MUSIC_ACTION:join_and_add(|...)]]              → 同 add 一套
-        //   [[MUSIC_ACTION:join_and_add_new|新歌单标题|描述]]  → 同 add_new
-        // 用 | 分隔参数，避免和 : 冲突（标题里很容易出现 :)
-        const MUSIC_TAG_RE = /\[\[MUSIC_ACTION:(join|add|add_new|join_and_add|join_and_add_new)(?:\|([^\]]*))?\]\]/;
-        const MUSIC_TAG_GLOBAL_RE = /\[\[MUSIC_ACTION:(?:join|add|add_new|join_and_add|join_and_add_new)(?:\|[^\]]*)?\]\]/g;
+        //   [[MUSIC_ACTION:invite|歌名?]]                      → 他主动邀请（允许无播放快照；2026-08-27 起不再教学，走关键词判定，此分支留作兜底）
+        //   [[MUSIC_ACTION:accept]] / [[MUSIC_ACTION:decline]] → 回应她的邀请（协议写在邀请卡正文里；仅 pendingInvites 有记录才激活）
+        //   [[MUSIC_ACTION:exit]]                              → 他主动结束一起听（2026-08-27 起前端另有关键词判定）
+        // join / join_and_add / join_and_add_new 已废弃：模型若还输出就剥标签当没发生（defuse）。
+        // 关键词判定（musicTagActed 之后那段）：他发起/结束一起听不靠常驻指令集，
+        // 按回复文本现判——accept/decline 协议在邀请卡里，invite/exit 走关键词。
+        const MUSIC_TAG_RE = /\[\[MUSIC_ACTION:(invite|accept|decline|exit|join|add|add_new|join_and_add|join_and_add_new)(?:\|([^\]]*))?\]\]/;
+        const MUSIC_TAG_GLOBAL_RE = /\[\[MUSIC_ACTION:(?:invite|accept|decline|exit|join|add|add_new|join_and_add|join_and_add_new)(?:\|[^\]]*)?\]\]/g;
+        let musicTagActed = false;
         const musicMatch = content.match(MUSIC_TAG_RE);
         if (musicMatch && musicHooks) {
-            const verb = musicMatch[1] as 'join' | 'add' | 'add_new' | 'join_and_add' | 'join_and_add_new';
+            const verb = musicMatch[1] as 'invite' | 'accept' | 'decline' | 'exit' | 'join' | 'add' | 'add_new' | 'join_and_add' | 'join_and_add_new';
             const argsRaw = (musicMatch[2] || '').trim();
             const args = argsRaw ? argsRaw.split('|').map(s => s.trim()).filter(Boolean) : [];
-            // 卡片元数据里只用 join / add / join_and_add 三种意图，把 _new 折叠回 add 系
-            const intent: 'join' | 'add' | 'join_and_add' =
-                verb === 'join' ? 'join'
-                : (verb === 'add' || verb === 'add_new') ? 'add'
-                : 'join_and_add';
-            const wantsJoin = verb === 'join' || verb === 'join_and_add' || verb === 'join_and_add_new';
-            const wantsAdd = verb !== 'join';
+            const isTogetherVerb = verb === 'invite' || verb === 'accept' || verb === 'decline' || verb === 'exit';
+            const isJoinVerb = verb === 'join' || verb === 'join_and_add' || verb === 'join_and_add_new';
 
-            let target: AddSongTarget | undefined;
-            if (wantsAdd) {
-                if (verb === 'add_new' || verb === 'join_and_add_new') {
+            if (isTogetherVerb) {
+                // ── 一起听状态机 ──
+                const snap = musicHooks.getListeningSnapshot();
+                const togetherNow = (snap?.listeningTogetherWith || []).includes(charId);
+                if (verb === 'invite') {
+                    // 他主动邀请：允许她没在放歌（invite 带不带歌名都成立）。已经在听就剥标签。
+                    if (togetherNow) {
+                        console.warn('[MusicAction] 已在一起听，重复 invite 忽略:', { charId });
+                    } else {
+                        // 定时路径里「他此刻在听」的那首冻结歌优先——他邀请的应该是自己正在听的那首
+                        const frozen = normalizeFrozenSong(frozenMusicSong);
+                        const inviteSnap = frozen
+                            ? await resolveFrozenSongSnapshot(charId, frozen)
+                            : snap;
+                        const inviteSongName = args[0] || inviteSnap?.name || '';
+                        const cardId = await persist({
+                            charId,
+                            role: 'assistant',
+                            type: 'music_invite',
+                            content: inviteSongName ? `[Ta 邀请你一起听：《${inviteSongName}》]` : '[Ta 邀请你一起听首歌]',
+                            metadata: {
+                                source: 'music_invite',
+                                invite: {
+                                    direction: 'char',
+                                    song: inviteSnap,
+                                    inviteSongName: inviteSongName || undefined,
+                                    status: 'pending',
+                                },
+                            },
+                        });
+                        addPendingInvite({
+                            charId,
+                            direction: 'char',
+                            inviteSongName: inviteSongName || undefined,
+                            cardMessageId: typeof cardId === 'number' ? String(cardId) : undefined,
+                        });
+                        addToast(`${charName} 邀请你一起听${inviteSongName ? `《${inviteSongName}》` : ''}`, 'info');
+                        musicTagActed = true;
+                    }
+                } else if (verb === 'accept' || verb === 'decline') {
+                    // 回应她的邀请：只有 pendingInvites 里有她的方向记录才激活——模型没被邀请
+                    // 时自己输出 accept 属于自作主张，剥标签忽略。
+                    const pending = pendingInviteOf(charId);
+                    if (pending && pending.direction === 'user') {
+                        const accepted = verb === 'accept';
+                        if (accepted) musicHooks.joinListeningTogether(charId);
+                        removePendingInvite(charId, accepted ? 'accepted' : 'declined');
+                        if (pending.cardMessageId) {
+                            await DB.updateMessageMetadata(Number(pending.cardMessageId), (prev) => ({
+                                ...(prev || {}),
+                                invite: { ...((prev || {}).invite || {}), status: accepted ? 'accepted' : 'declined' },
+                            })).catch(() => {});
+                        }
+                        await persist({
+                            charId,
+                            role: 'system',
+                            type: 'music_accept',
+                            content: accepted ? '[Ta 接受了一起听]' : '[Ta 婉拒了这次邀请]',
+                            metadata: {
+                                source: 'music_accept',
+                                acceptCard: { action: accepted ? 'accept' : 'decline', song: snap },
+                            },
+                        });
+                        addToast(accepted ? `${charName} 接受了一起听` : `${charName} 婉拒了邀请`, 'info');
+                        musicTagActed = true;
+                    } else {
+                        console.warn('[MusicAction] 没有待处理的邀请，accept/decline 忽略:', { charId, verb });
+                    }
+                } else {
+                    // exit：他主动结束（确实在一起听才有意义；总结卡由退出出口自己发）
+                    if (togetherNow) {
+                        musicHooks.endListeningTogether(charId);
+                        await persist({
+                            charId,
+                            role: 'system',
+                            type: 'music_accept',
+                            content: '[Ta 结束了这次一起听]',
+                            metadata: { source: 'music_accept', acceptCard: { action: 'exit', song: snap } },
+                        });
+                        addToast(`${charName} 结束了这次一起听`, 'info');
+                        musicTagActed = true;
+                    } else {
+                        console.warn('[MusicAction] 当前没有一起听，exit 忽略:', { charId });
+                    }
+                }
+            } else if (isJoinVerb) {
+                // join 系列已废弃（一起听全显式）——剥标签 defuse，不留卡片
+                console.warn('[MusicAction] join 系列已废弃（一起听全显式），忽略:', { charId, verb, args });
+            } else {
+                // ── add / add_new：只收歌，不 join（照旧）──
+                let target: AddSongTarget | undefined;
+                if (verb === 'add_new') {
                     // 至少要有标题；没标题就退化成默认 add
                     if (args[0]) target = { kind: 'new', title: args[0], description: args[1] };
                 } else if (args[0]) {
                     target = { kind: 'existing', title: args[0] };
                 }
-            }
 
-            // 先认「角色写这句话时读到的那首」（定时消息由 worker 冻进 directive、调用方传进来），
-            // 没有这一份才退回「用户此刻在听的那首」——本地聊天走的一直是后者。
-            const frozen = normalizeFrozenSong(frozenMusicSong);
-            const snap = frozen
-                ? await resolveFrozenSongSnapshot(charId, frozen)
-                : musicHooks.getListeningSnapshot();
-            if (snap) {
-                let addedToPlaylistTitle: string | undefined;
-                let playlistCreated = false;
-                if (wantsJoin) {
-                    musicHooks.joinListeningTogether(charId);
-                }
-                if (wantsAdd) {
+                // 先认「角色写这句话时读到的那首」（定时消息由 worker 冻进 directive、调用方传进来），
+                // 没有这一份才退回「用户此刻在听的那首」——本地聊天走的一直是后者。
+                const frozen = normalizeFrozenSong(frozenMusicSong);
+                const snap = frozen
+                    ? await resolveFrozenSongSnapshot(charId, frozen)
+                    : musicHooks.getListeningSnapshot();
+                if (snap) {
+                    let addedToPlaylistTitle: string | undefined;
+                    let playlistCreated = false;
                     try {
                         const playlistSong: CharPlaylistSong = {
                             id: snap.songId,
@@ -345,37 +436,32 @@ export const ChatParser = {
                             playlistCreated = added.created;
                         }
                     } catch { /* 忽略 */ }
+                    await persist({
+                        charId,
+                        role: 'assistant',
+                        type: 'music_card',
+                        content: '[音乐卡片]',
+                        metadata: {
+                            intent: 'add',
+                            song: snap,
+                            addedToPlaylistTitle,
+                            playlistCreated,
+                        },
+                    });
+                    const playlistSuffix = addedToPlaylistTitle
+                        ? (playlistCreated ? `（新建《${addedToPlaylistTitle}》）` : `《${addedToPlaylistTitle}》`)
+                        : '';
+                    addToast(`${charName} 把这首加到了${playlistSuffix || '自己歌单'}`, 'info');
+                } else {
+                    // 两头都空：推送里没冻歌（比如那一刻角色的日程不在听歌的时段，或者是本地
+                    // 聊天路径），用户此刻也没在放歌。剩下的选择只有跳过 —— 但静默跳过的结果是
+                    // 「正文在聊这首歌，卡片和歌单动作却整个没发生」，排查时一点线索都没有，
+                    // 所以至少留一行。
+                    console.warn(
+                        '[MusicAction] 既没有冻结的歌、也取不到"正在听"快照，这条音乐动作跳过:',
+                        { charId, verb, args, messageTimestamp },
+                    );
                 }
-                await persist({
-                    charId,
-                    role: 'assistant',
-                    type: 'music_card',
-                    content: '[音乐卡片]',
-                    metadata: {
-                        intent,
-                        song: snap,
-                        addedToPlaylistTitle,
-                        playlistCreated,
-                    },
-                });
-                const playlistSuffix = addedToPlaylistTitle
-                    ? (playlistCreated ? `（新建《${addedToPlaylistTitle}》）` : `《${addedToPlaylistTitle}》`)
-                    : '';
-                addToast(
-                    intent === 'join' ? `${charName} 和你一起听` :
-                    intent === 'add' ? `${charName} 把这首加到了${playlistSuffix || '自己歌单'}` :
-                    `${charName} 和你一起听，也加到了${playlistSuffix || '歌单'}`,
-                    'info'
-                );
-            } else {
-                // 两头都空：推送里没冻歌（比如那一刻角色的日程不在听歌的时段，或者是本地
-                // 聊天路径），用户此刻也没在放歌。剩下的选择只有跳过 —— 但静默跳过的结果是
-                // 「正文在聊这首歌，卡片和歌单动作却整个没发生」，排查时一点线索都没有，
-                // 所以至少留一行。
-                console.warn(
-                    '[MusicAction] 既没有冻结的歌、也取不到"正在听"快照，这条音乐动作跳过:',
-                    { charId, verb, args, messageTimestamp },
-                );
             }
             content = content.replace(musicMatch[0], '').trim();
             // 同类 tag 全清，防止 LLM 一条消息里插多次
@@ -385,6 +471,51 @@ export const ChatParser = {
             content = content.replace(MUSIC_TAG_GLOBAL_RE, '').trim();
         }
 
+        // ── 他发起/结束一起听：关键词判定（2026-08-27 她定：音乐交互不常驻指令集）──
+        // 标签路径已触发动作就跳过；同一条消息里标签被 defuse（join）时关键词仍会照常判。
+        if (musicHooks && !musicTagActed) {
+            const kwSnap = musicHooks.getListeningSnapshot();
+            const kwTogether = (kwSnap?.listeningTogetherWith || []).includes(charId);
+            if (kwTogether && detectMusicExitIntent(content)) {
+                // 他提出结束：走统一退出出口（flush 会话 + 总结卡）
+                musicHooks.endListeningTogether(charId);
+                await persist({
+                    charId,
+                    role: 'system',
+                    type: 'music_accept',
+                    content: '[Ta 结束了这次一起听]',
+                    metadata: { source: 'music_accept', acceptCard: { action: 'exit', song: kwSnap } },
+                });
+                addToast(`${charName} 结束了这次一起听`, 'info');
+            } else if (!kwTogether && keywordInviteAllowed(charId) && detectMusicInviteIntent(content)) {
+                // 他主动邀请：允许她没在放歌；歌名从回复文本里认（导入池），认不出就不带
+                // 冷却门：没有挂着的邀请 + 不在婉拒冷却期（防「拒绝→马上再邀」连环卡）
+                const inviteSongName = detectSongMentions(content, getMusicStore().importedSongs)[0]?.name || '';
+                const inviteCardId = await persist({
+                    charId,
+                    role: 'assistant',
+                    type: 'music_invite',
+                    content: inviteSongName ? `[Ta 邀请你一起听：《${inviteSongName}》]` : '[Ta 邀请你一起听首歌]',
+                    metadata: {
+                        source: 'music_invite',
+                        invite: {
+                            direction: 'char',
+                            inviteSongName: inviteSongName || undefined,
+                            status: 'pending',
+                        },
+                    },
+                });
+                addPendingInvite({
+                    charId,
+                    direction: 'char',
+                    inviteSongName: inviteSongName || undefined,
+                    cardMessageId: typeof inviteCardId === 'number' ? String(inviteCardId) : undefined,
+                });
+                addToast(`${charName} 邀请你一起听${inviteSongName ? `《${inviteSongName}》` : ''}`, 'info');
+            }
+        }
+
+        // NEWS_CARD — char 主动把某条热点当作新闻卡片分享（来源 + 标题）
         // NEWS_CARD — char 主动把某条热点当作新闻卡片分享（来源 + 标题）
         //   [[NEWS_CARD: 来源|标题]]    （来源可省略 → [[NEWS_CARD: 标题]]）
         const NEWS_CARD_RE = /\[\[NEWS_CARD:\s*([^\]]*?)\s*\]\]/;
@@ -573,6 +704,14 @@ export const ChatParser = {
     // same bubble: models often put spaces inside Japanese/Chinese mixed-language prose, and
     // treating those spaces as implicit newlines cuts a single sentence in half.
     chunkText: (text: string): string[] => {
+        // CJK character + punctuation ranges (Chinese text normally has no spaces between these)
+        const CJK = '\\u4e00-\\u9fff\\u3400-\\u4dbf\\u3000-\\u303f\\uff00-\\uffef\\u2000-\\u206f\\u2e80-\\u2eff\\u3001-\\u3003\\u2018-\\u201f\\u300a-\\u300f\\uff01-\\uff0f\\uff1a-\\uff20';
+        // 在两个 CJK 之间的空格处断行. 不用后行断言 (?<=…): iOS Safari <16.4 的 JSC 不支持,
+        // 旧设备上 new RegExp 会直接抛 "invalid group specifier name". 改成「捕获左侧 CJK + 零宽
+        // 前瞻右侧」, 用 $1 补回左字符, 行为与原 (?<=[CJK])\s+(?=[CJK]) 字节一致 (见 lookbehindFree.test.ts).
+        const cjkSplitRe = new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g');
+        const SPLIT = String.fromCharCode(1);  // CJK 切点标记
+
         // 0. 保护 <语音…>…</语音> 原子块。外语语音字幕对齐模式下 (见 chatPrompts
         //    voiceActingGuide) 标签内部常按空行分成好几段，一旦被下面的换行断句切碎，
         //    <语音> 的开 / 闭标签就会散落到不同气泡里；MessageItem 的 hasVoiceTag 要求
@@ -594,10 +733,27 @@ export const ChatParser = {
             .map(c => c.trim())
             .filter(c => c.length > 0);
 
+        // 2. For each chunk, also split on spaces between CJK chars/punctuation
+        //    (中文里不该有空格, so "汉字 汉字" means the AI intended a bubble break)
+        //    括号内的空格要保护: 否则裸括号表情包 / 标签 (如 "[你 交给我吧]" 或
+        //    "[[SEND_EMOJI: a b]]") 会被这条规则劈成 "[你" + "交给我吧]" 掉格式.
+        //    做法: 先把 [...] / [[...]] 内空格换成占位符, split 后再换回.
+        const SENTINEL = String.fromCharCode(0);
+        const ATOM_SOLO = new RegExp(`^${ATOM}(\\d+)${ATOM}$`);
         const ATOM_GLOBAL = new RegExp(`${ATOM}(\\d+)${ATOM}`, 'g');
         const restoreVoice = (s: string) => s.replace(ATOM_GLOBAL, (_m, n) => voiceBlocks[Number(n)] ?? '');
-        return lineChunks
-            .map(restoreVoice)
-            .filter(c => c.length > 0);
+        const result: string[] = [];
+        for (const chunk of lineChunks) {
+            // 独占一行的语音占位符 → 直接还原成完整语音块，不参与 CJK 空格切分
+            const solo = chunk.match(ATOM_SOLO);
+            if (solo) { result.push(voiceBlocks[Number(solo[1])]); continue; }
+            const guarded = chunk.replace(/\[{1,2}[^\[\]]*\]{1,2}/g, m => m.replace(/\s/g, SENTINEL));
+            const sub = guarded.replace(cjkSplitRe, `$1${SPLIT}`).split(SPLIT)
+                .map(c => restoreVoice(c.split(SENTINEL).join(' ').trim()))  // 安全网: 同行残留占位符还原
+                .filter(c => c.length > 0);
+            result.push(...sub);
+        }
+
+        return result;
     }
 }

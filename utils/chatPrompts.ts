@@ -9,7 +9,12 @@ import { formatTransferRecord } from './transferFormat';
 import { computeCurrentListening, getCurrentSlot } from './charMusicSchedule';
 import { getCharLyricSnippet } from './charLyricCache';
 import { MusicCfg, loadMusicCfgStandalone } from '../context/MusicContext';
+import { getMusicStore } from '../apps/couple/musicStore';
+import { buildLyricWindowKeywords, shouldInjectLyricWindow } from './musicContextBlock';
+import { buildMusicRecordBlock, detectSongMentions } from './musicMountContent';
+import { getPrompt } from './promptRegistry';
 import { RealtimeContextManager, NotionManager, FeishuManager, defaultRealtimeConfig } from './realtimeContext';
+import { loadImageGenSettings } from './imageGenStorage';
 import { isScheduleFeatureOn } from './scheduleFeature';
 import { VOICE_ACTING_GUIDE } from './minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from './fishAudioTts';
@@ -248,6 +253,8 @@ export const ChatPrompts = {
             artists: string;
             lyricWindow: string[];
             activeIdx: number;
+            fullLyric?: string;
+            hotComments?: string[];
         } | null,
         isListeningTogether?: boolean,
         musicCfg?: MusicCfg,
@@ -258,7 +265,8 @@ export const ChatPrompts = {
             realtimeConfig, evolvedNarrative, userListeningContext, isListeningTogether, musicCfg,
             undefined, promptOptions,
         );
-        return parts.stable + parts.volatileState + parts.recencyTail;
+        // 单串路径没有消息数组可深度插入，窗口块按旧行为跟易变段一起放尾部
+        return parts.stable + (parts.afterChar ? `\n${parts.afterChar}\n` : '') + parts.volatileState + (parts.lyricWindow ? `\n${parts.lyricWindow.content}\n` : '') + parts.recencyTail;
     },
 
     /**
@@ -287,6 +295,8 @@ export const ChatPrompts = {
             artists: string;
             lyricWindow: string[];
             activeIdx: number;
+            fullLyric?: string;
+            hotComments?: string[];
         } | null,
         // char 是否和 user 处于"一起听"状态（来自 MusicContext.listeningTogetherWith）。
         // 影响氛围措辞和互动工具提示；暂停/切歌/user 踢出都会让这个值变 false。
@@ -297,7 +307,7 @@ export const ChatPrompts = {
         // 刚才一起听途中歌被切了（char 还没重新加入）—— 注入"察觉换歌"提示。
         recentTrackSwitch?: { songName: string; artists: string } | null,
         promptOptions?: PromptBuildOptions,
-    ): Promise<{ stable: string; volatileState: string; recencyTail: string }> => {
+    ): Promise<{ stable: string; afterChar: string; volatileState: string; recencyTail: string; lyricWindow: { content: string; depth: number } | null }> => {
         // 主动消息的模板是最后一次聊天时打好、到点才渲染的，凡是「打包这一刻」的状态
         // 到触发时都已经过期，一律不烤进模板。见 PromptBuildOptions 的清单。
         const forFirePack = promptOptions?.forFirePack === true;
@@ -548,6 +558,10 @@ ${groupLogStr}\n`;
         //     fire_pack 不烤：这首歌是按打包时刻的时段抽的，跟日程一起挪到 AMSG_SLOT_SCENE。
         //     那边只渲染「你此刻在听什么」一句——一起听状态要读用户此刻的播放器、歌词要拉网络，
         //     worker 两样都够不着。
+        let stableHeadMusic = '';
+        let afterCharMusic = '';
+        // 窗口块走「聊天记录指定深度」时独立成 part，由调用方照世界书 depth 插进历史消息数组
+        let lyricWindowPart: { content: string; depth: number } | null = null;
         if (!forFirePack) try {
             let charListening: {
                 songId?: number; songName: string; artists: string; vibe?: string; lyricSnippet?: string[];
@@ -558,8 +572,8 @@ ${groupLogStr}\n`;
                     charListening = { songId: cur.songId, songName: cur.songName, artists: cur.artists, vibe: cur.vibe };
                     // 拉歌词。优先用调用方传进来的 cfg；没传就从 localStorage 取
                     // —— Proactive / activeMsgClient 走这条路也能享受到歌词。
-                    const cfgForLyric = musicCfg ?? loadMusicCfgStandalone();
-                    if (cfgForLyric) {
+                    const cfgForLyric = musicCfg?.workerUrl ? musicCfg : loadMusicCfgStandalone();
+                    if (cfgForLyric?.workerUrl) {
                         try {
                             const slot = getCurrentSlot(schedule, charNow);
                             const seed = `${char.id}-${today}-${slot?.startTime || '00:00'}-${cur.songId}`;
@@ -578,12 +592,74 @@ ${groupLogStr}\n`;
                 isListeningTogether,
                 recentTrackSwitch,
             );
-            if (musicBlock) {
-                volatileState += `\n${musicBlock}\n`;
-                if (userListeningContext) {
-                    volatileState += `\n${ContextBuilder.buildMusicActionGuide(isListeningTogether)}\n`;
+            let atmosphereBlock = musicBlock
+                ? musicBlock + (userListeningContext ? `\n${ContextBuilder.buildMusicActionGuide()}\n` : '')
+                : '';
+            const fullLyricBlock = ContextBuilder.buildMusicFullLyricBlock(userListeningContext || null);
+            // 位置参照世界书式挂载原则（0 角色设定前 / 1 角色设定后 / 4 聊天记录指定深度），
+            // 调音台（lyricInject.fullLyricPos / windowPos / windowDepth / keywordTrigger）现读现用——她随用随调。
+            const inj = getMusicStore().lyricInject;
+            const fullPos: 0 | 1 | 4 = inj.fullLyricPos ?? 1;
+            const winPos: 1 | 4 = inj.windowPos ?? 4;
+            // 关键词门（照原版世界书关键词触发，她 2026-08-26 定）：开着且最近几条消息
+            // 没提到歌/歌词/这首歌名字 → 窗口块不注入——免得背景放歌时模型一直讲歌。
+            if (atmosphereBlock && inj.keywordTrigger !== false) {
+                const kwSong = userListeningContext?.songName || charListening?.songName || '';
+                const kwArtists = userListeningContext?.artists || charListening?.artists || '';
+                if (!shouldInjectLyricWindow(currentMsgs, buildLyricWindowKeywords(kwSong, kwArtists))) {
+                    atmosphereBlock = '';
                 }
             }
+            if (fullLyricBlock) {
+                if (fullPos === 0) stableHeadMusic += `\n${fullLyricBlock}\n`;
+                else if (fullPos === 1) afterCharMusic += `${fullLyricBlock}\n\n`;
+                else volatileState += `\n${fullLyricBlock}\n`;
+            }
+            if (atmosphereBlock) {
+                if (winPos === 1) {
+                    afterCharMusic += `${atmosphereBlock}\n\n`;
+                } else if (userListeningContext) {
+                    // 聊天记录指定深度：独立 part，调用方照世界书 depth（默认 4）插进历史，
+                    // 不贴易变尾段——这就是原版世界书位置 4 的做法
+                    const depthRaw = inj.windowDepth;
+                    const depth = Number.isFinite(Number(depthRaw)) ? Math.min(999, Math.max(0, Math.floor(Number(depthRaw)))) : 4;
+                    lyricWindowPart = { content: atmosphereBlock, depth };
+                } else {
+                    // 没有用户听歌快照的路径（如主动消息单串拼装）没有消息数组可插 → 回易变段
+                    volatileState += `\n${atmosphereBlock}\n`;
+                }
+            }
+
+            // 提歌注入（批 2）：对方这条消息提到你歌单里的歌 → 带出你的印象/次数；
+            // 提到但还没听过的 → 注入「诚实回应」正面话术（先记下，请她讲讲哪里打动她）。
+            try {
+                const ms = getMusicStore();
+                const lastUser = [...currentMsgs].reverse().find((m) => m.role === 'user');
+                const lastText = lastUser
+                    ? (typeof lastUser.content === 'string'
+                        ? lastUser.content
+                        : Array.isArray(lastUser.content as any)
+                            ? (lastUser.content as any[]).map((p: any) => (typeof p === 'string' ? p : p?.text || '')).join('\n')
+                            : '')
+                    : '';
+                const mentioned = detectSongMentions(lastText, ms.importedSongs);
+                if (mentioned.length > 0) {
+                    const heard = mentioned.filter((x) =>
+                        ms.playRecords.some((r) => r.neteaseId === x.neteaseId)
+                        || ms.togetherSessions.some((t) => t.songs.some((g) => g.neteaseId === x.neteaseId))
+                        || Boolean(x.impression));
+                    const recordBlock = buildMusicRecordBlock(heard, ms.playRecords, ms.togetherSessions);
+                    if (recordBlock) volatileState += `\n${recordBlock}\n`;
+                    const unheard = mentioned.filter((x) => !heard.includes(x));
+                    if (unheard.length > 0) {
+                        const names = unheard.map((x) => `《${x.name}》`).join('、');
+                        const honest = getPrompt('music-诚实回应')
+                            .replace(/\{\{\s*char\s*\}\}/gi, char.name)
+                            .replace(/\{\{\s*user\s*\}\}/gi, userProfile.name);
+                        volatileState += `\n${honest}\n（对方提到的、你还没听过的歌：${names}）\n`;
+                    }
+                }
+            } catch { /* 提歌注入失败不影响主 prompt */ }
         } catch (e) {
             console.error('Failed to inject music atmosphere:', e);
         }
@@ -1053,6 +1129,31 @@ ${voiceActingGuide()}`;
             baseSystemPrompt += `\n\n[系统提示: 语音消息功能当前未开启。严禁使用 <语音>...</语音> 和 <字幕>...</字幕> 标签。所有回复必须是纯文字消息。]`;
         }
 
+        // ── 生图标签 [photo:...] / [photo:selfie:...] ──
+        const imageGenSettings = loadImageGenSettings();
+        if (imageGenSettings.enabled && imageGenSettings.apiKey && imageGenSettings.model) {
+            console.log('[PhotoPrompt] ✅ 生图已启用，注入 [photo:...] 提示词到 system prompt', { model: imageGenSettings.model });
+            baseSystemPrompt += `\n\n### 📸 Image Generation
+
+You can generate and send images to the user. Use \`[photo:description]\` to describe the scene — the image will automatically appear in the chat.
+
+Format:
+- Regular photo: \`[photo:description]\`
+- Selfie (you are IN the photo): \`[photo:selfie:description]\`
+
+Examples:
+[photo:a steaming latte on a wooden table by the window, morning sunlight streaming in, shallow depth of field, warm cozy tones]
+[photo:selfie:walking under cherry blossoms, petals falling, looking up and smiling, backlit golden hour shot]
+
+Rules:
+- Write the description in English for best results — be specific (lighting, angle, mood, colors, details)
+- Use when the user asks you to "take a photo", "send a picture", "show me"
+- You can also use it proactively to share what you're seeing/doing
+- One [photo:...] per message`;
+        } else {
+            console.log('[PhotoPrompt] ⚠️ 生图未启用或配置不完整，跳过注入', { enabled: imageGenSettings.enabled, hasKey: !!imageGenSettings.apiKey, hasModel: !!imageGenSettings.model });
+        }
+
         // 总纲：放在整段上下文最末尾，借 recency 抢最强注意力——这是模型生成下一轮前
         // 最后读到的定调，直接影响它怎么对待"对方刚说出口的话"。
         // 核心：用户的直接表达 > 角色惯性与模型的讨好倾向；把反馈代谢成亲密而非命令；
@@ -1097,7 +1198,7 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt, volatileState, recencyTail };
+        return { stable: stableHeadMusic + baseSystemPrompt, afterChar: afterCharMusic.trim(), volatileState, recencyTail, lyricWindow: lyricWindowPart };
     },
 
     // 格式化消息历史
@@ -1182,6 +1283,14 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
                 }
                 
                 if (m.type === 'image') {
+                     // AI 生成的图片：不传 base64 给模型（它不需要"看"自己生成的图），只传文本摘要
+                     const genDesc = (m.metadata as any)?.imageGenDescription as string | undefined;
+                     if (genDesc) {
+                         const summary = genDesc.length > 80 ? genDesc.slice(0, 80) + '…' : genDesc;
+                         const label = (m.metadata as any)?.imageGenStatus === 'pending' ? '正在生成图片' : '生成了图片';
+                         const textPart = `${timeStr} [${label}：${summary}]`;
+                         return { role: m.role, content: textPart };
+                     }
                      const visionDescription = options?.useVisionDescriptions
                          && typeof m.metadata?.visionDescription === 'string'
                          ? m.metadata.visionDescription.trim()
@@ -1441,6 +1550,33 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
                     // TRPG 跑团片段 / 笔友会小说章节：从对应 app 多选转发进来的内容。
                     // 复用 normalizeMessageContent 翻成完整文本，让角色"记得"一起玩过/写过什么。
                     content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
+                }
+                else if ((m.type as string) === 'music_invite') {
+                    // 一起听邀请卡（2026-08-27 修）：待回应的邀请，协议就住在卡正文里——模型必须读到全文
+                    // （accept/decline 的用法就写在那儿）；已经回应的只留一行结果，不再让长指令占上下文。
+                    const inv: any = m.metadata?.invite || {};
+                    const songName = inv.inviteSongName || inv.song?.name || '';
+                    if (inv.status === 'pending' && inv.direction === 'user') {
+                        content = `${timeStr} ${m.content}`;
+                    } else {
+                        const outcome = inv.status === 'accepted' ? '已接受' : inv.status === 'declined' ? '已婉拒' : '一起听邀请';
+                        content = `${timeStr} [${outcome}${songName ? `：《${songName}》` : ''}]`;
+                    }
+                }
+                else if ((m.type as string) === 'music_accept') {
+                    const ac: any = m.metadata?.acceptCard || {};
+                    content = `${timeStr} [${ac.action === 'accept' ? 'Ta 接受了一起听' : ac.action === 'decline' ? 'Ta 婉拒了这次邀请' : 'Ta 结束了这次一起听'}]`;
+                }
+                else if ((m.type as string) === 'music_summary') {
+                    // 总结正文是模型自己写的，不必原文回读；留曲目表当回忆线索就够
+                    const sc: any = m.metadata?.summaryCard || {};
+                    const list = Array.isArray(sc.songs) ? sc.songs : [];
+                    const names = list.slice(0, 8).map((s: any) => `《${s.name}》`).join(' ');
+                    content = `${timeStr} [一起听总结：听了 ${list.length} 首${names ? ' ' + names : ''}]`;
+                }
+                else if ((m.type as string) === 'music_chat_summary') {
+                    const cs: any = m.metadata?.chatSummaryCard || {};
+                    content = `${timeStr} [聊歌小结（第 ${cs.segFrom ?? 0}–${cs.segTo ?? '?'} 条）]`;
                 }
                 else content = `${timeStr} ${sourceTag} ${content}`;
 

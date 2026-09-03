@@ -5,6 +5,11 @@ import { DB } from '../utils/db';
 import { Message, MessageType, MemoryFragment, Emoji, EmojiCategory, DailySchedule, ScheduleSlot } from '../types';
 import { processImage, processImageToBlob } from '../utils/file';
 import { safeResponseJson, extractContent } from '../utils/safeApi';
+import { downloadChatImage, resolveChatImageBlob } from '../utils/imageDownload';
+import { addArchiveSafe, downscaleImage, type ArchiveEntry } from '../utils/archive';
+import { loadImageGenSettings } from '../utils/imageGenStorage';
+import { getPrompt } from '../utils/promptRegistry';
+import ImageLightbox from '../components/chat/ImageLightbox';
 import { buildChatFineTuneCss, mergeChatFineTune } from '../utils/chatFineTuneCss';
 import ChatFineTunePanel from '../components/chat/ChatFineTunePanel';
 import TokenImg from '../components/os/TokenImg';
@@ -21,7 +26,7 @@ import { XhsMcpClient, extractNotesFromMcpData, normalizeXhsLiteDetail } from '.
 import { extractWebpageContent, detectFirstUrl, detectXhsShortUrl, extractXhsShareTitle, isXhsUrl, extractXhsNoteId, expandShortUrl, type ExtractedWebpage } from '../utils/webpageExtractor';
 import { isVideoShareUrl, parseVideoShareUrl } from '../utils/videoParser';
 import { isDevDebugAvailable } from '../utils/devDebug';
-import { isImageValue, migrateDataUrlToRef, putImageBlob, useBlobRefUrl } from '../utils/blobRef';
+import { isImageValue, migrateDataUrlToRef, putImageBlob, useBlobRefUrl, blobToDataUrl } from '../utils/blobRef';
 import { buildReplySnapshotContent } from '../utils/applyAssistantPostProcessing';
 import { resolveLifeRecordCard } from '../utils/lifeRecords';
 import { isMcdConfigured } from '../utils/mcdMcpClient';
@@ -708,6 +713,125 @@ const Chat: React.FC = () => {
         }
     };
 
+    // 图片下载（照抄语音下载模式）
+    const handleDownloadImage = useCallback((msg: Message) => {
+        const charName = characters.find(c => c.id === msg.charId)?.name || char?.name;
+        void downloadChatImage(msg, { charName, notify: addToast });
+    }, [characters, char, addToast]);
+
+    // 聊天图片留档：识图摘要 → 相册（与相机留档同一存储，角色只读文字摘要）
+    const [archivingMsgId, setArchivingMsgId] = useState<number | null>(null);
+    const [archiveImageFailed, setArchiveImageFailed] = useState(false);
+    const handleArchiveImage = useCallback(async (msg: Message) => {
+        if (!msg?.id || archivingMsgId) return;
+        setArchivingMsgId(msg.id);
+        setArchiveImageFailed(false);
+        try {
+            const blob = await resolveChatImageBlob(msg);
+            if (!blob) {
+                setArchiveImageFailed(true);
+                addToast('拿不到这张图片的文件，无法留档', 'error');
+                return;
+            }
+            const imageDataUrl = await blobToDataUrl(blob);
+            const targetChar = characters.find(c => c.id === msg.charId) || char;
+            const date = new Date(msg.timestamp);
+            const dateLabel = `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+            const recentChat = messages.slice(-12).map(m => {
+                const sender = m.role === 'user' ? userProfile.name : (characters.find(c => c.id === m.charId)?.name || char?.name || '角色');
+                const text = m.type === 'text' ? m.content.substring(0, 80) : `[${m.type === 'image' ? '图片' : m.type}]`;
+                return `${sender}: ${text}`;
+            }).join('\n');
+
+            const genSettings = loadImageGenSettings();
+            let summary = `${dateLabel}，${userProfile.name} 在聊天里给${targetChar?.name || '角色'}发了这张照片。`;
+            if (genSettings.promptGenApiKey && genSettings.promptGenBaseUrl && genSettings.promptGenModel) {
+                try {
+                    const systemPrompt = getPrompt('聊天图片留档')
+                        .replace(/\{\{char\}\}/g, targetChar?.name || '角色')
+                        .replace(/\{\{user\}\}/g, userProfile.name)
+                        .replace(/\{\{date\}\}/g, dateLabel);
+                    const res = await fetch(genSettings.promptGenBaseUrl.replace(/\/+$/, '') + '/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${genSettings.promptGenApiKey}` },
+                        body: JSON.stringify({
+                            model: genSettings.promptGenModel,
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                {
+                                    role: 'user',
+                                    content: [
+                                        { type: 'text', text: `近期聊天（语境参考）：\n${recentChat.slice(0, 3000)}` },
+                                        { type: 'text', text: '照片就是这张：' },
+                                        { type: 'image_url', image_url: { url: imageDataUrl } },
+                                    ],
+                                },
+                            ],
+                            max_tokens: 4000,
+                        }),
+                    });
+                    const data = await safeResponseJson(res);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const s = String(data?.choices?.[0]?.message?.content || '').trim();
+                    if (s) summary = s;
+                } catch {
+                    // 识图失败用模板兜底，不阻塞留档
+                }
+            }
+            const thumbnail = await downscaleImage(imageDataUrl, 320);
+            const entry: ArchiveEntry = {
+                id: `ma_${Date.now()}`,
+                thumbnail,
+                charId: msg.charId,
+                charName: targetChar?.name || '未知角色',
+                summary,
+                description: '',
+                prefixPrompt: '',
+                presetName: '',
+                refMode: 'none',
+                tags: ['聊天'],
+                favorite: false,
+                charAlbum: true,
+                timestamp: msg.timestamp || Date.now(),
+                fromUser: true,
+                kind: 'other',
+            };
+            const ok = await addArchiveSafe(entry);
+            if (ok) {
+                setModalType('none');
+                addToast('已留档，可在「我的相册」查看', 'success');
+                trackEvent('聊天图片留档');
+            } else {
+                setArchiveImageFailed(true);
+                addToast('留档失败：本地存储已满', 'error');
+            }
+        } catch (error: any) {
+            console.warn('[Chat] archive image failed', error);
+            setArchiveImageFailed(true);
+            addToast(error?.message || '留档失败', 'error');
+        } finally {
+            setArchivingMsgId(null);
+        }
+    }, [archivingMsgId, characters, char, messages, userProfile.name, addToast, setModalType]);
+
+    // 图片大图预览
+    const [previewMsg, setPreviewMsg] = useState<Message | null>(null);
+    const handlePreviewImage = useCallback((msg: Message) => setPreviewMsg(msg), []);
+
+    // 重roll前编辑提示词
+    const [rerollEditMsg, setRerollEditMsg] = useState<Message | null>(null);
+    const [rerollEditDesc, setRerollEditDesc] = useState('');
+    const openRerollEdit = useCallback((msg: Message) => {
+        setRerollEditMsg(msg);
+        setRerollEditDesc((msg.metadata?.imageGenDescription as string) || '');
+    }, []);
+    const confirmRerollEdit = useCallback(() => {
+        if (rerollEditMsg) {
+            handleRerollImage(rerollEditDesc);
+            setRerollEditMsg(null);
+        }
+    }, [rerollEditMsg, rerollEditDesc]);
+
     const handleToggleVoiceFavorite = async (msg: Message) => {
         if (!msg?.id) return;
         try {
@@ -1108,9 +1232,19 @@ const Chat: React.FC = () => {
         };
         window.addEventListener('instant-tool-status', handler);
         window.addEventListener('active-msg-received', receivedHandler);
+        // 生图标签完成 → 刷新消息列表让生成的图片上屏
+        const photoGenHandler = (e: Event) => {
+            const detail = (e as CustomEvent<{ charId?: string }>).detail;
+            if (detail?.charId && detail.charId !== activeCharIdRef.current) return;
+            DB.getRecentMessagesByCharId(activeCharIdRef.current || '', 200).then(setMessages).catch(() => {});
+        };
+        window.addEventListener('photo-tag-generated', photoGenHandler);
+        window.addEventListener('photo-tag-failed', photoGenHandler);
         return () => {
             window.removeEventListener('instant-tool-status', handler);
             window.removeEventListener('active-msg-received', receivedHandler);
+            window.removeEventListener('photo-tag-generated', photoGenHandler);
+            window.removeEventListener('photo-tag-failed', photoGenHandler);
             if (clearTimer) clearTimeout(clearTimer);
         };
     }, []);
@@ -1680,6 +1814,85 @@ const Chat: React.FC = () => {
 
         // 重 roll：不注入上一轮残留的情绪 buff 与意识流（innerState），两边独立重新生成。
         triggerAI(newHistory, undefined, undefined, { skipEmotionInjection: true });
+    };
+
+    const handleRerollImage = async (editedDesc?: string) => {
+        if (!selectedMessage || selectedMessage.type !== 'image') return;
+        const originalDesc = selectedMessage.metadata?.imageGenDescription as string | undefined;
+        const desc = editedDesc?.trim() || originalDesc;
+        if (!desc) {
+            addToast('该图片没有可用的生图描述', 'error');
+            return;
+        }
+        const isSelfie = selectedMessage.metadata?.imageGenIsSelfie as boolean | undefined;
+        try {
+            // 先标 pending → UI 显示骨架
+            await DB.updateMessageMetadata(selectedMessage.id, (prev: any) => ({
+                ...prev,
+                imageGenStatus: 'pending',
+                imageGenError: undefined,
+                ...(editedDesc ? { imageGenDescription: editedDesc.trim() } : {}),
+            }));
+            setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+            addToast('正在重新生图…', 'info');
+            // 让出渲染帧，确保 pending 骨架先画出来再开始生图
+            await new Promise(r => requestAnimationFrame(r));
+            const { generateImage } = await import('../utils/imageGenService');
+            const { loadImageGenSettings } = await import('../utils/imageGenStorage');
+            const genSettings = loadImageGenSettings();
+            const presetId = isSelfie
+                ? (genSettings.defaultSelfiePresetId || genSettings.defaultPresetId)
+                : genSettings.defaultPresetId;
+            const presetPrompt = presetId
+                ? (genSettings.presets.find(p => p.id === presetId)?.prompt?.trim() || undefined)
+                : undefined;
+            const sizeOverride = isSelfie
+                ? (genSettings.selfieSize || undefined)
+                : (genSettings.landscapeSize || undefined);
+            const result = await generateImage(desc, {
+                referenceImageAssetId: isSelfie ? char?.referenceImageAssetId : undefined,
+                appearanceDescription: isSelfie ? char?.appearanceDescription : undefined,
+                presetPrompt,
+                settings: sizeOverride ? { ...genSettings, size: sizeOverride } : genSettings,
+            });
+            await DB.updateMessage(selectedMessage.id, result.dataUrl);
+            await DB.updateMessageMetadata(selectedMessage.id, (prev: any) => ({
+                ...prev,
+                imageGenStatus: 'generated',
+                imageGenPrompt: result.prompt,
+                imageGenRevisedPrompt: result.revisedPrompt,
+                imageGenBlobRef: result.blobRef,
+                imageGenMimeType: result.mimeType,
+                imageGenDescription: desc,
+                imageGenUsedReference: result.usedReference,
+                imageGenError: undefined,
+            }));
+            // 写入近期接收（独立备份站）
+            if (result.blobRef) {
+                try {
+                    await DB.saveImageReceipt({
+                        id: result.blobRef.replace('blobref:', ''),
+                        blobRef: result.blobRef,
+                        charId: char.id,
+                        description: desc,
+                        timestamp: Date.now(),
+                        mimeType: result.mimeType || 'image/png',
+                        isSelfie: isSelfie || false,
+                    });
+                } catch { /* 近期接收写入失败不影响主流程 */ }
+            }
+            setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+            addToast('图片已重新生成 ✨', 'success');
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            await DB.updateMessageMetadata(selectedMessage.id, (prev: any) => ({
+                ...prev,
+                imageGenStatus: 'failed',
+                imageGenError: msg,
+            }));
+            setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+            addToast(`重生成失败：${msg}`, 'error');
+        }
     };
 
     const handleImageSelect = async (file: File) => {
@@ -3836,6 +4049,12 @@ const Chat: React.FC = () => {
                 onDownloadVoice={selectedMessage ? () => handleDownloadVoice(selectedMessage) : undefined}
                 voiceFavorited={!!(selectedMessage?.id && chatFavoriteKeys.has(chatFavoriteSourceKey(selectedMessage)))}
                 onToggleVoiceFavorite={selectedMessage ? () => handleToggleVoiceFavorite(selectedMessage) : undefined}
+                onRerollImage={selectedMessage?.type === 'image' && selectedMessage?.metadata?.imageGenDescription ? () => openRerollEdit(selectedMessage) : undefined}
+                onDownloadImage={selectedMessage?.type === 'image' ? () => handleDownloadImage(selectedMessage) : undefined}
+                onArchiveImage={selectedMessage?.type === 'image' ? () => handleArchiveImage(selectedMessage) : undefined}
+                archivingImage={archivingMsgId === selectedMessage?.id}
+                archiveImageFailed={archiveImageFailed && archivingMsgId === null}
+                onPreviewImage={selectedMessage?.type === 'image' ? () => handlePreviewImage(selectedMessage) : undefined}
                 scheduleData={scheduleData}
                 isScheduleGenerating={isScheduleGenerating}
                 onScheduleEdit={handleScheduleEdit}
@@ -3871,6 +4090,35 @@ const Chat: React.FC = () => {
                     addToast('情绪状态已清除', 'info');
                 }}
              />
+
+             {/* 重roll前编辑提示词 */}
+             <Modal
+                 isOpen={!!rerollEditMsg}
+                 title="编辑生图描述"
+                 onClose={() => setRerollEditMsg(null)}
+                 footer={<>
+                     <button onClick={() => setRerollEditMsg(null)} className="flex-1 py-3 bg-slate-100 rounded-2xl font-medium text-slate-600">取消</button>
+                     <button onClick={confirmRerollEdit} disabled={!rerollEditDesc.trim()} className="flex-1 py-3 bg-violet-500 text-white font-bold rounded-2xl disabled:opacity-50">重新生成</button>
+                 </>}
+             >
+                 <textarea
+                     value={rerollEditDesc}
+                     onChange={e => setRerollEditDesc(e.target.value)}
+                     className="w-full h-28 bg-slate-100 rounded-2xl p-4 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-200"
+                     placeholder="输入生图描述…"
+                 />
+                 <p className="text-[10px] text-slate-400 mt-2">修改描述后重新生图，原图不会被替换直到新图生成成功。</p>
+             </Modal>
+
+             {/* 图片大图预览 Lightbox */}
+             {previewMsg && (
+                 <ImageLightbox
+                     msg={previewMsg}
+                     charName={previewMsg ? characters.find(c => c.id === previewMsg.charId)?.name : undefined}
+                     onClose={() => setPreviewMsg(null)}
+                     onDownload={handleDownloadImage}
+                 />
+             )}
 
              {/* 小剧场播放器：窥视某个日程时段的角色行为演出 */}
              {theaterSlotIdx !== null && scheduleData && createPortal(
@@ -4146,6 +4394,8 @@ const Chat: React.FC = () => {
                             isPending={false}
                             pendingIndicator={osTheme.chatPendingIndicator !== false}
                             onMcdSendCart={handleMcdSendCart}
+                            onPreviewImage={handlePreviewImage}
+                            onDownloadImage={handleDownloadImage}
                             onMcdCandidate={handleMcdCandidate}
                             onResolveTransfer={handleResolveTransfer}
                             onResolveLifeRecord={handleResolveLifeRecord}

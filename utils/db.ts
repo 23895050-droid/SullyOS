@@ -7,7 +7,7 @@ import {
     GalleryImage, FullBackupData, GroupProfile, SocialPost, StudyCourse, GameSession, Worldbook, NovelBook, Emoji, EmojiCategory,
     BankTransaction, SavingsGoal, BankFullState, DollhouseState, XhsStockImage, XhsActivityRecord, XhsOwnedPost, SongSheet, QuizSession, GuidebookSession,
     LifeSimState, HandbookEntry, Tracker, TrackerEntry, HotNewsSnapshot,
-    LifeRecord, MedPlan, LifeRecordSettings, CharacterGroup,
+    LifeRecord, MedPlan, LifeRecordSettings, CharacterGroup, ImageReceipt,
     VRWorldNovel, VRNovelAnnotation, CustomCreatorPart, VRMusicRoomState, VRGuestbookState, VRScript, VRStagedPlay, VRLetter,
     WorldProfile, WorldEpisode, StoryTheaterEntry, StoryTheaterPreset, StoryTheaterMask
 } from '../types';
@@ -27,7 +27,8 @@ const DB_NAME = 'AetherOS_Data';
 // v69：见面·剧情条目与糯米机原生预设。正文继续复用 messages 表，避免再造会话存储。
 // v70：剧场面具箱（原创人物面具）；角色面具仍只存 characterId，不复制神经链接资料。
 // v71：角色小红书伪主页；发帖归属与可删除的自由活动日志分离。
-const DB_VERSION = 71;
+// v72：image_receipts 近期接收 — 生图独立备份站（fork 自有 store，与聊天消息解耦）。
+const DB_VERSION = 72;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -57,6 +58,7 @@ const STORE_BANK_DATA = 'bank_data';
 const STORE_XHS_STOCK = 'xhs_stock';
 const STORE_XHS_ACTIVITIES = 'xhs_activities';
 const STORE_XHS_OWNED_POSTS = 'xhs_owned_posts';
+const STORE_IMAGE_RECEIPTS = 'image_receipts'; // 近期接收 — 生图独立备份站
 const STORE_SONGS = 'songs';
 const STORE_QUIZZES = 'quizzes';
 const STORE_GUIDEBOOK = 'guidebook';
@@ -326,6 +328,12 @@ export const openDB = (): Promise<IDBDatabase> => {
           const ownedPostStore = db.createObjectStore(STORE_XHS_OWNED_POSTS, { keyPath: 'id' });
           ownedPostStore.createIndex('characterId', 'characterId', { unique: false });
           ownedPostStore.createIndex('noteId', 'noteId', { unique: false });
+      }
+
+      // v72: 近期接收 — 生图独立备份站（与聊天消息解耦，各删各的）
+      if (!db.objectStoreNames.contains(STORE_IMAGE_RECEIPTS)) {
+          const irStore = db.createObjectStore(STORE_IMAGE_RECEIPTS, { keyPath: 'id' });
+          irStore.createIndex('charId', 'charId', { unique: false });
       }
 
       createStore(STORE_SONGS, { keyPath: 'id' });
@@ -1348,6 +1356,45 @@ export const DB = {
               ));
           };
           request.onerror = () => reject(request.error);
+      });
+  },
+
+  // ─── 近期接收（image_receipts）───────────────
+  getAllImageReceipts: async (): Promise<ImageReceipt[]> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_IMAGE_RECEIPTS)) return [];
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_IMAGE_RECEIPTS, 'readonly');
+          const request = transaction.objectStore(STORE_IMAGE_RECEIPTS).getAll();
+          request.onsuccess = () => {
+              const result = (request.result || []) as ImageReceipt[];
+              result.sort((a, b) => b.timestamp - a.timestamp);
+              resolve(result);
+          };
+          request.onerror = () => reject(request.error);
+      });
+  },
+
+  saveImageReceipt: async (receipt: ImageReceipt): Promise<void> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_IMAGE_RECEIPTS, 'readwrite');
+          transaction.objectStore(STORE_IMAGE_RECEIPTS).put(receipt);
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () => reject(transaction.error || new Error('saveImageReceipt aborted'));
+      });
+  },
+
+  deleteImageReceipt: async (id: string): Promise<void> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_IMAGE_RECEIPTS)) return;
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_IMAGE_RECEIPTS, 'readwrite');
+          transaction.objectStore(STORE_IMAGE_RECEIPTS).delete(id);
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () => reject(transaction.error || new Error('deleteImageReceipt aborted'));
       });
   },
 

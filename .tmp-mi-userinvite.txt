@@ -1,0 +1,71 @@
+    // --- Music Card Rendering (一起听 / 加入歌单) ---
+    // 一起听邀请卡（他发起的：带接受/拒绝按钮，她点了才发生——批 2 双向状态机方向 B）
+    if (m.type === 'music_invite' && m.metadata?.invite) {
+        const inv = m.metadata.invite as { song?: any; inviteSongName?: string; status?: string };
+        const status = inv.status || 'pending';
+        const respondInvite = async (accepted: boolean) => {
+            if (status !== 'pending') return;
+            const hooks = loadMusicHooks();
+            if (accepted && hooks) hooks.joinListeningTogether(m.charId);
+            removePendingInvite(m.charId, accepted ? 'accepted' : 'declined');
+            await DB.updateMessageMetadata(m.id, (prev) => ({
+                ...(prev || {}),
+                invite: { ...((prev || {}).invite || {}), status: accepted ? 'accepted' : 'declined' },
+            })).catch(() => {});
+            await DB.saveMessage({
+                charId: m.charId,
+                role: 'system',
+                type: 'music_accept',
+                content: accepted ? '[你接受了一起听]' : '[你婉拒了这次邀请]',
+                metadata: { source: 'music_accept', acceptCard: { action: accepted ? 'accept' : 'decline', song: inv.song || null } },
+            }).catch(() => {});
+            if (accepted) {
+                // 他带歌名邀请：正在放歌就去搜这首来播（搜不到保持当前）；没在放就只激活状态，等她自己去放
+                const name = inv.inviteSongName;
+                const snap = loadMusicPlaybackSnapshot();
+                if (name && snap?.playing && snap.current && snap.cfg) {
+                    try {
+                        const r: any = await musicApi.search(snap.cfg, name);
+                        const hit = (r?.result?.songs || [])[0];
+                        if (hit) {
+                            const req = loadMusicPlayRequest();
+                            if (req) {
+                                req({
+                                    id: hit.id,
+                                    name: hit.name,
+                                    artists: (hit.ar || hit.artists || []).map((a: any) => a.name).join(' / '),
+                                    album: hit.al?.name || hit.album?.name || '',
+                                    albumPic: String(hit.al?.picUrl || hit.album?.picUrl || '').replace(/^http:/, 'https:'),
+                                    duration: (hit.dt || hit.duration || 0) / 1000,
+                                    fee: hit.fee ?? 0,
+                                });
+                            }
+                        }
+                    } catch { /* 搜不到就保持当前播放 */ }
+                }
+            }
+        };
+        const footer = status === 'pending' ? (
+            <div className="mt-2.5 flex gap-2">
+                <button
+                    onClick={(e) => { e.stopPropagation(); void respondInvite(true); }}
+                    className="flex-1 py-1.5 rounded-full text-[10px] font-semibold active:scale-95 transition-transform"
+                    style={{ background: 'linear-gradient(135deg, #ff9dbb, #c9b3ff)', color: '#fff', boxShadow: '0 2px 8px rgba(201,141,255,0.35)' }}>
+                    💗 接受
+                </button>
+                <button
+                    onClick={(e) => { e.stopPropagation(); void respondInvite(false); }}
+                    className="flex-1 py-1.5 rounded-full text-[10px] font-medium active:scale-95 transition-transform"
+                    style={{ background: 'rgba(148,163,184,0.12)', color: '#7a7a85', border: '1px solid rgba(148,163,184,0.3)' }}>
+                    婉拒
+                </button>
+            </div>
+        ) : status === 'accepted' ? (
+            <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a5db0' }}>💗 已接受，正在一起听</div>
+        ) : (
+            <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a7a85' }}>已婉拒这次邀请</div>
+        );
+        return commonLayout(musicInviteCardBody(inv, footer));
+    }
+
+    if (m.type === 'music_card' && m.metadata?.song) {

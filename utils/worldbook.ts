@@ -245,10 +245,11 @@ export const formatWorldbookSection = (
 
 export const injectWorldbookDepthEntries = <T extends WorldbookScanMessage>(
     messages: T[],
-    entries: ResolvedWorldbookEntry[],
+    // 只读 depth/role——音乐窗口块等非世界书条目也走同一条深度插入通道
+    entries: Array<{ content: string; book: { depth?: number | null; role?: number | null } }>,
 ): Array<T | { role: string; content: string }> => {
     if (entries.length === 0) return [...messages];
-    const buckets = new Map<number, ResolvedWorldbookEntry[]>();
+    const buckets = new Map<number, Array<{ content: string; book: { depth?: number | null; role?: number | null } }>>();
     for (const entry of entries) {
         const depth = Math.max(0, Math.floor(entry.book.depth ?? 4));
         const index = Math.max(0, messages.length - depth);
