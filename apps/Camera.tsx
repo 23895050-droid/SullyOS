@@ -12,6 +12,7 @@ import { loadImageGenSettings, saveImageGenSettings } from '../utils/imageGenSto
 import { downscaleImage, addArchiveSafe, compactArchiveThumbnails } from '../utils/archive';
 import type { ImageGenResult } from '../utils/imageGenService';
 import type { Message, ImageGenPreset } from '../types';
+import DataBackupPanel from './couple/DataBackupPanel';
 
 // ── 辅助：从 ImageGenResult 构造 Message 给 lightbox / download ──
 function resultToMessage(r: ImageGenResult, charId: string, desc: string): Message {
@@ -2001,6 +2002,11 @@ const CameraSettings: React.FC<{
               placeholder="自定义生图时的系统提示词（给 AI 的风格/质量指令）"
               className="w-full text-[11px] px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 outline-none focus:border-violet-400 resize-none"
             />
+          </Section>
+
+          {/* ── 数据备份（2026-09-04 分功能入口）── */}
+          <Section title="数据备份">
+            <DataBackupPanel scope="camera" />
           </Section>
 
           <div className="flex gap-2 pt-1">

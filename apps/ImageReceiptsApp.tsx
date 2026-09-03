@@ -9,6 +9,7 @@ import ConfirmDialog from '../components/os/ConfirmDialog';
 import { downloadChatImage } from '../utils/imageDownload';
 import { useBlobRefUrl, deleteBlobRefIfUnreferenced } from '../utils/blobRef';
 import { trackEvent } from '../utils/analytics';
+import DataBackupPanel from './couple/DataBackupPanel';
 
 interface Entry {
   receipt: ImageReceipt;
@@ -67,6 +68,7 @@ const ImageReceiptsApp: React.FC<{ embedded?: boolean; onEmbeddedBack?: () => vo
   const [refreshing, setRefreshing] = useState(false);
   const [previewEntry, setPreviewEntry] = useState<Entry | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Entry | null>(null);
+  const [showBackup, setShowBackup] = useState(false);
   const isInitialLoad = useRef(true);
 
   const charNameOf = useCallback((charId: string) =>
@@ -144,6 +146,13 @@ const ImageReceiptsApp: React.FC<{ embedded?: boolean; onEmbeddedBack?: () => vo
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" /></svg>
           </button>
+          <button
+            onClick={() => setShowBackup(true)}
+            aria-label="数据备份"
+            className="p-2 rounded-full hover:bg-black/5 active:scale-90 transition-all text-slate-400"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0-3-3m3 3 3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z" /></svg>
+          </button>
         </div>
       </div>
 
@@ -218,6 +227,17 @@ const ImageReceiptsApp: React.FC<{ embedded?: boolean; onEmbeddedBack?: () => vo
           onConfirm={confirmDelete}
           onCancel={() => setPendingDelete(null)}
         />
+      )}
+
+      {/* 数据备份（2026-09-04 分功能入口） */}
+      {showBackup && (
+        <div className="fixed inset-0 z-[350] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.35)' }} onClick={() => setShowBackup(false)}>
+          <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-bold text-slate-800 text-center">近期接收 · 数据备份</h3>
+            <DataBackupPanel scope="receipts" />
+            <button onClick={() => setShowBackup(false)} className="w-full py-2.5 rounded-xl bg-slate-100 text-slate-500 text-xs font-bold active:scale-95">关闭</button>
+          </div>
+        </div>
       )}
     </div>
   );

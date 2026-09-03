@@ -10,6 +10,7 @@ import ConfirmDialog from '../components/os/ConfirmDialog';
 import TokenImg from '../components/os/TokenImg';
 import ImageReceiptsApp from './ImageReceiptsApp';
 import { loadImageGenSettings } from '../utils/imageGenStorage';
+import DataBackupPanel from './couple/DataBackupPanel';
 import {
   loadArchive, updateArchive, deleteArchives, toggleFavorite,
   searchArchives, formatArchiveTime, buildForwardText, compactArchiveThumbnails, type ArchiveEntry,
@@ -821,6 +822,11 @@ const SettingsCard: React.FC<{
           留档摘要与自动打标使用提示词生成模型，在「相机 ⚙ 设置」里配置。
           留档卡片只存缩略图，原图在近期接收里。
         </p>
+        {/* 数据备份（2026-09-04 分功能入口） */}
+        <div className="pt-2 border-t border-slate-100">
+          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">数据备份</div>
+          <DataBackupPanel scope="album" />
+        </div>
         <button onClick={onClose} className="w-full py-2.5 rounded-xl bg-[#ffe6eb] text-[#383639] text-xs font-medium active:scale-95">关闭</button>
       </div>
     </ModalOverlay>

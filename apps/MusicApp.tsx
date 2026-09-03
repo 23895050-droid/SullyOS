@@ -16,6 +16,7 @@ import CharVisitPage from './music/CharVisitPage';
 import PlaylistHomePage from './music/PlaylistHomePage';
 import MusicChatBox from './music/MusicChatBox';
 import { useMusicStore, importMusicJson, exportMusicJson, setCssGlobal, setCssPage, clearCssPage, setCssPerChar, clearCssPerChar, setLyricInject, setMusicApi, setChatBg, setChatShowAvatar, setCssPreset, setMusicPalette, resetMusicPalette, addPendingInvite, pendingInviteOf } from './couple/musicStore';
+import DataBackupPanel from './couple/DataBackupPanel';
 import { buildPaletteCss, MUSIC_PALETTE_KEYS, MUSIC_PALETTE_DEFAULTS, SURFACE_DEFAULT_PCT, GLASS_DEFAULT_PCT } from '../utils/musicPalette';
 import { putImageBlob } from '../utils/blobRef';
 import { MUSIC_NIGHT_PRESET_CSS } from '../utils/musicNightPreset';
@@ -818,6 +819,10 @@ const MusicApp: React.FC = () => {
               ))}
             </div>
             <div className="text-[9px] mt-1.5 italic" style={{ color: C.faint }}>lossless / hires 需要黑胶 SVIP</div>
+          </SettingsFold>
+          {/* ── 我们的数据备份（2026-09-04 分功能入口） ── */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.sakura} delay={0.8} /> 数据备份</span>}>
+            <DataBackupPanel scope="music" />
           </SettingsFold>
           {/* ── 导入导出（2026-08-26：CC↔Sully 第一个数据同步区） ── */}
           <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.primary} delay={0.3} /> 导入导出（Claude Code 歌单）</span>}>

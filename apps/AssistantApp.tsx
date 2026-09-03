@@ -31,6 +31,7 @@ import {
   saveAssistantThemePreset, loadAssistantThemePreset, deleteAssistantThemePreset,
   type AssistantMsg, type AssistantAttachment,
 } from '../utils/beautyAssistantStore';
+import DataBackupPanel from './couple/DataBackupPanel';
 
 // ── 工作模式树（2026-08-30 重构）：模块 → 页面 → 卡片。
 //    页面 key 同时是 CSS 槽位：'base' = cssGlobal、'self' = 小助手自己页面（cssSelf），其余 = musicStore.cssPages[key]。
@@ -1429,6 +1430,12 @@ const AssistantApp: React.FC = () => {
                   <AssistantPromptItem key={entry.label} label={entry.label} description={entry.description} colors={colors} />
                 ))}
               </div>
+            </div>
+
+            {/* 数据备份（2026-09-04 分功能入口） */}
+            <div>
+              <div className="text-[9px] mb-1 tracking-wider" style={{ color: colors.muted }}>数据备份</div>
+              <DataBackupPanel scope="assistant" />
             </div>
 
             <button
