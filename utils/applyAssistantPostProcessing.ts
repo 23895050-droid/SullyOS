@@ -401,8 +401,11 @@ export interface PostProcessMusicHooks {
         albumPic: string;
         duration: number;
         fee: number;
+        listeningTogetherWith: string[];
     } | null;
     joinListeningTogether: (charId: string) => void;
+    /** 批 2：一起听统一退出出口（exit 标签 / 用户点 × 都走它） */
+    endListeningTogether: (charId: string) => void;
     addSongToCharPlaylist: (
         charId: string,
         song: any,

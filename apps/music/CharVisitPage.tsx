@@ -27,8 +27,6 @@ import { isBlobRef } from '../../utils/blobRef';
 import { useLocalDateKey } from '../../hooks/useLocalDateKey';
 import { resolveCharTimeZone } from '../../utils/timezone';
 import { trackEvent } from '../../utils/analytics';
-import TokenImg from '../../components/os/TokenImg';
-import { isBlobRef } from '../../utils/blobRef';
 
 interface Props {
   charId: string;

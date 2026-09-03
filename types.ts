@@ -3150,6 +3150,11 @@ export interface CharacterProfile {
    * 独立于 proactiveConfig（主动发消息），互不挤占触发。
    */
   vrState?: VRWorldCharState;
+
+  /** 角色外貌描述：生图时拼入 prompt 用于锁脸（如"黑色短发，单眼皮，高鼻梁…"） */
+  appearanceDescription?: string;
+  /** 角色参考图：blobref 令牌，指向 blob_assets 中存储的图片 Blob。生图锁脸模式时作为 reference_image 传给 edits endpoint */
+  referenceImageAssetId?: string;
 }
 
 /**
@@ -3827,7 +3832,7 @@ export interface GameSession {
     lastPlayedAt: number;
 }
 
-export type MessageType = 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
+export type MessageType = 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'music_invite' | 'music_accept' | 'music_summary' | 'music_chat_summary' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
 
 export interface Message {
     id: number;

@@ -16,6 +16,7 @@
 import JSZip from 'jszip';
 import { DB } from './db';
 import { getBlobForRef, restoreBlobRef, dataUrlToBlob } from './blobRef';
+import { shareOrDownloadBlob } from './shareExport';
 import type { ImageReceipt } from '../types';
 
 // ─── 功能面清单（她 2026-09-03 验收过；每个功能自己记账自己的 key）───────────────
@@ -272,15 +273,10 @@ export async function exportOurData(scope: OurFeatureId | 'all'): Promise<OurBac
   return { payload, zipBlob };
 }
 
-/** 下载备份 zip。文件名带日期，全量/分功能一个套路。 */
-export function downloadOurBackup(zipBlob: Blob, scope: OurFeatureId | 'all'): void {
+/** 下载备份 zip（走统一分享：原生 App 出系统分享面板，Web 端下载）。文件名带日期，全量/分功能一个套路。 */
+export function downloadOurBackup(zipBlob: Blob, scope: OurFeatureId | 'all'): Promise<'shared' | 'downloaded' | 'cancelled'> {
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-  const url = URL.createObjectURL(zipBlob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `our-data-backup_${scope}_${stamp}.zip`;
-  a.click();
-  URL.revokeObjectURL(url);
+  return shareOrDownloadBlob({ blob: zipBlob, fileName: `our-data-backup_${scope}_${stamp}.zip`, nativeChunked: true });
 }
 
 // ─── 导入 ─────────────────────────────────────────────────────────

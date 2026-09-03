@@ -13,6 +13,7 @@ import {
 import NeteaseProfilePage from './music/NeteaseProfilePage';
 import CharVisitPage from './music/CharVisitPage';
 import { shareOrDownloadBlob } from '../utils/shareExport';
+import { getProxyWorkerUrl } from '../utils/proxyWorker';
 import PlaylistHomePage from './music/PlaylistHomePage';
 import MusicChatBox from './music/MusicChatBox';
 import { useMusicStore, importMusicJson, exportMusicJson, setCssGlobal, setCssPage, clearCssPage, setCssPerChar, clearCssPerChar, setLyricInject, setMusicApi, setChatBg, setChatShowAvatar, setCssPreset, setMusicPalette, resetMusicPalette, addPendingInvite, pendingInviteOf } from './couple/musicStore';
@@ -286,11 +287,7 @@ const MusicApp: React.FC = () => {
     const charName = characters.find((c) => c.id === playlistCharId)?.name;
     const json = exportMusicJson(charName);
     const blob = new Blob([json], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `sully-music-export-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    void shareOrDownloadBlob({ blob, fileName: `sully-music-export-${new Date().toISOString().slice(0, 10)}.json` });
     addToast('已导出（新增播放记录 + 全部印象）', 'success');
     trackEvent('导出音乐数据给 CC');
   };

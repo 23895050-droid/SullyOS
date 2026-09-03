@@ -197,12 +197,13 @@ describe('与孤儿 GC 的配合', () => {
     it('清单守卫：改写走的引用面就是 GC 的那一份', () => {
         // 两边共用同一个常量——GC 能 mark 到的面，改写就能改到。
         // 换成各自维护的清单时，这条会红。
+        // fork 注：清单比上游多一张 image_receipts（相机/相册近期接收原图），追上游覆盖
         expect(REF_SOURCE_STORES.length).toBeGreaterThan(0);
         expect([...REF_SOURCE_STORES]).toEqual(
             [
                 'characters', 'messages', 'cc_custom_parts', 'songs', 'gallery', 'assets', 'themes', 'emojis',
                 'user_profile', 'social_posts', 'groups', 'character_groups', 'story_theater_masks',
-                'bank_data', 'guidebook', 'life_sim', 'pixel_home_assets',
+                'bank_data', 'guidebook', 'life_sim', 'pixel_home_assets', 'image_receipts',
             ],
         );
     });

@@ -17,6 +17,7 @@ import { getPrompt, savePrompt, resetPrompt, isPromptOverridden, getPromptEntrie
 import { putImageBlob, useBlobRefUrl, deleteBlobRef } from '../utils/blobRef';
 import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '../utils/apiConfigNormalize';
 import type { ApiPreset } from '../types';
+import { shareOrDownloadFile } from '../utils/shareExport';
 import { setCssGlobal, setCssPage, getMusicStore } from './couple/musicStore';
 import {
   splitCodeBlocks, codeFileName, foldFoldedCodeBlocks, buildAssistantUserParts,
@@ -436,24 +437,16 @@ const AssistantApp: React.FC = () => {
       addToast('收藏夹是空的', 'info');
       return;
     }
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `assistant-favorites-${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    void shareOrDownloadFile({
+      content: text,
+      fileName: `assistant-favorites-${new Date().toISOString().slice(0, 10)}.txt`,
+      mimeType: 'text/plain;charset=utf-8',
+    });
   };
 
-  /** 折叠文件的下载（2026-08-31）：与导出收藏夹同款 Blob + a.download */
+  /** 折叠文件的下载（2026-08-31）：走统一分享（原生 App 出系统分享面板，Web 端下载） */
   const downloadTextFile = (name: string, text: string) => {
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${name}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    void shareOrDownloadFile({ content: text, fileName: `${name}.txt`, mimeType: 'text/plain;charset=utf-8' });
   };
 
   const openCssEditor = () => {

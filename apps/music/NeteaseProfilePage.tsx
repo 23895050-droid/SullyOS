@@ -14,8 +14,6 @@ import NeteaseLoginPanel from './NeteaseLoginPanel';
 import TokenImg from '../../components/os/TokenImg';
 import { isBlobRef } from '../../utils/blobRef';
 import { trackEvent } from '../../utils/analytics';
-import TokenImg from '../../components/os/TokenImg';
-import { isBlobRef } from '../../utils/blobRef';
 
 interface Playlist {
   id: number;

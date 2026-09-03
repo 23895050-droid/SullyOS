@@ -95,7 +95,7 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
     setStatus({ kind: 'exporting' });
     try {
       const { payload, zipBlob } = await exportOurData(scope);
-      downloadOurBackup(zipBlob, scope);
+      void downloadOurBackup(zipBlob, scope);
       setStatus({ kind: 'exported', payload, zipBlob, sizeMb: zipBlob.size / 1024 / 1024 });
     } catch {
       setStatus({ kind: 'error', message: '导出失败，请重试' });

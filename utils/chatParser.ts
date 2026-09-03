@@ -23,8 +23,8 @@ export interface MusicActionSnapshot {
     albumPic: string;
     duration: number;
     fee: number;
-    /** 此刻和 user 一起听的 char 名单（批 2 状态机用：判断"已在一起听"） */
-    listeningTogetherWith: string[];
+    /** 此刻和 user 一起听的 char 名单（批 2 状态机用：判断"已在一起听"）；上游测试构造的快照不带此字段，故可选 */
+    listeningTogetherWith?: string[];
 }
 
 /**
@@ -45,8 +45,8 @@ export interface MusicActionHooks {
     getListeningSnapshot: () => MusicActionSnapshot | null;
     /** 将 charId 加入"一起听"名单（chatParser 不维护状态，只通知） */
     joinListeningTogether: (charId: string) => void;
-    /** 批 2：一起听统一退出出口（exit 标签 / 用户点 × 都走它） */
-    endListeningTogether: (charId: string) => void;
+    /** 批 2：一起听统一退出出口（exit 标签 / 用户点 × 都走它）；可选——上游测试 mock 不提供它 */
+    endListeningTogether?: (charId: string) => void;
     /**
      * 把 song 加到 char 的歌单。
      * 返回 { playlistTitle, created } —— created=true 表示这次是新建了歌单。
@@ -379,7 +379,7 @@ export const ChatParser = {
                 } else {
                     // exit：他主动结束（确实在一起听才有意义；总结卡由退出出口自己发）
                     if (togetherNow) {
-                        musicHooks.endListeningTogether(charId);
+                        musicHooks.endListeningTogether?.(charId);
                         await persist({
                             charId,
                             role: 'system',
@@ -478,7 +478,7 @@ export const ChatParser = {
             const kwTogether = (kwSnap?.listeningTogetherWith || []).includes(charId);
             if (kwTogether && detectMusicExitIntent(content)) {
                 // 他提出结束：走统一退出出口（flush 会话 + 总结卡）
-                musicHooks.endListeningTogether(charId);
+                musicHooks.endListeningTogether?.(charId);
                 await persist({
                     charId,
                     role: 'system',
@@ -704,14 +704,6 @@ export const ChatParser = {
     // same bubble: models often put spaces inside Japanese/Chinese mixed-language prose, and
     // treating those spaces as implicit newlines cuts a single sentence in half.
     chunkText: (text: string): string[] => {
-        // CJK character + punctuation ranges (Chinese text normally has no spaces between these)
-        const CJK = '\\u4e00-\\u9fff\\u3400-\\u4dbf\\u3000-\\u303f\\uff00-\\uffef\\u2000-\\u206f\\u2e80-\\u2eff\\u3001-\\u3003\\u2018-\\u201f\\u300a-\\u300f\\uff01-\\uff0f\\uff1a-\\uff20';
-        // 在两个 CJK 之间的空格处断行. 不用后行断言 (?<=…): iOS Safari <16.4 的 JSC 不支持,
-        // 旧设备上 new RegExp 会直接抛 "invalid group specifier name". 改成「捕获左侧 CJK + 零宽
-        // 前瞻右侧」, 用 $1 补回左字符, 行为与原 (?<=[CJK])\s+(?=[CJK]) 字节一致 (见 lookbehindFree.test.ts).
-        const cjkSplitRe = new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g');
-        const SPLIT = String.fromCharCode(1);  // CJK 切点标记
-
         // 0. 保护 <语音…>…</语音> 原子块。外语语音字幕对齐模式下 (见 chatPrompts
         //    voiceActingGuide) 标签内部常按空行分成好几段，一旦被下面的换行断句切碎，
         //    <语音> 的开 / 闭标签就会散落到不同气泡里；MessageItem 的 hasVoiceTag 要求
@@ -733,27 +725,10 @@ export const ChatParser = {
             .map(c => c.trim())
             .filter(c => c.length > 0);
 
-        // 2. For each chunk, also split on spaces between CJK chars/punctuation
-        //    (中文里不该有空格, so "汉字 汉字" means the AI intended a bubble break)
-        //    括号内的空格要保护: 否则裸括号表情包 / 标签 (如 "[你 交给我吧]" 或
-        //    "[[SEND_EMOJI: a b]]") 会被这条规则劈成 "[你" + "交给我吧]" 掉格式.
-        //    做法: 先把 [...] / [[...]] 内空格换成占位符, split 后再换回.
-        const SENTINEL = String.fromCharCode(0);
-        const ATOM_SOLO = new RegExp(`^${ATOM}(\\d+)${ATOM}$`);
         const ATOM_GLOBAL = new RegExp(`${ATOM}(\\d+)${ATOM}`, 'g');
         const restoreVoice = (s: string) => s.replace(ATOM_GLOBAL, (_m, n) => voiceBlocks[Number(n)] ?? '');
-        const result: string[] = [];
-        for (const chunk of lineChunks) {
-            // 独占一行的语音占位符 → 直接还原成完整语音块，不参与 CJK 空格切分
-            const solo = chunk.match(ATOM_SOLO);
-            if (solo) { result.push(voiceBlocks[Number(solo[1])]); continue; }
-            const guarded = chunk.replace(/\[{1,2}[^\[\]]*\]{1,2}/g, m => m.replace(/\s/g, SENTINEL));
-            const sub = guarded.replace(cjkSplitRe, `$1${SPLIT}`).split(SPLIT)
-                .map(c => restoreVoice(c.split(SENTINEL).join(' ').trim()))  // 安全网: 同行残留占位符还原
-                .filter(c => c.length > 0);
-            result.push(...sub);
-        }
-
-        return result;
+        return lineChunks
+            .map(restoreVoice)
+            .filter(c => c.length > 0);
     }
 }
