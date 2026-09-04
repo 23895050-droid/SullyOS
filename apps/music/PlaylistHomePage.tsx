@@ -8,10 +8,25 @@ import { useOS } from '../../context/OSContext';
 import { useMusic } from '../../context/MusicContext';
 import { useMusicStore, playRecordById } from '../couple/musicStore';
 import { groupImportedSongs } from '../../utils/musicMountContent';
+import { useBlobRefUrl } from '../../utils/blobRef';
+import { toHttps } from '../../utils/musicContextBlock';
 import SongDetailModal from './SongDetailModal';
 import { C, MizuHeader, BokehBg } from './MusicUI';
 import { Play, MusicNote, ArrowRight } from '@phosphor-icons/react';
 import { type CharacterProfile } from '../../types';
+
+/** 封面小方块（反馈1 A2）：blobRef 令牌解析 + http→https，list 里逐行 hook 只能抽子组件 */
+const PlaylistCover: React.FC<{ src?: string }> = ({ src }) => {
+  const url = useBlobRefUrl(toHttps(src));
+  if (url) {
+    return <img src={url} alt="" className="w-11 h-11 rounded-xl object-cover shrink-0" />;
+  }
+  return (
+    <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: `rgba(var(--mz-primary-rgb, 128,124,157), 0.13)` }}>
+      <MusicNote size={16} color={C.primary} />
+    </div>
+  );
+};
 
 interface Props {
   charId: string;
@@ -91,13 +106,7 @@ const PlaylistHomePage: React.FC<Props> = ({ charId, onBack, onOpenPlayer, onOpe
                     style={{ background: C.glass }}
                     onClick={() => setDetailId(s.neteaseId)}
                   >
-                    {s.albumPic ? (
-                      <img src={s.albumPic} alt="" className="w-11 h-11 rounded-xl object-cover shrink-0" />
-                    ) : (
-                      <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: `rgba(var(--mz-primary-rgb, 128,124,157), 0.13)` }}>
-                        <MusicNote size={16} color={C.primary} />
-                      </div>
-                    )}
+                    <PlaylistCover src={s.albumPic} />
                     <div className="flex-1 min-w-0">
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text }} className="truncate">{s.name}</div>
                       <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }} className="truncate">

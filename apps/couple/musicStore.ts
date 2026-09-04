@@ -10,6 +10,8 @@ import { addActivity } from './activityStore';
 import { DB } from '../../utils/db';
 import type { MusicPalette } from '../../utils/musicPalette';
 import { mergeImportedSong, parseMusicImportJson, buildMusicExportPayload } from '../../utils/musicImportExport';
+import { toHttps } from '../../utils/musicContextBlock';
+import type { BgTaskPending } from '../../utils/bgTask';
 import type { CharPlaylistSong } from '../../types';
 
 // ── 类型 ──
@@ -157,6 +159,8 @@ export interface CoupleMusicV1 {
   exportCursor: number;             // 已导出 playRecords 游标（lastPlayedAt 时间戳）
   importBatches: ImportBatch[];
   musicChatSessions: MusicChatSession[];
+  /** 反馈1 A5：补生成总结卡的后台任务状态（bgTask 基建，生成中可离页） */
+  pendingSummary?: BgTaskPending;
 }
 
 /** CSS 分页 key（音乐 App 各视图各一份；'chat' = 聊歌页，'miniplayer' = 全局悬浮窗） */
@@ -186,6 +190,8 @@ const store = createCoupleStore<CoupleMusicV1>('couple_music_v1', 1, {
 
 export const useMusicStore = store.use;
 export const getMusicStore = store.get;
+/** bgTask 后台生成要写 pending 字段——直接给 store 句柄（get/set） */
+export const musicStoreApi = store;
 
 // ── 纯 getter ──
 
@@ -363,8 +369,9 @@ export function recordLocalPlay(song: { id: number; name: string; artists: strin
   const existing = playRecordById(s.playRecords, song.id);
   const artists = song.artists ? String(song.artists).split(/[/、,]+/).map((x) => x.trim()).filter(Boolean) : [];
   const record: SongPlayRecord = existing
-    ? { ...existing, playCount: existing.playCount + 1, lastPlayedAt: now, albumPic: song.albumPic ?? existing.albumPic }
-    : { neteaseId: song.id, name: song.name, artists, playCount: 1, lastPlayedAt: now, albumPic: song.albumPic, context: '自己听' };
+    // 反馈1 A2：封面入库即归一 https（http 封面在 https 页面会被 Mixed Content 拦截，存下来就是坏的）
+    ? { ...existing, playCount: existing.playCount + 1, lastPlayedAt: now, albumPic: toHttps(song.albumPic || existing.albumPic) }
+    : { neteaseId: song.id, name: song.name, artists, playCount: 1, lastPlayedAt: now, albumPic: toHttps(song.albumPic || ''), context: '自己听' };
   store.set((prev) => ({
     ...prev,
     playRecords: existing
@@ -478,7 +485,8 @@ export const topPlayedSong = (s: CoupleMusicV1): { record: SongPlayRecord; album
   if (s.playRecords.length === 0) return undefined;
   const record = [...s.playRecords].sort((a, b) => b.playCount - a.playCount || (a.lastPlayedAt < b.lastPlayedAt ? 1 : -1))[0];
   const song = importedSongById(s.importedSongs, record.neteaseId);
-  return { record, albumPic: record.albumPic ?? song?.albumPic, duration: song?.duration, fee: song?.fee, album: song?.album };
+  // 反馈1 A2：老记录里存的 http 封面在这里统一升级（渲染端还会再兜一层 toHttps + useBlobRefUrl）
+  return { record, albumPic: toHttps(record.albumPic ?? song?.albumPic ?? ''), duration: song?.duration, fee: song?.fee, album: song?.album };
 };
 
 /** 内置 CSS 预设切换（2026-08-30）：'night' = 沉浸夜色；undefined = 默认 */
@@ -552,6 +560,21 @@ export const removePendingInvite = (charId: string, outcome?: 'accepted' | 'decl
     updatedAt: isoNow(),
   }));
 
+/**
+ * 邀请卡被删时清掉 pending 记录（反馈1 A5 死锁修：卡片没了但记录还在 → 角色接不到、也再发不起邀请）。
+ * 不带冷却——删卡是用户主动收拾，不是婉拒。按 charId 或 cardMessageId 都能命中。
+ */
+export const dropPendingInviteByCard = (charId: string, cardMessageId?: string) =>
+  store.set((s) => ({
+    ...s,
+    pendingInvites: s.pendingInvites.filter((p) => {
+      if (p.charId === charId) return false;
+      if (cardMessageId && p.cardMessageId === cardMessageId) return false;
+      return true;
+    }),
+    updatedAt: isoNow(),
+  }));
+
 /** 关键词发起邀请的冷却时长：婉拒后这段时间内他不再自动插邀请卡 */
 export const KEYWORD_INVITE_COOLDOWN_MS = 10 * 60 * 1000;
 
@@ -584,7 +607,8 @@ export function flushTogetherSession(
     charId,
     startedAt: new Date(startedAt).toISOString(),
     endedAt: new Date(endedAt).toISOString(),
-    songs,
+    // 反馈1 A2：封面入库即归一 https
+    songs: songs.map((x) => ({ ...x, albumPic: toHttps(x.albumPic || '') })),
   };
   const now = isoNow();
   store.set((s) => ({ ...s, togetherSessions: [...s.togetherSessions, session].slice(-200), updatedAt: now }));

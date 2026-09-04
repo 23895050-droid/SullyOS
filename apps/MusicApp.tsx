@@ -16,13 +16,15 @@ import { shareOrDownloadBlob } from '../utils/shareExport';
 import { getProxyWorkerUrl } from '../utils/proxyWorker';
 import PlaylistHomePage from './music/PlaylistHomePage';
 import MusicChatBox from './music/MusicChatBox';
-import { useMusicStore, importMusicJson, exportMusicJson, setCssGlobal, setCssPage, clearCssPage, setCssPerChar, clearCssPerChar, setLyricInject, setMusicApi, setChatBg, setChatShowAvatar, setCssPreset, setMusicPalette, resetMusicPalette, addPendingInvite, pendingInviteOf } from './couple/musicStore';
+import { useMusicStore, musicStoreApi, importMusicJson, exportMusicJson, setCssGlobal, setCssPage, clearCssPage, setCssPerChar, clearCssPerChar, setLyricInject, setMusicApi, setChatBg, setChatShowAvatar, setCssPreset, setMusicPalette, resetMusicPalette, addPendingInvite, pendingInviteOf } from './couple/musicStore';
 import DataBackupPanel from './couple/DataBackupPanel';
 import { buildPaletteCss, MUSIC_PALETTE_KEYS, MUSIC_PALETTE_DEFAULTS, SURFACE_DEFAULT_PCT, GLASS_DEFAULT_PCT } from '../utils/musicPalette';
 import { putImageBlob } from '../utils/blobRef';
 import { MUSIC_NIGHT_PRESET_CSS } from '../utils/musicNightPreset';
 import { getMountConfig } from '../utils/noxhomeMount';
 import { maybeGeneratePendingSummaries } from '../utils/musicSummary';
+import { configFromPreset, presetMatchesConfig } from '../utils/apiPresetSwitch';
+import { startBgTaskForResult, isBgTaskStale } from '../utils/bgTask';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 
 // ------------------------- 工具 -------------------------
@@ -69,7 +71,7 @@ const SettingsFold: React.FC<{ title: React.ReactNode; right?: React.ReactNode; 
 
 // ========================= 主组件 =========================
 const MusicApp: React.FC = () => {
-  const { closeApp, addToast, characters, userProfile } = useOS();
+  const { closeApp, addToast, characters, userProfile, apiPresets } = useOS();
   const {
     cfg, setCfg, effectiveWorkerUrl,
     current, playing, progress, duration, loadingSong,
@@ -145,7 +147,6 @@ const MusicApp: React.FC = () => {
   // ── 一起听（批 2）：她发起邀请（选角色）→ 轻确认退出 ──
   const [showInvitePicker, setShowInvitePicker] = useState(false);
   const [confirmEndChar, setConfirmEndChar] = useState<string | null>(null);
-  const [pendingSummariesBusy, setPendingSummariesBusy] = useState(false);
   // 聊歌框对象：一起听伙伴 > 从歌单页进的角色 > 挂载角色
   const [chatCharId, setChatCharId] = useState<string | null>(null);
 
@@ -187,6 +188,10 @@ const MusicApp: React.FC = () => {
   };
   // ── 角色歌单主页（2026-08-26）：charId = 拜访的角色 → 挂载角色 → 第一个角色 ──
   const musicStore = useMusicStore();
+  // 反馈1 A5：补生成走 bgTask（后台生成，可离页）——状态在 store.pendingSummary，订阅式刷新
+  const pendingSummary = musicStore.pendingSummary;
+  const summariesRunning = pendingSummary?.status === 'running' && !isBgTaskStale(pendingSummary);
+  const summariesInterrupted = pendingSummary?.status === 'running' && isBgTaskStale(pendingSummary);
   const playlistCharId = visitCharId || getMountConfig().charId || characters[0]?.id || '';
   // ── CSS 预设注入（2026-08-26 分页版；2026-08-30 加调色台层）：内置预设(夜色) → 调色台 → 基础(全局) → 当前页面 → 角色覆盖 ──
   // 内置预设排最前，用户自己的 CSS 在后 → 后注入的覆盖预设，可自行微调
@@ -1018,6 +1023,38 @@ const MusicApp: React.FC = () => {
             <div className="text-[9px] mb-2 italic" style={{ color: C.faint }}>
               一起听结束时生成总结卡用。留空 = 退出时提示「会话已保存，配置后补生成」。聊歌、印象生成走主 API，不在这里配。
             </div>
+            {/* 预设池胶囊（2026-09-05 反馈1 A3）：点一下即切即存，高亮 = 当前生效的预设 */}
+            {apiPresets.length > 0 && (
+              <div className="flex flex-wrap mb-2" style={{ gap: 6 }}>
+                {apiPresets.map((preset) => {
+                  const active = presetMatchesConfig(preset, {
+                    baseUrl: musicStore.api?.baseUrl ?? '',
+                    apiKey: musicStore.api?.apiKey ?? '',
+                    model: musicStore.api?.model ?? '',
+                  });
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => {
+                        const patch = configFromPreset(preset);
+                        setMusicApi({ baseUrl: patch.baseUrl ?? '', apiKey: patch.apiKey ?? '', model: patch.model ?? '' });
+                        setMusicApiForm({ baseUrl: patch.baseUrl ?? '', apiKey: patch.apiKey ?? '', model: patch.model ?? '' });
+                        addToast(`音乐总结 API 已切换到预设「${preset.name}」`, 'success');
+                      }}
+                      className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all"
+                      style={{
+                        background: active ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
+                        color: active ? '#fff' : C.muted,
+                        border: active ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                      }}
+                    >
+                      {preset.name}{active ? ' · 使用中' : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <div className="flex flex-col mb-2" style={{ gap: 6 }}>
               <input value={musicApiForm.baseUrl} onChange={(e) => setMusicApiForm({ ...musicApiForm, baseUrl: e.target.value })} placeholder="总结 API Base URL（已带 /v1）" className="shizuku-input text-[10px]" style={{ background: C.glass, color: C.text, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
               <input value={musicApiForm.apiKey} onChange={(e) => setMusicApiForm({ ...musicApiForm, apiKey: e.target.value })} placeholder="总结 API Key" className="shizuku-input text-[10px]" style={{ background: C.glass, color: C.text, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
@@ -1031,27 +1068,39 @@ const MusicApp: React.FC = () => {
             >
               保存
             </button>
+            {/* 反馈1 A5：补生成后台跑（bgTask）——生成中可离页，回来还在跑；失败/中断可重试 */}
             <button
               type="button"
-              disabled={pendingSummariesBusy}
+              disabled={summariesRunning}
               onClick={() => {
-                setPendingSummariesBusy(true);
-                void maybeGeneratePendingSummaries()
-                  .then((r) => {
-                    setPendingSummariesBusy(false);
-                    if (r.togetherDone + r.chatDone > 0) {
-                      addToast(`补生成完成：总结卡 ${r.togetherDone} 张、聊歌小结 ${r.chatDone} 段`, 'success');
+                void startBgTaskForResult(musicStoreApi, 'pendingSummary', 'music-summaries', () => maybeGeneratePendingSummaries())
+                  .then(({ started, result }) => {
+                    if (!started) return; // 已有新鲜 running，静默忽略
+                    if (result) {
+                      if (result.togetherDone + result.chatDone > 0) {
+                        addToast(`补生成完成：总结卡 ${result.togetherDone} 张、聊歌小结 ${result.chatDone} 段`, 'success');
+                      } else {
+                        addToast('没有可补的内容（或 API 未配置）', 'info');
+                      }
                     } else {
-                      addToast('没有可补的内容（或 API 未配置）', 'info');
+                      addToast('补生成失败，重试一次看看', 'error');
                     }
-                  })
-                  .catch(() => { setPendingSummariesBusy(false); addToast('补生成失败', 'error'); });
+                  });
               }}
               className="rounded-full w-full border-0 cursor-pointer mt-2 disabled:opacity-50"
               style={{ padding: '7px 0', fontSize: 10, fontWeight: 600, color: C.primary, border: `1px solid rgba(var(--mz-lavender-rgb, 207,195,232), 0.4)`, background: C.glass }}
             >
-              {pendingSummariesBusy ? '补生成中…' : '补生成没落下的总结卡'}
+              {summariesRunning ? '补生成中…（可离开，回来还在跑）' : '补生成没落下的总结卡'}
             </button>
+            {summariesRunning && (
+              <div className="mt-2 text-[9px]" style={{ color: C.sakura }}>生成中……切去别的页面也不中断，回来这里看结果（新卡片会发进对应聊天）。</div>
+            )}
+            {summariesInterrupted && (
+              <div className="mt-2 text-[9px]" style={{ color: C.danger }}>上次生成被页面重载打断了，再点一次补生成重试。</div>
+            )}
+            {pendingSummary?.status === 'failed' && (
+              <div className="mt-2 text-[9px]" style={{ color: C.danger }}>补生成失败：{pendingSummary.error || '未知错误'}。再点一次重试。</div>
+            )}
           </SettingsFold>
 
           {/* ── 聊歌页背景自设（2026-08-30 她要求：聊歌页背景开放自设；头像开关同批） ── */}

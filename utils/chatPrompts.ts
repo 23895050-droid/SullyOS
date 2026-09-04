@@ -10,7 +10,7 @@ import { computeCurrentListening, getCurrentSlot } from './charMusicSchedule';
 import { getCharLyricSnippet } from './charLyricCache';
 import { MusicCfg, loadMusicCfgStandalone } from '../context/MusicContext';
 import { getMusicStore } from '../apps/couple/musicStore';
-import { buildLyricWindowKeywords, shouldInjectLyricWindow } from './musicContextBlock';
+import { buildLyricWindowKeywords, shouldInjectLyricWindow, type UserListeningContextLike } from './musicContextBlock';
 import { buildMusicRecordBlock, detectSongMentions } from './musicMountContent';
 import { getPrompt } from './promptRegistry';
 import { RealtimeContextManager, NotionManager, FeishuManager, defaultRealtimeConfig } from './realtimeContext';
@@ -248,14 +248,7 @@ export const ChatPrompts = {
         currentMsgs: Message[],
         realtimeConfig?: RealtimeConfig,
         evolvedNarrative?: string,
-        userListeningContext?: {
-            songName: string;
-            artists: string;
-            lyricWindow: string[];
-            activeIdx: number;
-            fullLyric?: string;
-            hotComments?: string[];
-        } | null,
+        userListeningContext?: UserListeningContextLike | null,
         isListeningTogether?: boolean,
         musicCfg?: MusicCfg,
         promptOptions?: PromptBuildOptions,
@@ -290,14 +283,7 @@ export const ChatPrompts = {
         currentMsgs: Message[],
         realtimeConfig?: RealtimeConfig,  // 实时配置
         evolvedNarrative?: string,        // 进化后的意识流独白
-        userListeningContext?: {
-            songName: string;
-            artists: string;
-            lyricWindow: string[];
-            activeIdx: number;
-            fullLyric?: string;
-            hotComments?: string[];
-        } | null,
+        userListeningContext?: UserListeningContextLike | null,
         // char 是否和 user 处于"一起听"状态（来自 MusicContext.listeningTogetherWith）。
         // 影响氛围措辞和互动工具提示；暂停/切歌/user 踢出都会让这个值变 false。
         isListeningTogether?: boolean,
@@ -615,6 +601,10 @@ ${groupLogStr}\n`;
                 else if (fullPos === 1) afterCharMusic += `${fullLyricBlock}\n\n`;
                 else volatileState += `\n${fullLyricBlock}\n`;
             }
+            // 播放/暂停时间线块（反馈1 A4）：独立于关键词门——听歌/暂停期间常驻易变段，
+            // 角色随时知道最近播放暂停记录（带时间）和本次听歌期间听了什么
+            const playTimelineBlock = ContextBuilder.buildMusicPlayTimelineBlock(userListeningContext || null);
+            if (playTimelineBlock) volatileState += `\n${playTimelineBlock}\n`;
             if (atmosphereBlock) {
                 if (winPos === 1) {
                     afterCharMusic += `${atmosphereBlock}\n\n`;

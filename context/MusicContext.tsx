@@ -18,6 +18,11 @@ import type { PostProcessMusicHooks } from '../utils/applyAssistantPostProcessin
 import { resolveRefToDataUrl } from '../utils/blobRef';
 import { flushTogetherSession, recordLocalPlay } from '../apps/couple/musicStore';
 import { generateTogetherSummary } from '../utils/musicSummary';
+import { toHttps } from '../utils/musicContextBlock';
+
+// toHttps 搬家到 utils/musicContextBlock（2026-09-05 反馈1 A2：musicStore/musicSummary 入库归一也要用，
+// MusicContext 与 musicStore 是双向依赖，纯函数只能放无环的 musicContextBlock）——这里 re-export 兼容既有调用点。
+export { toHttps };
 
 /* ───────────── 类型 ───────────── */
 export type MusicQuality = 'standard' | 'higher' | 'exhigh' | 'lossless' | 'hires';
@@ -160,6 +165,19 @@ export interface RecentTrackChange {
   at: number;
 }
 
+/** 播放/暂停/播完事件（反馈1 A4：最近 5 条带时间戳进上下文） */
+export interface PlayEvent {
+  action: 'play' | 'pause' | 'ended';
+  song: { name: string; artists: string } | null;
+  at: number;
+}
+
+/** 本次听歌期间听过的一首歌（反馈1 A4：连续播放段内去重列表） */
+export interface SessionSong {
+  name: string;
+  artists: string;
+}
+
 export interface MusicPlaybackSnapshot {
   current: Song | null;
   playing: boolean;
@@ -172,6 +190,9 @@ export interface MusicPlaybackSnapshot {
   listeningTogetherWith: string[];
   cfg: MusicCfg;
   recentTrackChange?: RecentTrackChange | null;
+  /** 反馈1 A4：最近 5 条播放/暂停/播完（带时间戳）+ 本次听歌期间听过的歌 */
+  playEvents: PlayEvent[];
+  sessionSongs: SessionSong[];
 }
 let __musicPlaybackSnapshot: MusicPlaybackSnapshot | null = null;
 export const loadMusicPlaybackSnapshot = (): MusicPlaybackSnapshot | null => __musicPlaybackSnapshot;
@@ -249,18 +270,6 @@ export const normalizeCookie = (raw: string): string => {
   return `MUSIC_U=${s}`;
 };
 
-/**
- * 把网易云返回的 http:// 资源 URL 升级成 https://
- * 浏览器在 HTTPS 页面里加载 http:// 图片会抛 Mixed Content 警告、并强制升级请求，
- * 我们直接在映射层就升级，避免控制台噪音。
- * - 只处理明文 http:// 开头的；https / data / 相对路径保持原样
- * - 空/非字符串直接返回原值
- */
-export const toHttps = (url: string): string => {
-  if (!url || typeof url !== 'string') return url;
-  if (url.startsWith('http://')) return 'https://' + url.slice('http://'.length);
-  return url;
-};
 
 /* ───────────── API ───────────── */
 export const musicApi = {
@@ -367,6 +376,9 @@ interface MusicContextType {
   progress: number;
   duration: number;
   loadingSong: boolean;
+  // 反馈1 A4：最近 5 条播放/暂停/播完（带时间戳）+ 本次听歌期间听过的歌（进上下文）
+  playEvents: PlayEvent[];
+  sessionSongs: SessionSong[];
 
   // 歌词
   lyric: LyricLine[];
@@ -511,6 +523,35 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [duration, setDuration] = useState(0);
   const [loadingSong, setLoadingSong] = useState(false);
 
+  // 当前曲 ref（提前声明：下面的播放事件记录也要用；原声明在「一起听」段，此处上移）
+  const currentRef = useRef(current);
+  currentRef.current = current;
+
+  // 反馈1 A4：播放/暂停/播完事件时间线（最近 5 条，带时间戳）+ 本次听歌期间的歌。
+  // 会话边界 = 连续播放段：两次 play 间隔超过 30 分钟算新一段（纯内存，刷新即新一段）。
+  const [playEvents, setPlayEvents] = useState<PlayEvent[]>([]);
+  const [sessionSongs, setSessionSongs] = useState<SessionSong[]>([]);
+  const sessionActiveRef = useRef(false);
+  const lastPlayAtRef = useRef(0);
+  const SESSION_GAP_MS = 30 * 60 * 1000;
+  const recordPlayEvent = useCallback((action: PlayEvent['action']) => {
+    const cur = currentRef.current;
+    const song = cur ? { name: cur.name, artists: cur.artists } : null;
+    setPlayEvents((prev) => [...prev, { action, song, at: Date.now() }].slice(-5));
+    if (action === 'play') {
+      const now = Date.now();
+      if (!sessionActiveRef.current || now - lastPlayAtRef.current > SESSION_GAP_MS) {
+        sessionActiveRef.current = true;
+        if (song) setSessionSongs([song]);
+      } else if (song) {
+        setSessionSongs((prev) =>
+          prev.some((s) => s.name === song.name && s.artists === song.artists) ? prev : [...prev, song].slice(-50),
+        );
+      }
+      lastPlayAtRef.current = now;
+    }
+  }, []);
+
   // 歌词
   const [lyric, setLyric] = useState<LyricLine[]>([]);
   const [tlyric, setTlyric] = useState<LyricLine[]>([]);
@@ -613,8 +654,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // 一起听 - char 加入后在 miniPlayer / 播放页显示徽标；切歌不散伙；显式退出走 endListeningTogether
   const [listeningTogetherWith, setListeningTogetherWith] = useState<string[]>([]);
-  const currentRef = useRef(current);
-  currentRef.current = current;
   const togetherBufRef = useRef<TogetherSessionBuffer | null>(null);
   const addListeningPartner = useCallback((charId: string) => {
     setListeningTogetherWith(prev => {
@@ -725,13 +764,14 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // 注意: 不要设置 crossOrigin — NetEase CDN 没有 CORS 头，会变成静默加载失败
     audioRef.current = a;
 
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
+    const onPlay = () => { setPlaying(true); recordPlayEvent('play'); };
+    // 自然播完时浏览器会连发 pause+ended：pause 在 a.ended=true 时不算「用户暂停」，跳过免得时间线里多一条假暂停
+    const onPause = () => { setPlaying(false); if (!a.ended) recordPlayEvent('pause'); };
     const onTime = () => setProgress(a.currentTime);
     const onMeta = () => setDuration(a.duration || 0);
     // 播放出错 → 清掉 playing 状态 + 走统一出口结束"一起听"（会话照常落库，防 UI 卡残留）
     const onErr = () => { setPlaying(false); endTogetherRef.current(undefined); toast('播放失败', 'error'); };
-    const onEnd = () => { endedHandlerRef.current(); };
+    const onEnd = () => { endedHandlerRef.current(); recordPlayEvent('ended'); };
 
     a.addEventListener('play', onPlay);
     a.addEventListener('pause', onPause);
@@ -1020,8 +1060,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       listeningTogetherWith,
       cfg,
       recentTrackChange,
+      playEvents,
+      sessionSongs,
     };
-  }, [current, playing, lyric, activeLyricIdx, plainLyric, hotComments, listeningTogetherWith, cfg, recentTrackChange]);
+  }, [current, playing, lyric, activeLyricIdx, plainLyric, hotComments, listeningTogetherWith, cfg, recentTrackChange, playEvents, sessionSongs]);
 
   // 把整组 musicHooks 写到模块级 slot — useChatAI 和 instant push activeMsgRuntime 都从这里取.
   // current / addListeningPartner 变化时刷新闭包, 保证读到的是最新 React state.
@@ -1139,6 +1181,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     cfg, setCfg, effectiveWorkerUrl,
     queue, setQueue, idx, current,
     playing, progress, duration, loadingSong,
+    playEvents, sessionSongs,
     lyric, tlyric, activeLyricIdx,
     plainLyric, hotComments,
     profile, refreshProfile,

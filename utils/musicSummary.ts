@@ -5,6 +5,7 @@
 // 音乐设置页「补生成」逐条补（maybeGeneratePendingSummaries）。
 import { DB } from './db';
 import { getPrompt } from './promptRegistry';
+import { toHttps } from './musicContextBlock';
 import {
   clearSummaryPending,
   getMusicStore,
@@ -82,7 +83,8 @@ ${songList}
         source: 'music_summary',
         summaryCard: {
           sessionId: session.id,
-          songs: session.songs.map((s) => ({ neteaseId: s.neteaseId, name: s.name, artists: s.artists, albumPic: s.albumPic, count: s.count })),
+          // 反馈1 A2：总结卡封面归一 https（老会话里可能还存着 http）
+          songs: session.songs.map((s) => ({ neteaseId: s.neteaseId, name: s.name, artists: s.artists, albumPic: toHttps(s.albumPic ?? ''), count: s.count })),
           summaryText: text,
           startedAt: session.startedAt,
           endedAt: session.endedAt,

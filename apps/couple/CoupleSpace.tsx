@@ -344,9 +344,10 @@ const CoupleFirstScreen: React.FC<{ onOpen: (route: string) => void }> = ({ onOp
   const musicStore = useMusicStore();
   const { current, playing: musicPlaying, playSong } = useMusic();
   const topSong = topPlayedSong(musicStore);
-  const topSongCover = useBlobRefUrl(topSong?.albumPic);
+  // 反馈1 A2：老数据里的 http 封面渲染前升级 https（blobRef 令牌由 useBlobRefUrl 解析，toHttps 只碰 http 前缀）
+  const topSongCover = useBlobRefUrl(toHttps(topSong?.albumPic));
   const myPick = musicStore.mySongPick;
-  const myPickCover = useBlobRefUrl(myPick?.albumPic);
+  const myPickCover = useBlobRefUrl(toHttps(myPick?.albumPic));
   const [beauty] = useState(loadCoupleBeauty);
   const headerBgUrl = useBlobRefUrl(beauty.headerBg);
   const capsuleBgUrl = useBlobRefUrl(beauty.capsuleBg);

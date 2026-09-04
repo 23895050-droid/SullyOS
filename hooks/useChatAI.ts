@@ -621,6 +621,8 @@ export const useChatAI = ({
                         recentTrackChange: deps.music.recentTrackChange,
                         plainLyric: deps.music.plainLyric,
                         hotComments: deps.music.hotComments,
+                        playEvents: deps.music.playEvents,
+                        sessionSongs: deps.music.sessionSongs,
                     },
                     translationConfig: deps.translationConfig,
                     htmlMode: { enabled: !!(evalChar as any).htmlModeEnabled, customPrompt: (evalChar as any).htmlModeCustomPrompt },
@@ -943,10 +945,11 @@ export const useChatAI = ({
                 realtimeConfig,
                 innerState: skipEmotionInjection ? undefined : (evolvedNarrative || undefined),
                 userListeningContext: (() => {
-                    if (!music.current || !music.playing) return null;
+                    // 反馈1 A4：暂停也有上下文（buildUserListeningContext 里带 playing 标志 + 时间线）
+                    if (!music.current) return null;
                     return buildUserListeningContext(music, getMusicStore().lyricInject);
                 })(),
-                isListeningTogether: !!(music.current && music.playing && music.listeningTogetherWith.includes(char.id)),
+                isListeningTogether: !!(music.current && music.listeningTogetherWith.includes(char.id)),
                 musicCfg: music.cfg,
                 recentTrackChange: music.recentTrackChange,
                 translationConfig,

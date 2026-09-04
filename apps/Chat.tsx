@@ -9,6 +9,7 @@ import { downloadChatImage, resolveChatImageBlob } from '../utils/imageDownload'
 import { addArchiveSafe, downscaleImage, type ArchiveEntry } from '../utils/archive';
 import { loadImageGenSettings } from '../utils/imageGenStorage';
 import { getPrompt } from '../utils/promptRegistry';
+import { dropPendingInviteByCard } from './couple/musicStore';
 import ImageLightbox from '../components/chat/ImageLightbox';
 import { buildChatFineTuneCss, mergeChatFineTune } from '../utils/chatFineTuneCss';
 import ChatFineTunePanel from '../components/chat/ChatFineTunePanel';
@@ -3109,6 +3110,11 @@ const Chat: React.FC = () => {
     const handleDeleteMessage = async () => {
         if (!selectedMessage) return;
         const deletedId = selectedMessage.id;
+        // 音乐邀请卡删掉时同步清 pending 邀请（反馈1 A5 死锁修）——否则卡片没了记录还在，
+        // 角色接不到、她也再发不起邀请（显示"还没接受上次邀请"）
+        if (selectedMessage.type === 'music_invite') {
+            dropPendingInviteByCard(selectedMessage.charId, String(deletedId));
+        }
         await DB.deleteMessage(deletedId);
         discardVoiceForMessages([deletedId]);
         // 满血主动消息：云端 fire_pack 里带最近对话原文，删了消息不打脏的话，角色到点
@@ -3274,6 +3280,12 @@ const Chat: React.FC = () => {
         }
         const ids = Array.from(msgIdsToDelete);
         if (ids.length > 0) {
+            // 批量删除里的音乐邀请卡同样清 pending 邀请（反馈1 A5 死锁修，与单条删除同口径）
+            for (const m of messages) {
+                if (msgIdsToDelete.has(m.id) && m.type === 'music_invite') {
+                    dropPendingInviteByCard(m.charId, String(m.id));
+                }
+            }
             await DB.deleteMessages(ids);
             discardVoiceForMessages(ids);
         }

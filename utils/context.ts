@@ -513,6 +513,10 @@ export const ContextBuilder = {
             activeIdx: number;          // 在 lyricWindow 里的高亮位置，-1 表示没窗口
             fullLyric?: string;         // 全量歌词（有轴=全部行/纯文本=原文），单独放低注意力位置
             hotComments?: string[];     // 彻底没歌词时的热评（别人的耳朵）
+            // 反馈1 A4：暂停也留在上下文；播放器最近动静 + 本次听歌期间听过什么
+            playing?: boolean;
+            playTimeline?: string[];
+            sessionSongs?: { name: string; artists: string }[];
         } | null,
         charListening?: {
             songId?: number;            // 用来回查这首歌是不是从 user 收来的
@@ -539,9 +543,13 @@ export const ContextBuilder = {
         if (canRead && userListening && userListening.songName) {
             lines.push(`### 【此刻的对话氛围】`);
             if (isListeningTogether) {
-                lines.push(`你正在和 ${userName || '对方'} 一起听《${userListening.songName}》— ${userListening.artists}`);
+                lines.push(userListening.playing === false
+                    ? `你和 ${userName || '对方'} 一起听的《${userListening.songName}》— ${userListening.artists} 现在暂停着`
+                    : `你正在和 ${userName || '对方'} 一起听《${userListening.songName}》— ${userListening.artists}`);
             } else {
-                lines.push(`${userName || '对方'} 正在听《${userListening.songName}》— ${userListening.artists}`);
+                lines.push(userListening.playing === false
+                    ? `${userName || '对方'} 的播放器暂停在《${userListening.songName}》— ${userListening.artists}`
+                    : `${userName || '对方'} 正在听《${userListening.songName}》— ${userListening.artists}`);
                 if (recentTrackSwitch && recentTrackSwitch.songName !== userListening.songName) {
                     lines.push(`（你们刚才本来在一起听《${recentTrackSwitch.songName}》— ${recentTrackSwitch.artists}，播放器切歌后那次"一起听"自然结束了。你能察觉到歌换成了现在这首；想继续陪 ${userName || '对方'} 听下去就在回复里自然接上并重新加入，不想也不必勉强，顺其自然。）`);
                 }
@@ -654,6 +662,34 @@ export const ContextBuilder = {
             ? `### 【这首歌的歌词】\n《${userListening.songName}》— ${userListening.artists}（播放到哪一句，看状态块里的 >> 标记）\n`
             : `### 【这首歌的歌词】\n《${userListening.songName}》— ${userListening.artists}（这首歌的歌词没有时间轴，全文如下）\n`;
         return head + userListening.fullLyric;
+    },
+
+    /**
+     * 播放器最近动静 + 本次听歌期间听过什么（反馈1 A4，2026-09-05 她定稿）：
+     * 最近 5 条播放/暂停/播完记录带时间戳、本次连续播放段听过的歌，一起进上下文。
+     * 独立成块、不塞 buildMusicAtmosphere——那边整块吃关键词门（没提歌就抹掉），
+     * 这条要的是「听歌期间角色随时都知道」，跟提没提歌无关。
+     */
+    buildMusicPlayTimelineBlock: (
+        userListening: {
+            playing?: boolean;
+            playTimeline?: string[];
+            sessionSongs?: { name: string; artists: string }[];
+        } | null,
+    ): string => {
+        if (!userListening) return '';
+        const lines: string[] = [];
+        if ((userListening.playTimeline?.length ?? 0) > 0) {
+            lines.push(`### 【播放器的动静】`);
+            lines.push(`最近几次播放/暂停记录（带时间）：`);
+            for (const t of userListening.playTimeline!) lines.push(`  - ${t}`);
+        }
+        if ((userListening.sessionSongs?.length ?? 0) > 0) {
+            lines.push(`本次听歌期间听过：${userListening.sessionSongs!.map((s) => `《${s.name}》`).join('、')}`);
+        }
+        if (lines.length === 0) return '';
+        lines.push(`（这些是播放器的真实动静，你自然就知道；不必逐条评论，顺其自然就好。）`);
+        return lines.join('\n');
     },
 
     /**

@@ -37,23 +37,15 @@ import { mergedMountedWorldbooks } from './noxhomeMount';
 import { normalizeTranslationLangLabel } from './translationLang';
 import { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
 import { materializeVisionDescriptions } from './visionApi';
-import { buildUserListeningContext } from './musicContextBlock';
+import { buildUserListeningContext, type UserListeningContextLike } from './musicContextBlock';
 import { getMusicStore } from '../apps/couple/musicStore';
 import type { RecallEntryPoint, RecallTrace } from './memoryPalace/trace';
 import { loadCollaborationFileCabinetBlock } from '../features/collaboration/chatLibrary';
 
 export { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
 
-export interface UserListeningContext {
-    songName: string;
-    artists: string;
-    lyricWindow: string[];
-    activeIdx: number;
-    /** 全量歌词（有轴=全部行；纯文本=原文），开关关掉时为 undefined */
-    fullLyric?: string;
-    /** 彻底没歌词时的热评（2-3 条） */
-    hotComments?: string[];
-}
+/** 组装结果别名（反馈1 A4：与 musicContextBlock 的 UserListeningContextLike 合一，带 playing/时间线） */
+export type UserListeningContext = UserListeningContextLike;
 
 export interface BuildChatPayloadInput {
     char: CharacterProfile;

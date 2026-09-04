@@ -11,7 +11,7 @@ import {
   SpeakerHigh, Copy, PencilSimple, Trash, X, CaretRight,
 } from '@phosphor-icons/react';
 import { useOS } from '../../context/OSContext';
-import { useMusic } from '../../context/MusicContext';
+import { useMusic, toHttps } from '../../context/MusicContext';
 import { ChatParser } from '../../utils/chatParser';
 import { splitMusicChatSegments } from '../../utils/musicVoiceBlock';
 import { C, Sparkle, NightTogetherStrip } from './MusicUI';
@@ -174,6 +174,8 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
   const userName = userProfile?.name || '你';
   const musicStore = useMusicStore();
   const chatBgUrl = useBlobRefUrl(musicStore.chatBgImage);
+  // 反馈1 A2：当前歌封面渲染前归一（blobRef 令牌 + http→https）
+  const currentCoverUrl = useBlobRefUrl(toHttps(current?.albumPic));
   const night = musicStore.cssPreset === 'night';
   const togetherNow = listeningTogetherWith.includes(charId);
 
@@ -402,7 +404,7 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
           {current && (
             <div className="rounded-xl p-2 flex items-center gap-2"
               style={{ background: `linear-gradient(135deg, rgba(var(--mz-sakura-rgb, 244,194,207), 0.14), rgba(var(--mz-lavender-rgb, 207,195,232), 0.14))` }}>
-              <img src={current.albumPic} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0"
+              <img src={currentCoverUrl} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0"
                 style={{ opacity: playing ? 1 : 0.5 }} referrerPolicy="no-referrer" />
               <div className="min-w-0">
                 <div className="text-[11px] font-semibold truncate" style={{ color: C.text }}>{current.name}</div>

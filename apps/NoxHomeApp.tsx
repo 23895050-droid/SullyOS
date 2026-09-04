@@ -12,6 +12,7 @@ import CoupleCalendar from './couple/CoupleCalendar';
 import { useActivityStore } from './couple/activityStore';
 import { useMusicStore, topPlayedSong } from './couple/musicStore';
 import { useBlobRefUrl } from '../utils/blobRef';
+import { toHttps } from '../utils/musicContextBlock';
 import { House, Heart, Pulse, GearSix, MoonStars, ArrowLeft } from '@phosphor-icons/react';
 
 const DESIGN_W = 1280;
@@ -113,7 +114,8 @@ const NoxHomeApp: React.FC = () => {
   // 歌曲页占位 → 真图（2026-08-30 她要求）：挂载角色收听次数最多的那首歌封面
   const musicStore = useMusicStore();
   const topSong = useMemo(() => topPlayedSong(musicStore), [musicStore]);
-  const topSongCover = useBlobRefUrl(topSong?.albumPic);
+  // 反馈1 A2：老数据 http 封面渲染前升级 https
+  const topSongCover = useBlobRefUrl(toHttps(topSong?.albumPic));
   const now = new Date();
   const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
   const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;

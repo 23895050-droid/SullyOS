@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { startBgTask, clearBgTask, isBgTaskStale, BG_TASK_STALE_MS, type BgTaskPending } from './bgTask';
+import { startBgTask, startBgTaskForResult, clearBgTask, isBgTaskStale, BG_TASK_STALE_MS, type BgTaskPending } from './bgTask';
 
 // 假 store：结构对齐 coupleStoreBase 的 get/set（订阅无关紧要，这里只钉状态机本身）
 type FakeState = { pending?: BgTaskPending; result?: string } & Record<string, unknown>;
@@ -78,6 +78,36 @@ describe('startBgTask 生命周期', () => {
     const store = makeStore();
     await startBgTask(store, 'pending', 'k', async () => {});
     expect(JSON.parse(JSON.stringify(store.get())).pending).toBeUndefined();
+  });
+});
+
+describe('startBgTaskForResult（带返回值）', () => {
+  it('成功：result 原样带回 + pending 清掉', async () => {
+    const store = makeStore();
+    const { started, result } = await startBgTaskForResult(store, 'pending', 'k', async () => ({ done: 3 }));
+    expect(started).toBe(true);
+    expect(result).toEqual({ done: 3 });
+    expect(store.get().pending).toBeUndefined();
+  });
+
+  it('失败：started=true 但 result=null，pending 留 failed', async () => {
+    const store = makeStore();
+    const { started, result } = await startBgTaskForResult(store, 'pending', 'k', async () => {
+      throw new Error('炸了');
+    });
+    expect(started).toBe(true);
+    expect(result).toBeNull();
+    expect(store.get().pending).toMatchObject({ status: 'failed', error: '炸了' });
+  });
+
+  it('新鲜 running 重入：started=false，fn 不跑', async () => {
+    const store = makeStore();
+    let release!: () => void;
+    const p1 = startBgTaskForResult(store, 'pending', 'k', () => new Promise<number>((r) => { release = () => r(1); }));
+    const again = await startBgTaskForResult(store, 'pending', 'k', async () => 2);
+    expect(again).toEqual({ started: false, result: null });
+    release();
+    await p1;
   });
 });
 

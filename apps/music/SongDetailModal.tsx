@@ -8,6 +8,8 @@ import { useOS } from '../../context/OSContext';
 import { useMusic } from '../../context/MusicContext';
 import { useMusicStore, getSongDetail, saveSongImpression, saveSongLyric, saveSongTags } from '../couple/musicStore';
 import { getPrompt } from '../../utils/promptRegistry';
+import { useBlobRefUrl } from '../../utils/blobRef';
+import { toHttps } from '../../utils/musicContextBlock';
 import { C } from './MusicUI';
 import { Play, SpinnerGap, X, Sparkle } from '@phosphor-icons/react';
 
@@ -90,6 +92,8 @@ const SongDetailModal: React.FC<Props> = ({ charId, charName, neteaseId, onClose
 
   const detail = useMemo(() => getSongDetail(neteaseId), [neteaseId, musicStore]);
   const song = detail.song;
+  // 反馈1 A2：封面渲染前归一（blobRef 令牌解析 + http→https），老数据/导入歌都能显示
+  const coverUrl = useBlobRefUrl(toHttps(song?.albumPic));
   if (!song) {
     return (
       <div className="absolute inset-0 z-[130] flex items-center justify-center" style={{ background: 'rgba(20,14,24,0.55)' }} onClick={onClose}>
@@ -172,8 +176,8 @@ const SongDetailModal: React.FC<Props> = ({ charId, charName, neteaseId, onClose
         <div className="flex-1 overflow-y-auto px-5 pb-6">
           {/* 封面 + 基本信息 */}
           <div className="flex items-center gap-4">
-            {song.albumPic ? (
-              <img src={song.albumPic} alt="" className="w-20 h-20 rounded-2xl object-cover shrink-0" />
+            {coverUrl ? (
+              <img src={coverUrl} alt="" className="w-20 h-20 rounded-2xl object-cover shrink-0" />
             ) : (
               <div className="w-20 h-20 rounded-2xl flex items-center justify-center shrink-0" style={{ background: C.glass }}>
                 <Sparkle size={20} color={C.glow} />

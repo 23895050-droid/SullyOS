@@ -1,8 +1,23 @@
 // 歌词注入组装纯函数（2026-08-26 她定稿）——全量+窗口双块、热评兜底
 // 两个组装点共用：utils/chatRequestPayload.ts deriveListeningFromSnapshot + hooks/useChatAI.ts
 // 长期试错区：窗口半径/全量开关是调音台参数，改设置下一条消息生效；数据（快照）不删不减
+// 反馈1 A4（2026-09-05）：暂停不再清上下文——没在播但有歌也组装（带播放/暂停时间线）；
+// toHttps 从 MusicContext 搬到这里（纯函数无环依赖，musicStore/musicSummary 入库归一也要用）。
 import type { MusicPlaybackSnapshot } from '../context/MusicContext';
 import type { LyricInjectSettings } from '../apps/couple/musicStore';
+
+/**
+ * 把网易云返回的 http:// 资源 URL 升级成 https://
+ * 浏览器在 HTTPS 页面里加载 http:// 图片会抛 Mixed Content 警告、并强制升级请求，
+ * 我们直接在映射层就升级，避免控制台噪音。
+ * - 只处理明文 http:// 开头的；https / data / 相对路径保持原样
+ * - 空/非字符串直接返回原值
+ */
+export const toHttps = (url?: string): string => {
+  if (!url || typeof url !== 'string') return url ?? '';
+  if (url.startsWith('http://')) return 'https://' + url.slice('http://'.length);
+  return url;
+};
 
 /** 全量歌词截断上限（超出标后略） */
 export const LYRIC_FULL_LIMIT = 1200;
@@ -19,6 +34,12 @@ export interface UserListeningContextLike {
   fullLyric?: string;
   /** 彻底没歌词时的热评（2-3 条截 60 字） */
   hotComments?: string[];
+  /** 反馈1 A4：播放中/暂停中——暂停也要留在上下文里，模型才知道「暂停在《歌名》」 */
+  playing: boolean;
+  /** 最近 5 条播放/暂停/播完记录（带时间，已格式化成文案行） */
+  playTimeline: string[];
+  /** 本次听歌期间听过的歌（连续播放段，间隔超 30 分钟算新一段） */
+  sessionSongs: { name: string; artists: string }[];
 }
 
 export const clampRadius = (r: number | undefined): number => {
@@ -89,26 +110,49 @@ export const sliceWindow = (lyric: { text: string }[], idx: number, radius: numb
   };
 };
 
+/** 时间戳 → HH:MM（带时间的播放/暂停记录，模型看得懂） */
+export const fmtPlayEventClock = (t: number): string => {
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+const PLAY_EVENT_WORD = { play: '开始播放', pause: '暂停', ended: '播完' } as const;
+
 /**
  * 从播放快照组装 userListening 上下文（两个组装点共用，行为一致）：
  * 有轴 → 窗口（当前行±N）+ 全量；纯文本 → 全量（无窗口）；没词 → 热评。
  * 快照里数据永远保留，这里只按调音台参数切——半径/全量开关现读现用。
  * snap 只要求结构兼容：MusicPlaybackSnapshot 和 useMusic() 返回的对象都能进。
+ * 反馈1 A4：门槛只要求有歌（暂停也有上下文）；playTimeline/sessionSongs 随三条分支一起带出。
  */
 export function buildUserListeningContext(
-  snap: Pick<MusicPlaybackSnapshot, 'current' | 'playing' | 'lyric' | 'activeLyricIdx' | 'plainLyric' | 'hotComments'> | null | undefined,
+  snap: Pick<MusicPlaybackSnapshot, 'current' | 'playing' | 'lyric' | 'activeLyricIdx' | 'plainLyric' | 'hotComments' | 'playEvents' | 'sessionSongs'> | null | undefined,
   inject: Pick<LyricInjectSettings, 'windowRadius' | 'fullLyric'>,
 ): UserListeningContextLike | null {
-  if (!snap || !snap.current || !snap.playing) return null;
+  if (!snap || !snap.current) return null;
   const radius = clampRadius(inject.windowRadius);
+
+  // 最近 5 条播放/暂停/播完（带时间），共用三件
+  const playTimeline = (snap.playEvents ?? []).map((e) =>
+    e.song
+      ? `${fmtPlayEventClock(e.at)} ${PLAY_EVENT_WORD[e.action]}《${e.song.name}》`
+      : `${fmtPlayEventClock(e.at)} ${PLAY_EVENT_WORD[e.action]}`,
+  );
+  const common = {
+    songName: snap.current.name,
+    artists: snap.current.artists,
+    playing: snap.playing,
+    playTimeline,
+    sessionSongs: snap.sessionSongs ?? [],
+  };
 
   // 有轴歌词：窗口 + 全量
   if (snap.lyric.length > 0) {
     const idx = snap.activeLyricIdx >= 0 ? snap.activeLyricIdx : 0;
     const { window, activeIdx } = sliceWindow(snap.lyric, idx, radius);
     return {
-      songName: snap.current.name,
-      artists: snap.current.artists,
+      ...common,
       lyricWindow: window,
       activeIdx,
       fullLyric: inject.fullLyric ? buildFullLyric(snap) : undefined,
@@ -119,8 +163,7 @@ export function buildUserListeningContext(
   // 纯文本歌词（没时间轴，标不了当前行）：全量、无窗口
   if (snap.plainLyric.trim()) {
     return {
-      songName: snap.current.name,
-      artists: snap.current.artists,
+      ...common,
       lyricWindow: [],
       activeIdx: -1,
       fullLyric: inject.fullLyric ? buildFullLyric(snap) : undefined,
@@ -130,8 +173,7 @@ export function buildUserListeningContext(
 
   // 彻底没词：热评兜底（别人的耳朵）
   return {
-    songName: snap.current.name,
-    artists: snap.current.artists,
+    ...common,
     lyricWindow: [],
     activeIdx: -1,
     hotComments: snap.hotComments,

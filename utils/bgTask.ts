@@ -36,18 +36,35 @@ interface BgTaskStore<S> {
  * 发起一次后台生成。fn 负责「调用 API + 把结果写回 store」（util 不碰结果，只管 pending 生命周期）。
  * 返回 true = 已开始；false = 该字段已有新鲜 running（防止重入，调用方静默忽略即可）。
  */
-export async function startBgTask<S extends Record<string, unknown>>(
+export async function startBgTask<S extends object>(
   store: BgTaskStore<S>,
   field: keyof S,
   key: string,
   fn: () => Promise<void>,
 ): Promise<boolean> {
+  const { started } = await startBgTaskForResult(store, field, key, fn);
+  return started;
+}
+
+/** 清掉字段的 pending（手动取消 / 结果已确认时用）。undefined 值 JSON 序列化时自然消失，持久层干净。 */
+export function clearBgTask<S extends object>(store: BgTaskStore<S>, field: keyof S): void {
+  store.set((s) => ({ ...s, [field]: undefined }));
+}
+
+/** 带返回值版（startBgTask 的底层实现）：调用方拿 fn 的结果报 toast 等；失败/没跑成 result=null，看 store 里 pending 区分 */
+export async function startBgTaskForResult<S extends object, T>(
+  store: BgTaskStore<S>,
+  field: keyof S,
+  key: string,
+  fn: () => Promise<T>,
+): Promise<{ started: boolean; result: T | null }> {
   const cur = store.get()[field] as BgTaskPending | null | undefined;
-  if (cur?.status === 'running' && !isBgTaskStale(cur)) return false;
+  if (cur?.status === 'running' && !isBgTaskStale(cur)) return { started: false, result: null };
   store.set((s) => ({ ...s, [field]: { status: 'running', key, startedAt: Date.now() } as BgTaskPending }));
   try {
-    await fn();
+    const result = await fn();
     clearBgTask(store, field);
+    return { started: true, result };
   } catch (e) {
     store.set((s) => ({
       ...s,
@@ -58,11 +75,6 @@ export async function startBgTask<S extends Record<string, unknown>>(
         error: e instanceof Error ? e.message : String(e),
       } as BgTaskPending,
     }));
+    return { started: true, result: null };
   }
-  return true;
-}
-
-/** 清掉字段的 pending（手动取消 / 结果已确认时用）。undefined 值 JSON 序列化时自然消失，持久层干净。 */
-export function clearBgTask<S extends Record<string, unknown>>(store: BgTaskStore<S>, field: keyof S): void {
-  store.set((s) => ({ ...s, [field]: undefined }));
 }
