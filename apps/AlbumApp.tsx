@@ -13,8 +13,10 @@ import { loadImageGenSettings } from '../utils/imageGenStorage';
 import DataBackupPanel from './couple/DataBackupPanel';
 import {
   loadArchive, updateArchive, deleteArchives, toggleFavorite,
-  searchArchives, formatArchiveTime, buildForwardText, compactArchiveThumbnails, type ArchiveEntry,
+  searchArchives, formatArchiveTime, buildForwardText, compactArchiveThumbnails, type ArchiveEntry, type ArchiveKind,
 } from '../utils/archive';
+import { startBgTask, startBgTaskForResult, isBgTaskStale } from '../utils/bgTask';
+import { albumBgStore, albumBgStoreApi, setRecallResult } from './couple/albumBgStore';
 
 type View =
   | { name: 'home' }
@@ -24,10 +26,10 @@ type View =
   | { name: 'favorites' }
   | { name: 'charAlbum'; charId: string };
 
-type KindFilter = 'all' | 'selfie' | 'daily' | 'other';
-const KIND_LABEL: Record<Exclude<KindFilter, 'all'>, string> = { selfie: '自拍', daily: '日常', other: '其他' };
-const kindOf = (e: ArchiveEntry): Exclude<KindFilter, 'all'> =>
-  (e.kind === 'selfie' || e.kind === 'daily') ? e.kind : 'other';
+type KindFilter = 'all' | ArchiveKind;
+const KIND_LABEL: Record<ArchiveKind, string> = { camera: '相机', chat: '聊天', board: '留言板', together: '和Ta' };
+const kindOf = (e: ArchiveEntry): ArchiveKind =>
+  (e.kind === 'chat' || e.kind === 'board' || e.kind === 'together') ? e.kind : 'camera';
 
 const clamp5: React.CSSProperties = {
   display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden',
@@ -133,7 +135,7 @@ const ArchiveDetailModal: React.FC<{
   characters: CharacterProfile[];
 }> = ({ entry, onClose, onMutate, addToast, characters }) => {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ summary: '', description: '', tags: '', date: '' });
+  const [draft, setDraft] = useState({ summary: '', description: '', tags: '', date: '', kind: 'camera' as ArchiveKind });
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [forwardOpen, setForwardOpen] = useState(false);
 
@@ -172,6 +174,7 @@ const ArchiveDetailModal: React.FC<{
       description: entry.description,
       tags: (entry.tags || []).join('，'),
       date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      kind: kindOf(entry),
     });
     setEditing(true);
   };
@@ -187,6 +190,7 @@ const ArchiveDetailModal: React.FC<{
       description: draft.description.trim(),
       tags: draft.tags.split(/[,，、]/).map(t => t.trim()).filter(Boolean),
       timestamp: ts,
+      kind: draft.kind,
     });
     setEditing(false);
     onMutate();
@@ -263,6 +267,14 @@ const ArchiveDetailModal: React.FC<{
               <Field label="标签（逗号分隔）">
                 <input value={draft.tags} onChange={e => setDraft({ ...draft, tags: e.target.value })} onFocus={onFieldFocus} onBlur={onFieldBlur}
                   className="w-full text-xs rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-slate-700 focus:outline-none" />
+              </Field>
+              <Field label="来源">
+                <select value={draft.kind} onChange={e => setDraft({ ...draft, kind: e.target.value as ArchiveKind })}
+                  className="w-full text-xs rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-slate-700 focus:outline-none">
+                  {(['camera', 'chat', 'board', 'together'] as const).map(k => (
+                    <option key={k} value={k}>{KIND_LABEL[k]}</option>
+                  ))}
+                </select>
               </Field>
             </div>
           ) : (
@@ -373,8 +385,11 @@ const ArchiveListSection: React.FC<{
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tagModal, setTagModal] = useState(false);
   const [tagInput, setTagInput] = useState('');
-  const [autoTagging, setAutoTagging] = useState(false);
   const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
+  const albumBg = albumBgStore.use();
+  const pendingTag = albumBg.pendingAutoTag;
+  const taggingRunning = pendingTag?.status === 'running' && !isBgTaskStale(pendingTag);
+  const taggingInterrupted = pendingTag?.status === 'running' && isBgTaskStale(pendingTag);
 
   const [detailEntry, setDetailEntry] = useState<ArchiveEntry | null>(null);
 
@@ -438,8 +453,9 @@ const ArchiveListSection: React.FC<{
     addToast(`已给 ${selected.size} 张留档打标`, 'success');
   };
 
-  // 自动打标：调提示词生成模型，一次性返回 JSON
-  const autoTag = async () => {
+  // 自动打标：调提示词生成模型，一次性返回 JSON（后台跑，选中项在点按钮瞬间快照；
+  // 生成中可离开页面，标签写 localStorage，回来重读就有）
+  const autoTag = () => {
     const gs = loadImageGenSettings();
     if (!gs.promptGenApiKey || !gs.promptGenBaseUrl || !gs.promptGenModel) {
       addToast('未配置提示词生成模型（在相机 ⚙ 里配）', 'error');
@@ -447,8 +463,7 @@ const ArchiveListSection: React.FC<{
     }
     const items = [...selected].map(id => entries.find(e => e.id === id)).filter(Boolean) as ArchiveEntry[];
     if (items.length === 0) return;
-    setAutoTagging(true);
-    try {
+    void startBgTask(albumBgStoreApi, 'pendingAutoTag', 'album-autotag', async () => {
       const res = await fetch(`${gs.promptGenBaseUrl.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gs.promptGenApiKey}` },
@@ -485,11 +500,9 @@ const ArchiveListSection: React.FC<{
       setTagModal(false);
       exitSelect();
       addToast(`自动打标完成（${applied} 张）`, 'success');
-    } catch (err) {
-      addToast(`自动打标失败：${err instanceof Error ? err.message : String(err)}`, 'error');
-    } finally {
-      setAutoTagging(false);
-    }
+    }).then((started) => {
+      if (!started) addToast('自动打标还在进行中', 'info');
+    });
   };
 
   const applyTagsTo = (id: string, tags: string[]) => {
@@ -555,7 +568,7 @@ const ArchiveListSection: React.FC<{
       {/* 筛选行 */}
       <div className="flex gap-1.5 px-3 pt-2 overflow-x-auto shrink-0" style={{ scrollbarWidth: 'none' }}>
         <button className={chip(kindFilter === 'all')} onClick={() => setKindFilter('all')}>全部</button>
-        {(['selfie', 'daily', 'other'] as const).map(k => (
+        {(['camera', 'chat', 'board', 'together'] as const).map(k => (
           <button key={k} className={chip(kindFilter === k)} onClick={() => setKindFilter(k)}>{KIND_LABEL[k]}</button>
         ))}
         {showFromUserFilter && (
@@ -648,13 +661,19 @@ const ArchiveListSection: React.FC<{
             <div className="grid grid-cols-2 gap-2">
               <button onClick={manualTag} className="py-2.5 rounded-xl bg-[#383639] text-white text-xs font-medium active:scale-95">手动打标</button>
               <button
-                onClick={() => void autoTag()}
-                disabled={autoTagging}
+                onClick={() => autoTag()}
+                disabled={taggingRunning}
                 className="py-2.5 rounded-xl bg-[#ffe6eb] text-[#383639] text-xs font-medium active:scale-95 disabled:opacity-60"
               >
-                {autoTagging ? '打标中…' : '自动打标'}
+                {taggingRunning ? '打标中…（可离开页面）' : '自动打标'}
               </button>
             </div>
+            {taggingInterrupted && !taggingRunning && (
+              <p className="text-[11px] text-amber-600">上次打标中断了（页面刷新过），点自动打标接着跑</p>
+            )}
+            {pendingTag?.status === 'failed' && !taggingRunning && (
+              <p className="text-[11px] text-red-500">上次打标失败：{pendingTag.error}，可重试</p>
+            )}
             <button onClick={() => setTagModal(false)} className="w-full py-2 rounded-xl text-xs text-slate-400 active:scale-95">取消</button>
           </div>
         </ModalOverlay>
@@ -696,18 +715,22 @@ const RecallModal: React.FC<{
 }> = ({ onClose, characters, apiConfig, addToast }) => {
   const [charId, setCharId] = useState<string | null>(null);
   const [note, setNote] = useState('');
-  const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
   const [syncOn, setSyncOn] = useState(false);
-  const [generated, setGenerated] = useState(false);
   const char = characters.find(c => c.id === charId) || null;
+  const albumBg = albumBgStore.use();
+  const pendingRecall = albumBg.pendingRecall;
+  const recallRunning = pendingRecall?.status === 'running' && !isBgTaskStale(pendingRecall);
+  const recallInterrupted = pendingRecall?.status === 'running' && isBgTaskStale(pendingRecall);
+  const storeResult = albumBg.recallResult && albumBg.recallResult.charId === charId ? albumBg.recallResult.text : '';
+  const shownResult = result || storeResult;
 
-  const generate = async () => {
+  const generate = () => {
     if (!char) { addToast('先选一个角色', 'info'); return; }
     if (!apiConfig.baseUrl || !apiConfig.apiKey || !apiConfig.model) { addToast('未配置聊天模型', 'error'); return; }
-    setLoading(true);
-    setResult('');
-    try {
+    const sync = syncOn;
+    void startBgTaskForResult(albumBgStoreApi, 'pendingRecall', 'album-recall', async () => {
+      setResult('');
       const msgs = await DB.getMessagesByCharId(char.id);
       const recent = msgs
         .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -736,20 +759,20 @@ const RecallModal: React.FC<{
       const text: string = data?.choices?.[0]?.message?.content || '';
       if (!text.trim()) throw new Error('空回复');
       setResult(text);
-      setGenerated(true);
-      if (syncOn) {
+      setRecallResult({ charId: char.id, charName: char.name, text, at: Date.now() });
+      if (sync) {
         await DB.saveMessage({
           charId: char.id, role: 'system', type: 'text',
           content: `🖼 翻看旧照片\n\n${text}`,
           metadata: { source: 'album_recall' },
         });
         addToast('已同步到聊天上下文 📤', 'success');
+      } else {
+        addToast('回忆生成完成', 'success');
       }
-    } catch (err) {
-      addToast(`生成失败：${err instanceof Error ? err.message : String(err)}`, 'error');
-    } finally {
-      setLoading(false);
-    }
+    }).then(({ started }) => {
+      if (!started) addToast('回忆生成还在进行中', 'info');
+    });
   };
 
   return (
@@ -778,19 +801,25 @@ const RecallModal: React.FC<{
           placeholder="补充提示词（可选），比如「聊聊上周那张合照」"
           className="w-full text-xs rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-slate-700 focus:outline-none resize-none"
         />
-        {result && (
-          <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-700 leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto">{result}</div>
+        {shownResult && (
+          <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-700 leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto">{shownResult}</div>
+        )}
+        {recallInterrupted && !recallRunning && (
+          <p className="text-[11px] text-amber-600">上次生成中断了（页面刷新过），点生成接着跑</p>
+        )}
+        {pendingRecall?.status === 'failed' && !recallRunning && (
+          <p className="text-[11px] text-red-500">上次生成失败：{pendingRecall.error}，点生成重试</p>
         )}
         <label className="flex items-center justify-between text-xs text-slate-500">
           <span>本次回忆同步到聊天上下文</span>
           <input type="checkbox" checked={syncOn} onChange={e => setSyncOn(e.target.checked)} className="accent-[#383639] w-4 h-4" />
         </label>
         <button
-          onClick={() => void generate()}
-          disabled={loading}
+          onClick={() => generate()}
+          disabled={recallRunning}
           className="w-full py-3 rounded-xl bg-[#383639] text-white text-sm font-medium active:scale-[0.98] transition-transform disabled:opacity-60"
         >
-          {loading ? '回忆中…' : generated ? '重新生成' : '生成'}
+          {recallRunning ? '回忆中…（可离开弹窗）' : shownResult ? '重新生成' : '生成'}
         </button>
         <button onClick={onClose} className="w-full py-2 rounded-xl text-xs text-slate-400 active:scale-95">关闭</button>
       </div>

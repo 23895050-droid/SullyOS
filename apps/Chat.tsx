@@ -795,7 +795,7 @@ const Chat: React.FC = () => {
                 charAlbum: true,
                 timestamp: msg.timestamp || Date.now(),
                 fromUser: true,
-                kind: 'other',
+                kind: 'chat',
             };
             const ok = await addArchiveSafe(entry);
             if (ok) {

@@ -16,10 +16,39 @@ export interface ArchiveEntry {
   favorite: boolean;          // 收藏夹
   charAlbum: boolean;         // 同时存入角色相册
   timestamp: number;
-  fromUser?: boolean;         // 是否用户自己拍的
-  kind?: 'selfie' | 'daily' | 'other'; // 类型：自拍 / 日常 / 其他
+  fromUser?: boolean;         // 是否用户自己拍的（拍照人=用户）
+  kind?: ArchiveKind;         // 类型 = 照片来源：相机 / 聊天 / 留言板 / 和Ta
   a2Transcript?: { role: string; content: string }[]; // a2 对话记录（如有）
 }
+
+/** 照片来源（2026-09-05 定：类型按「来源」分，自拍/日常这类交给 tag 管） */
+export type ArchiveKind = 'camera' | 'chat' | 'board' | 'together';
+
+// 旧 kind（selfie/daily/other）按 tag 推断来源回填：留言板 / 和Ta / 聊天有专属 tag，
+// 其余一律算相机（相机留档默认 tag「相机」、a2 是「一起看过」、手动打的 tag 也在相机语境里）
+const LEGACY_TAG_TO_KIND: Array<[string, ArchiveKind]> = [
+  ['留言', 'board'],
+  ['和Ta', 'together'],
+  ['聊天', 'chat'],
+];
+
+const isArchiveKind = (v: unknown): v is ArchiveKind =>
+  v === 'camera' || v === 'chat' || v === 'board' || v === 'together';
+
+const migrateKinds = (list: ArchiveEntry[]): { list: ArchiveEntry[]; changed: boolean } => {
+  let changed = false;
+  const next = list.map((e) => {
+    if (isArchiveKind(e.kind)) return e;
+    const tags = e.tags || [];
+    let kind: ArchiveKind = 'camera';
+    for (const [tag, k] of LEGACY_TAG_TO_KIND) {
+      if (tags.some((t) => t.includes(tag))) { kind = k; break; }
+    }
+    changed = true;
+    return { ...e, kind };
+  });
+  return { list: next, changed };
+};
 
 const KEY = 'os_memory_archive';
 const MAX = 200;
@@ -28,7 +57,11 @@ export function loadArchive(): ArchiveEntry[] {
   try {
     const raw = localStorage.getItem(KEY);
     const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list : [];
+    const arr = Array.isArray(list) ? list : [];
+    // 旧 kind（selfie/daily/other）按 tag 推断来源回填，幂等（已迁移的直接跳过）
+    const { list: migrated, changed } = migrateKinds(arr);
+    if (changed) saveArchive(migrated);
+    return migrated;
   } catch {
     return [];
   }

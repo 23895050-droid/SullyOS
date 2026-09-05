@@ -13,6 +13,7 @@ import { downscaleImage, addArchiveSafe, compactArchiveThumbnails } from '../uti
 import type { ImageGenResult } from '../utils/imageGenService';
 import type { Message, ImageGenPreset } from '../types';
 import DataBackupPanel from './couple/DataBackupPanel';
+import { saveA2Draft, loadA2Draft, clearA2Draft } from './couple/cameraA2Draft';
 
 // ── 辅助：从 ImageGenResult 构造 Message 给 lightbox / download ──
 function resultToMessage(r: ImageGenResult, charId: string, desc: string): Message {
@@ -47,12 +48,20 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
 const CameraApp: React.FC = () => {
   const { closeApp, characters, addToast, apiConfig, userProfile } = useOS();
 
-  // 当前角色（'user' = 自己）
-  const [charId, setCharId] = useState<string>(() => characters[0]?.id || 'user');
-  const char = charId === 'user' ? null : characters.find(c => c.id === charId);
+  // 照片里的人（被拍者）：'' = 不选 / 'user' = 自己 / 角色 id = 该角色
+  const [charId, setCharId] = useState<string>('');
+  const char = charId === 'user' || !charId ? null : characters.find(c => c.id === charId);
 
-  // 拍照的人的名字（留档用）
-  const photographerName = charId === 'user' ? 'Angelica' : (char?.name || '角色');
+  // 拍照的人（摄影师）：默认 user、每次打开相机重置为 user（不持久化）；会话内可选任意角色
+  const [photographerId, setPhotographerId] = useState<string>('user');
+  const photographerChar = photographerId === 'user' ? null : characters.find(c => c.id === photographerId);
+
+  // 文案口径：「{摄影师} 拍摄的照片」/「{摄影师} 拍摄的 {被拍者}」
+  const userName = userProfile?.name || '用户';
+  const photographerName = photographerId === 'user' ? userName : (photographerChar?.name || '角色');
+  const subjectName = charId === 'user' ? userName : (char?.name || '');
+  const shotLabel = subjectName ? `${photographerName}拍摄的${subjectName}` : `${photographerName}拍摄的照片`;
+  const subjectKey = charId || 'user'; // 留档/近期接收的 charId 兜底
 
   // 参考图
   const [refMode, setRefMode] = useState<RefMode>('none');
@@ -127,6 +136,7 @@ const CameraApp: React.FC = () => {
   const a2LastAssistantCountRef = useRef<number>(0);
   const a2AbortRef = useRef<AbortController | null>(null);
   const a2ChatEndRef = useRef<HTMLDivElement>(null);
+  const a2StatusScrollRef = useRef<HTMLDivElement>(null);
   const a2InputRef = useRef<HTMLTextAreaElement>(null);
   const a2SendRef = useRef<HTMLButtonElement>(null);
   const a2VVHandlerRef = useRef<(() => void) | null>(null);
@@ -231,7 +241,7 @@ const CameraApp: React.FC = () => {
           await DB.saveImageReceipt({
             id: result.blobRef.replace('blobref:', ''),
             blobRef: result.blobRef,
-            charId: char?.id || charId,
+            charId: char?.id || subjectKey,
             description: desc,
             timestamp: Date.now(),
             mimeType: result.mimeType || 'image/png',
@@ -374,7 +384,7 @@ const CameraApp: React.FC = () => {
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, '0');
         const ts = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-        setArchiveSummary(`${ts}，${photographerName}拍了这张照片。画面：${lastDesc.slice(0, 100)}。`);
+        setArchiveSummary(`${ts}，${shotLabel}。画面：${lastDesc.slice(0, 100)}。`);
       } else {
         const res = await fetch(url.replace(/\/+$/, '') + '/chat/completions', {
           method: 'POST',
@@ -384,7 +394,7 @@ const CameraApp: React.FC = () => {
             messages: [
               {
                 role: 'system',
-                content: `你是记录助手。${photographerName}拍了一张照片。请用第三人称写一段简短的画面描述和感受（50字以内），用"${photographerName}"而不是"我"。格式："${photographerName}拍了这张照片。画面中……${photographerName}觉得……"。直接输出，不要任何前缀。`,
+                content: `你是记录助手。${shotLabel}。请用第三人称写一段简短的画面描述和感受（50字以内），用"${photographerName}"而不是"我"。格式："${photographerName}拍了一张照片。画面中……${photographerName}觉得……"。直接输出，不要任何前缀。`,
               },
               {
                 role: 'user',
@@ -398,10 +408,10 @@ const CameraApp: React.FC = () => {
         const data = await res.json();
         if (!res.ok) throw new Error((data as any).error?.message || `HTTP ${res.status}`);
         const summary = data.choices?.[0]?.message?.content?.trim() || '';
-        setArchiveSummary(summary || `${photographerName}拍了一张照片：${lastDesc.slice(0, 80)}。`);
+        setArchiveSummary(summary || `${shotLabel}：${lastDesc.slice(0, 80)}。`);
       }
     } catch {
-      setArchiveSummary(`${photographerName}拍了一张照片：${lastDesc.slice(0, 100)}。`);
+      setArchiveSummary(`${shotLabel}：${lastDesc.slice(0, 100)}。`);
     } finally {
       setIsArchiving(false);
       setArchiveStep('options');
@@ -415,8 +425,8 @@ const CameraApp: React.FC = () => {
       const ok = await addArchiveSafe({
         id: `ma_${Date.now()}`,
         thumbnail: await downscaleImage(lastResult?.dataUrl || '', 320),
-        charId: char?.id || charId,
-        charName: char?.name || '',
+        charId: char?.id || subjectKey,
+        charName: char?.name || userName,
         summary: archiveSummary,
         description: lastDesc,
         prefixPrompt,
@@ -428,8 +438,8 @@ const CameraApp: React.FC = () => {
         })(),
         favorite: archiveFavorite,
         charAlbum: archiveToChar,
-        fromUser: (char?.id || charId) === 'user',
-        kind: refMode === 'face_lock' ? 'selfie' : 'other',
+        fromUser: photographerId === 'user',
+        kind: 'camera',
         timestamp: Date.now(),
       });
       addToast(ok ? '留档成功 📋' : '留档失败', ok ? 'success' : 'error');
@@ -591,17 +601,53 @@ const CameraApp: React.FC = () => {
   // ── a2 给他看 ──
   const openA2Card = () => {
     if (!lastResult) { addToast('请先生成一张图片', 'info'); return; }
-    setA2SelectedCharId(characters[0]?.id || null);
+    const initialCharId = characters[0]?.id || null;
+    setA2SelectedCharId(initialCharId);
     setA2Input('');
-    setA2Messages([]);
-    setA2StreamingContent('');
-    setA2HasStarted(false);
-    setA2CustomPrompt('');
     setA2ActivePresetName('');
     setA2ShowCharPicker(false);
     setA2ShowPresets(false);
+    // 上次暂离的草稿直接接上
+    const draft = initialCharId ? loadA2Draft(initialCharId) : null;
+    if (draft && draft.messages.length > 0) {
+      setA2Messages(draft.messages);
+      setA2StreamingContent('');
+      setA2HasStarted(draft.hasStarted);
+      setA2CustomPrompt(draft.customPrompt);
+      setA2OutputMode(draft.outputMode);
+      addToast('已接上上次暂离的聊天', 'info');
+    } else {
+      setA2Messages([]);
+      setA2StreamingContent('');
+      setA2HasStarted(false);
+      setA2CustomPrompt('');
+    }
     setShowA2Card(true);
   };
+
+  // 暂离：快照进草稿店，下次打开接着聊
+  const leaveA2WithDraft = () => {
+    if (a2SelectedCharId && a2HasStarted && a2Messages.length > 0) {
+      saveA2Draft(a2SelectedCharId, {
+        messages: a2Messages,
+        hasStarted: true,
+        customPrompt: a2CustomPrompt,
+        outputMode: a2OutputMode,
+      });
+    }
+    setShowA2Card(false);
+  };
+
+  // 整个相机被关掉时（a2 卡片开着）也落草稿，聊天不丢。
+  // 用 ref 取最新快照：effect 只在卸载时跑一次，不会随对话变化反复写。
+  const a2DraftRef = useRef<{ charId: string; messages: { role: string; content: string }[]; hasStarted: boolean; customPrompt: string; outputMode: 'bubbles' | 'longform' } | null>(null);
+  a2DraftRef.current = a2SelectedCharId && a2HasStarted && a2Messages.length > 0
+    ? { charId: a2SelectedCharId, messages: a2Messages, hasStarted: true, customPrompt: a2CustomPrompt, outputMode: a2OutputMode }
+    : null;
+  useEffect(() => () => {
+    const draft = a2DraftRef.current;
+    if (draft) saveA2Draft(draft.charId, draft);
+  }, []);
 
   const buildA2SystemPrompt = (
     charData: typeof characters[number],
@@ -825,12 +871,13 @@ ${a2OutputMode === 'bubbles'
         favorite: false,
         charAlbum: true,
         fromUser: false,
-        kind: 'other',
+        kind: 'camera',
         timestamp: Date.now(),
         a2Transcript: a2Messages.map(m => ({ role: m.role, content: m.content })),
       });
     } catch { /* ignore */ }
     setA2IsSummarizing(false);
+    if (a2SelectedCharId) clearA2Draft(a2SelectedCharId);
     setShowA2Card(false);
     setA2Messages([]);
     setA2HasStarted(false);
@@ -926,6 +973,12 @@ ${a2OutputMode === 'bubbles'
   const a2Now = new Date();
   const a2DateStr = `${a2Now.getFullYear()}年${a2Now.getMonth() + 1}月${a2Now.getDate()}日`;
   const a2LastAssistant = [...a2Messages].reverse().find(m => m.role === 'assistant');
+
+  // 状态栏流式自动滚底
+  useEffect(() => {
+    const el = a2StatusScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [a2StreamingContent, a2LastAssistant]);
 
   // ── 渲染 ──
   return (
@@ -1059,45 +1112,66 @@ ${a2OutputMode === 'bubbles'
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center" onClick={() => setShowRefPicker(false)}>
           <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full sm:max-w-sm p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-sm font-bold text-slate-800 mb-4 text-center">选择参考图</h3>
-            {/* 自己 */}
+            {/* 拍照的人（摄影师）：默认 Angel，每次打开相机都重置，会话内可换 */}
             <div className="mb-4">
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">拍照的人</p>
               <div className="flex gap-2 flex-wrap">
                 <button
-                  onClick={() => { setCharId('user'); setCustomRefBlobRef(null); setShowRefPicker(false); }}
+                  onClick={() => setPhotographerId('user')}
+                  className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${photographerId === 'user' ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
+                >
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-sm font-bold">我</div>
+                  <span className="text-[10px] text-slate-600 truncate max-w-[60px]">{userName}</span>
+                </button>
+                {characters.map(c => (
+                  <button
+                    key={`p-${c.id}`}
+                    onClick={() => setPhotographerId(c.id)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${photographerId === c.id ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
+                  >
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-slate-300 to-slate-400 flex items-center justify-center text-white text-sm font-bold">{c.name.charAt(0)}</div>
+                    <span className="text-[10px] text-slate-600 truncate max-w-[60px]">{c.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 照片里的人（被拍者，可选）：不选 = 没有参考图；锁脸生图用该角色的外貌描述+参考图 */}
+            <div className="mb-4">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">照片里的人（被拍者 · 可选）</p>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => { setCharId(''); setCustomRefBlobRef(null); }}
+                  className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${charId === '' && !customRefBlobRef ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
+                >
+                  <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 text-sm font-bold">—</div>
+                  <span className="text-[10px] text-slate-600">不选</span>
+                </button>
+                <button
+                  onClick={() => { setCharId('user'); setCustomRefBlobRef(null); }}
                   className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${charId === 'user' && !customRefBlobRef ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
                 >
                   <div className="w-12 h-12 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-sm font-bold">我</div>
-                  <span className="text-[10px] text-slate-600">Angelica</span>
+                  <span className="text-[10px] text-slate-600 truncate max-w-[60px]">{userName}</span>
                 </button>
+                {characters.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => selectCharRef(c.id)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${c.id === charId && !customRefBlobRef ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
+                  >
+                    {c.referenceImageAssetId ? (
+                      <CharRefAvatar charId={c.id} />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-slate-300 to-slate-400 flex items-center justify-center text-white text-sm font-bold">{c.name.charAt(0)}</div>
+                    )}
+                    <span className="text-[10px] text-slate-600 truncate max-w-[60px]">{c.name}</span>
+                  </button>
+                ))}
               </div>
+              {!characters.some(c => c.referenceImageAssetId) && (
+                <p className="text-[9px] text-slate-400 mt-1.5 leading-relaxed">角色还没存参考图：没有参考图也能拍（「不选」，或选中后只用外貌描述）；想锁脸生图，去角色设置「外貌描述 & 参考图」补一张。</p>
+              )}
             </div>
-            {/* 角色 tab：全部角色都列出来（2026-08-30 修「选角色选不了」——以前只列有参考图的角色，
-                角色没存参考图时这一栏整个消失；现在无参考图的角色也可选，锁脸图去角色设置里补） */}
-            {characters.length > 0 && (
-              <div className="mb-4">
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">角色参考图</p>
-                <div className="flex gap-2 flex-wrap">
-                  {characters.map(c => (
-                    <button
-                      key={c.id}
-                      onClick={() => selectCharRef(c.id)}
-                      className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${c.id === charId && !customRefBlobRef ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
-                    >
-                      {c.referenceImageAssetId ? (
-                        <CharRefAvatar charId={c.id} />
-                      ) : (
-                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-slate-300 to-slate-400 flex items-center justify-center text-white text-sm font-bold">{c.name.charAt(0)}</div>
-                      )}
-                      <span className="text-[10px] text-slate-600 truncate max-w-[60px]">{c.name}</span>
-                    </button>
-                  ))}
-                </div>
-                {!characters.some(c => c.referenceImageAssetId) && (
-                  <p className="text-[9px] text-slate-400 mt-1.5 leading-relaxed">角色还没存参考图：选中的角色仍可作为拍照人；想锁脸生图，去角色设置「外貌描述 & 参考图」补一张。</p>
-                )}
-              </div>
-            )}
             {/* 自定义上传 */}
             <div>
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">自定义上传</p>
@@ -1313,18 +1387,22 @@ ${a2OutputMode === 'bubbles'
                   {a2CharName || '选个角色吧'}
                 </span>
               </div>
-              {/* 状态栏：流式自动填 #7a7a7a（人名已在上方人名区，这里不重复） */}
+              {/* 状态栏：流式自动填 #7a7a7a，长文可滚（人名已在上方人名区，这里不重复） */}
               <div className="absolute overflow-hidden" style={{ left: '55%', top: '45.2%', width: '29.4%', height: '19.4%' }}>
-                <div className="leading-snug overflow-hidden" style={{ color: '#7a7a7a', fontSize: 'clamp(8px, 3vw, 11px)', wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>
-                  {a2StreamingContent || a2LastAssistant?.content?.slice(0, 60) || '待机中…'}
-                  {a2StreamingContent && <span className="inline-block w-1 h-2.5 bg-slate-400 animate-pulse align-middle ml-0.5" />}
+                <div ref={a2StatusScrollRef} className="h-full overflow-y-auto" style={{ overscrollBehavior: 'contain', scrollbarWidth: 'none' }}>
+                  <div className="leading-snug" style={{ color: '#7a7a7a', fontSize: 'clamp(8px, 3vw, 11px)', wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>
+                    {a2StreamingContent || a2LastAssistant?.content || '待机中…'}
+                    {a2StreamingContent && <span className="inline-block w-1 h-2.5 bg-slate-400 animate-pulse align-middle ml-0.5" />}
+                  </div>
                 </div>
               </div>
-              {/* 描述栏 #7a7a7a（短文案，长内容等后续换） */}
+              {/* 描述栏 #7a7a7a（长描述可滚） */}
               <div className="absolute overflow-hidden" style={{ left: '55%', top: '65.2%', width: '29.4%', height: '12.3%' }}>
-                <p className="leading-snug" style={{ color: '#7a7a7a', fontSize: 'clamp(7px, 2.6vw, 10.5px)', wordBreak: 'break-all' }}>
-                  {(lastDesc || '还没有照片描述').slice(0, 36)}
-                </p>
+                <div className="h-full overflow-y-auto" style={{ overscrollBehavior: 'contain', scrollbarWidth: 'none' }}>
+                  <p className="leading-snug" style={{ color: '#7a7a7a', fontSize: 'clamp(7px, 2.6vw, 10.5px)', wordBreak: 'break-all' }}>
+                    {lastDesc || '还没有照片描述'}
+                  </p>
+                </div>
               </div>
               {/* 日期 #7a7a7a */}
               <div className="absolute flex items-end overflow-hidden" style={{ left: '55%', top: '77.4%', width: '19.6%', height: '2.6%' }}>
@@ -1596,7 +1674,7 @@ ${a2OutputMode === 'bubbles'
                 {!a2HasStarted ? (
                   <button onClick={() => { setShowA2Card(false); setA2Messages([]); }} className="w-full py-1 text-[10px] text-slate-400 font-medium flex items-center justify-center">取消</button>
                 ) : (
-                  <button onClick={() => setShowA2Card(false)} className="w-full py-1 text-[10px] text-slate-400 font-medium flex items-center justify-center">暂离（聊天已保留）</button>
+                  <button onClick={leaveA2WithDraft} className="w-full py-1 text-[10px] text-slate-400 font-medium flex items-center justify-center">暂离（下次打开接着聊）</button>
                 )}
               </div>
 

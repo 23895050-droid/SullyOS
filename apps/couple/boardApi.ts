@@ -178,7 +178,7 @@ export async function archiveBoardImage(opts: {
     favorite: false,
     charAlbum: false,
     fromUser: false,
-    kind: 'other',
+    kind: 'board',
     timestamp: Date.now(),
   });
   if (!ok) throw new Error('留档写入失败（存储配额不足）');

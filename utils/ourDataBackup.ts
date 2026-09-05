@@ -40,10 +40,11 @@ export const OUR_FEATURE_SCOPES: OurFeatureScope[] = [
       'os_camera_a2_presets',    // a2 背景预设
       'os_camera_system_prompt', // 系统提示词
       'os_camera_last',          // 取景器最后一张（临时状态，一样不丢）
+      'os_camera_a2_drafts_v1',  // a2 暂离草稿
     ],
     includeReceipts: false,
   },
-  { id: 'album', label: '相册', localStorageKeys: ['os_memory_archive'], includeReceipts: false },
+  { id: 'album', label: '相册', localStorageKeys: ['os_memory_archive', 'couple_album_bg_v1'], includeReceipts: false },
   { id: 'receipts', label: '近期接收', localStorageKeys: [], includeReceipts: true },
   {
     id: 'noxhome', label: 'NoxHome（含情侣空间）',

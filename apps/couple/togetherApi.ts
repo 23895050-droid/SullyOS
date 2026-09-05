@@ -114,7 +114,7 @@ export async function archiveTogetherPhoto(opts: {
     favorite: false,
     charAlbum: true,   // 同时进用户的和角色的相册（文档要求）
     fromUser: false,
-    kind: 'other',
+    kind: 'together',
     timestamp: Date.now(),
   });
   if (!ok) throw new Error('留档写入失败（存储配额不足）');
