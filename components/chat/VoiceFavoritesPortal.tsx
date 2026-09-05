@@ -30,6 +30,7 @@ import {
     type VoiceFavoriteSource,
 } from '../../utils/voiceFavorites';
 import { normalizeChatSearchText, searchableChatMessageText } from '../../utils/chatMessageSearch';
+import TokenImg from '../os/TokenImg';
 
 const PAGE_SIZE = 10;
 type FavoriteTab = 'chat' | 'voice' | 'image';
@@ -336,7 +337,7 @@ const FavoritesPortal: React.FC<FavoritesPortalProps> = ({ onClose, onJumpToMess
                     <article key={item.id} className="relative rounded-2xl overflow-hidden bg-white border border-slate-900/10 shadow-sm">
                         <button type="button" disabled={!imageUrl} onClick={() => imageUrl && setPreviewImage(imageUrl)} className="block w-full aspect-square bg-slate-100 disabled:cursor-default">
                             {imageUrl ? (
-                                <img src={imageUrl} alt="收藏图片" className="w-full h-full object-cover" loading="lazy" />
+                                <TokenImg value={imageUrl} alt="收藏图片" className="w-full h-full object-cover" loading="lazy" />
                             ) : (
                                 <span className="h-full grid place-items-center px-4 text-center text-[11px] leading-5 text-slate-400">
                                     {ready ? '原图片已删除或未随备份恢复' : '正在读取原图片…'}
@@ -363,7 +364,7 @@ const FavoritesPortal: React.FC<FavoritesPortalProps> = ({ onClose, onJumpToMess
         ? '长按有意义的聊天消息，就能收藏到这里。'
         : tab === 'voice'
             ? '在聊天、通话或见面里长按语音，就能收藏到这里。'
-            : '在聊天或相册里收藏图片；这里只保存引用，不复制图片。';
+            : '在聊天或相册里收藏图片；收藏会保留一份副本，删掉原图也不丢。';
 
     const portal = (
         <div className="favorites-root">
@@ -475,7 +476,7 @@ const FavoritesPortal: React.FC<FavoritesPortalProps> = ({ onClose, onJumpToMess
             {previewImage && (
                 <div className="absolute inset-0 z-20 bg-black/95 grid place-items-center p-3" onClick={() => setPreviewImage(null)}>
                     <button type="button" onClick={() => setPreviewImage(null)} className="absolute top-[max(16px,env(safe-area-inset-top))] right-4 w-10 h-10 grid place-items-center rounded-full bg-white/10 text-white" aria-label="关闭图片预览"><X size={22} /></button>
-                    <img src={previewImage} alt="收藏图片预览" className="max-w-full max-h-full object-contain" onClick={event => event.stopPropagation()} />
+                    <TokenImg value={previewImage} alt="收藏图片预览" className="max-w-full max-h-full object-contain" onClick={event => event.stopPropagation()} />
                 </div>
             )}
         </div>

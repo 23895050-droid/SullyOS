@@ -203,22 +203,28 @@ export const saveMessageContentFavorite = async (
     const existing = current.find(item => item.id === id);
 
     let favorite: ContentFavorite;
-    let obsoleteImageAssetIds: string[] = [];
     if (message.type === 'image') {
         const reference: ContentFavoriteReference = { source: 'chat', charId: message.charId, messageId: message.id };
         const linkedGalleryImage = await DB.findGalleryImageBySourceMessageId(message.charId, message.id).catch(() => null)
             || await DB.findGalleryImageByUrl(message.charId, message.content).catch(() => null);
         const existingReferences = existing?.kind === 'image' ? existing.references : [];
-        obsoleteImageAssetIds = existingReferences
-            .filter((candidate): candidate is Extract<ContentFavoriteReference, { source: 'favorite_asset' }> => candidate.source === 'favorite_asset')
-            .map(candidate => candidate.assetId);
         const previousReferences = existingReferences.filter(candidate => candidate.source !== 'favorite_asset');
+        // 收藏时刻就写一份 favorite-owned 副本：收藏彻底独立于原消息——原消息被删、
+        // 内容被「优化资源存储」令牌化，收藏都照常显示。assetId 按指纹确定，
+        // 同一张图永远同一个副本 id，重复收藏原地覆盖不增生。
+        const assetId = favoriteImageAssetId(imageFingerprint(message.content));
+        await DB.saveAssetRaw(assetId, {
+            version: 1,
+            imageUrl: message.content,
+            savedAt: now,
+        } satisfies FavoriteImageAsset);
         const references = [
             ...previousReferences,
             reference,
             ...(linkedGalleryImage
                 ? [{ source: 'gallery' as const, charId: linkedGalleryImage.charId, galleryImageId: linkedGalleryImage.id }]
                 : []),
+            { source: 'favorite_asset' as const, assetId },
         ].filter((candidate, index, all) => (
             all.findIndex(other => referenceKey(other) === referenceKey(candidate)) === index
         ));
@@ -252,7 +258,6 @@ export const saveMessageContentFavorite = async (
     }
 
     await saveIndex([favorite, ...current.filter(item => item.id !== id)]);
-    await Promise.all(obsoleteImageAssetIds.map(assetId => DB.deleteAsset(assetId).catch(() => undefined)));
     notifyChanged();
     return favorite;
 });
@@ -266,18 +271,24 @@ export const saveGalleryImageContentFavorite = async (
     const id = makeImageContentFavoriteId(image.url);
     const existing = current.find(item => item.id === id);
     const existingReferences = existing?.kind === 'image' ? existing.references : [];
-    const obsoleteImageAssetIds = existingReferences
-        .filter((candidate): candidate is Extract<ContentFavoriteReference, { source: 'favorite_asset' }> => candidate.source === 'favorite_asset')
-        .map(candidate => candidate.assetId);
     const linkedMessage = typeof image.sourceMessageId === 'number'
         ? await DB.getMessageById(image.sourceMessageId).catch(() => null)
         : await DB.findImageMessageByUrl(image.charId, image.url).catch(() => null);
+    // 与聊天收藏同一套：收藏时刻写 favorite-owned 副本，收藏独立于相册原图
+    // （原图被删 / 被令牌化都不影响收藏显示）。assetId 按指纹确定，原地覆盖。
+    const assetId = favoriteImageAssetId(imageFingerprint(image.url));
+    await DB.saveAssetRaw(assetId, {
+        version: 1,
+        imageUrl: image.url,
+        savedAt: now,
+    } satisfies FavoriteImageAsset);
     const referenceCandidates: ContentFavoriteReference[] = [
         ...existingReferences.filter(candidate => candidate.source !== 'favorite_asset'),
         { source: 'gallery' as const, charId: image.charId, galleryImageId: image.id },
         ...(linkedMessage?.charId === image.charId && linkedMessage.type === 'image' && linkedMessage.content === image.url
             ? [{ source: 'chat' as const, charId: image.charId, messageId: linkedMessage.id }]
             : []),
+        { source: 'favorite_asset' as const, assetId },
     ];
     const references = referenceCandidates.filter((candidate, index, all) => (
         all.findIndex(other => referenceKey(other) === referenceKey(candidate)) === index
@@ -293,7 +304,6 @@ export const saveGalleryImageContentFavorite = async (
         favoritedAt: existing?.favoritedAt || now,
     };
     await saveIndex([favorite, ...current.filter(item => item.id !== id)]);
-    await Promise.all(obsoleteImageAssetIds.map(assetId => DB.deleteAsset(assetId).catch(() => undefined)));
     notifyChanged();
     return favorite;
 });
