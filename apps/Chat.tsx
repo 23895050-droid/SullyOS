@@ -2927,7 +2927,7 @@ const Chat: React.FC = () => {
             }
             await saveMessageContentFavorite(msg, char?.name || '未知角色');
             setContentFavoriteIds(previous => new Set(previous).add(favoriteId));
-            addToast(msg.type === 'image' ? '已收藏图片（副本已保留）' : '已收藏聊天消息', 'success');
+            addToast(msg.type === 'image' ? '已收藏图片（仅保存引用）' : '已收藏聊天消息', 'success');
             trackEvent(msg.type === 'image' ? '收藏聊天图片' : '收藏聊天消息');
         } catch (error) {
             console.warn('[Chat] favorite content failed', error);

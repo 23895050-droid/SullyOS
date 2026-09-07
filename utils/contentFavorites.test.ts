@@ -57,7 +57,7 @@ describe('content favorites reference index', () => {
         expect('sourceAvailable' in resolved && resolved.sourceAvailable).toBe(false);
     });
 
-    it('deduplicates the same image across chat and gallery while keeping a favorite-owned copy', async () => {
+    it('deduplicates the same image across chat and gallery without storing media', async () => {
         const url = 'data:image/png;base64,QUJDREVGRw==';
         const sourceMessageId = await DB.saveMessage({
             charId: CHAR_ID,
@@ -76,21 +76,21 @@ describe('content favorites reference index', () => {
         await DB.saveGalleryImage(galleryImage);
         await saveMessageContentFavorite(sourceMessage, 'Sully');
         const linkedFromChat = (await listContentFavorites())[0];
-        expect(linkedFromChat.kind === 'image' ? linkedFromChat.references : []).toHaveLength(3);
-        const retainedAssetId = favoriteImageAssetId(linkedFromChat.kind === 'image' ? linkedFromChat.fingerprint : '');
-        // 收藏时刻就写好 favorite-owned 副本（索引本身仍不携带媒体）
-        expect(await DB.getAssetRaw(retainedAssetId)).toMatchObject({ imageUrl: url });
-
+        expect(linkedFromChat.kind === 'image' ? linkedFromChat.references : []).toHaveLength(2);
         await saveGalleryImageContentFavorite(galleryImage, 'Sully');
+
         const items = await listContentFavorites();
         expect(items).toHaveLength(1);
         expect(items[0]).toMatchObject({ kind: 'image', id: contentFavoriteIdForMessage(sourceMessage) });
-        expect(items[0].kind === 'image' && items[0].references).toHaveLength(3);
+        expect(items[0].kind === 'image' && items[0].references).toHaveLength(2);
+        const retainedAssetId = favoriteImageAssetId(items[0].kind === 'image' ? items[0].fingerprint : '');
         const rawIndex = JSON.stringify(await DB.getAssetRaw(CONTENT_FAVORITES_INDEX_ASSET_ID));
         expect(rawIndex).not.toContain(url);
         expect(rawIndex).not.toContain('base64');
+        expect(await DB.getAssetRaw(retainedAssetId)).toBeNull();
 
         await DB.deleteMessage(sourceMessage.id);
+        expect(await DB.getAssetRaw(retainedAssetId)).toBeNull();
         await DB.deleteGalleryImage(galleryImage.id);
 
         const retained = (await listContentFavorites())[0];
@@ -100,42 +100,15 @@ describe('content favorites reference index', () => {
         expect('reference' in resolved && resolved.reference?.source).toBe('favorite_asset');
         expect(await DB.getAssetRaw(retainedAssetId)).toMatchObject({ imageUrl: url });
 
-        // 活源回来后再收藏：副本按同一指纹原地覆盖，不增不减
+        // If the same live image returns later, ownership moves back to that source and
+        // the temporary favorite-owned media row is removed instead of duplicating it.
         await DB.saveGalleryImage(galleryImage);
         await saveGalleryImageContentFavorite(galleryImage, 'Sully');
-        expect(await DB.getAssetRaw(retainedAssetId)).toMatchObject({ imageUrl: url });
+        expect(await DB.getAssetRaw(retainedAssetId)).toBeNull();
         await DB.deleteGalleryImage(galleryImage.id);
         expect(await DB.getAssetRaw(retainedAssetId)).toMatchObject({ imageUrl: url });
 
         await removeContentFavoriteById(retained.id);
         expect(await DB.getAssetRaw(retainedAssetId)).toBeNull();
-    });
-
-    it('keeps favorites whose image content is a blobref token resolvable and deletion-proof', async () => {
-        const token = 'blobref:b_token_content_test';
-        const sourceMessageId = await DB.saveMessage({
-            charId: CHAR_ID,
-            role: 'assistant',
-            type: 'image',
-            content: token,
-        });
-        const sourceMessage = message({ id: sourceMessageId, type: 'image', content: token });
-        await saveMessageContentFavorite(sourceMessage, 'Sully');
-
-        const retained = (await listContentFavorites())[0];
-        expect(retained.kind).toBe('image');
-        const assetId = favoriteImageAssetId(retained.kind === 'image' ? retained.fingerprint : '');
-        expect(await DB.getAssetRaw(assetId)).toMatchObject({ imageUrl: token });
-
-        // 令牌内容原样解析出来（渲染端 TokenImg 负责把令牌变成可用的 objectURL）
-        const resolved = await resolveContentFavorite(retained);
-        expect('imageUrl' in resolved && resolved.imageUrl).toBe(token);
-        expect('reference' in resolved && resolved.reference?.source).toBe('chat');
-
-        // 原消息删除后改由副本供图，依然返回令牌
-        await DB.deleteMessage(sourceMessage.id);
-        const after = await resolveContentFavorite((await listContentFavorites())[0]);
-        expect('imageUrl' in after && after.imageUrl).toBe(token);
-        expect('reference' in after && after.reference?.source).toBe('favorite_asset');
     });
 });
