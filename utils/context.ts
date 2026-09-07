@@ -696,9 +696,10 @@ export const ContextBuilder = {
      * 音乐行动指令（告诉 LLM 怎么输出 music_action 指令）
      * 这个块**只在 user 正在听歌**的时候注入，避免 char 在没上下文时乱 call。
      *
-     * 一起听修正（她 2026-08-27 定）：一起听的动作不常驻指令集——接受/婉拒的协议写在
-     * 邀请卡正文里（模型读到卡就知道怎么回），他发起/结束一起听由前端按关键词判定。
-     * 所以这里只留原版「收歌」语法（add 系列），不再教 invite/accept/decline/exit。
+     * 一起听修正（她 2026-08-27 定 + 2026-09-08 反馈3 再修正）：发起已改为指令化常驻
+     * （见 chatPrompts 可用动作清单的 invite 条目，prompt 授予发起能力、他判断场合）；
+     * 接受/婉拒的协议写在邀请卡正文里（模型读到卡就知道怎么回），结束由前端关键词判定。
+     * 所以这里只留原版「收歌」语法（add 系列），不再教 accept/decline/exit。
      */
     buildMusicActionGuide: (): string => {
         return `### 【音乐互动工具】

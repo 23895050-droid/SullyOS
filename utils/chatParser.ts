@@ -6,8 +6,8 @@ import { sanitizeForBubble } from './sanitize';
 import { extractTransferCommands } from './transferFormat';
 import { executeLifeDirectives } from './lifeRecords';
 import { wallClockToTimestamp } from './timezone';
-import { addPendingInvite, getMusicStore, keywordInviteAllowed, pendingInviteOf, removePendingInvite } from '../apps/couple/musicStore';
-import { detectMusicExitIntent, detectMusicInviteIntent, detectSongMentions } from './musicMountContent';
+import { addPendingInvite, keywordInviteAllowed, pendingInviteOf, removePendingInvite } from '../apps/couple/musicStore';
+import { detectMusicExitIntent } from './musicMountContent';
 import { CollaborationStore } from '../features/collaboration/store';
 import {
     collaborationFileMessageMetadata,
@@ -291,12 +291,12 @@ export const ChatParser = {
         //   [[MUSIC_ACTION:add]]                              → 默认放第一个歌单
         //   [[MUSIC_ACTION:add|歌单标题]]                      → 放进现有歌单（标题匹配）
         //   [[MUSIC_ACTION:add_new|新歌单标题|可选描述]]        → 新建歌单
-        //   [[MUSIC_ACTION:invite|歌名?]]                      → 他主动邀请（允许无播放快照；2026-08-27 起不再教学，走关键词判定，此分支留作兜底）
+        //   [[MUSIC_ACTION:invite|歌名?]]                      → 他主动邀请（2026-09-08 反馈3：指令化——prompt 授予发起能力，他判断场合输出；带歌名可选）
         //   [[MUSIC_ACTION:accept]] / [[MUSIC_ACTION:decline]] → 回应她的邀请（协议写在邀请卡正文里；仅 pendingInvites 有记录才激活）
-        //   [[MUSIC_ACTION:exit]]                              → 他主动结束一起听（2026-08-27 起前端另有关键词判定）
+        //   [[MUSIC_ACTION:exit]]                              → 他主动结束一起听（前端关键词判定）
         // join / join_and_add / join_and_add_new 已废弃：模型若还输出就剥标签当没发生（defuse）。
-        // 关键词判定（musicTagActed 之后那段）：他发起/结束一起听不靠常驻指令集，
-        // 按回复文本现判——accept/decline 协议在邀请卡里，invite/exit 走关键词。
+        // 关键词判定（musicTagActed 之后那段）：只剩结束——「一起听」三字是普通聊天内容，
+        // 前端不再拦自然语言发邀请（误触率太高，反馈3 砍掉）。accept/decline 协议在邀请卡里。
         const MUSIC_TAG_RE = /\[\[MUSIC_ACTION:(invite|accept|decline|exit|join|add|add_new|join_and_add|join_and_add_new)(?:\|([^\]]*))?\]\]/;
         const MUSIC_TAG_GLOBAL_RE = /\[\[MUSIC_ACTION:(?:invite|accept|decline|exit|join|add|add_new|join_and_add|join_and_add_new)(?:\|[^\]]*)?\]\]/g;
         let musicTagActed = false;
@@ -313,9 +313,13 @@ export const ChatParser = {
                 const snap = musicHooks.getListeningSnapshot();
                 const togetherNow = (snap?.listeningTogetherWith || []).includes(charId);
                 if (verb === 'invite') {
-                    // 他主动邀请：允许她没在放歌（invite 带不带歌名都成立）。已经在听就剥标签。
+                    // 他主动邀请（2026-09-08 反馈3：指令化——prompt 授予发起能力，他自行判断场合输出标签；
+                    // 前端不再拦自然语言关键词）。允许她没在放歌（invite 带不带歌名都成立）。已经在听就剥标签。
                     if (togetherNow) {
                         console.warn('[MusicAction] 已在一起听，重复 invite 忽略:', { charId });
+                    } else if (!keywordInviteAllowed(charId)) {
+                        // 冷却门挪到标签路径：挂着未回应的邀请 / 婉拒冷却期内 → 剥标签忽略（防「拒绝→马上再邀」连环卡）
+                        console.warn('[MusicAction] 有未回应邀请或婉拒冷却期内，invite 忽略:', { charId });
                     } else {
                         // 定时路径里「他此刻在听」的那首冻结歌优先——他邀请的应该是自己正在听的那首
                         const frozen = normalizeFrozenSong(frozenMusicSong);
@@ -368,7 +372,8 @@ export const ChatParser = {
                             content: accepted ? '[Ta 接受了一起听]' : '[Ta 婉拒了这次邀请]',
                             metadata: {
                                 source: 'music_accept',
-                                acceptCard: { action: accepted ? 'accept' : 'decline', song: snap },
+                                // 反馈3 #2：标清回应方——渲染「谁接受了一起听」不再猜方向
+                                acceptCard: { action: accepted ? 'accept' : 'decline', by: 'char', song: snap },
                             },
                         });
                         addToast(accepted ? `${charName} 接受了一起听` : `${charName} 婉拒了邀请`, 'info');
@@ -471,8 +476,9 @@ export const ChatParser = {
             content = content.replace(MUSIC_TAG_GLOBAL_RE, '').trim();
         }
 
-        // ── 他发起/结束一起听：关键词判定（2026-08-27 她定：音乐交互不常驻指令集）──
-        // 标签路径已触发动作就跳过；同一条消息里标签被 defuse（join）时关键词仍会照常判。
+        // ── 他结束一起听：关键词判定（2026-08-27 她定：音乐交互不常驻指令集；
+        //    2026-09-08 反馈3 修正：发起已改为指令化 [[MUSIC_ACTION:invite]]，前端不再拦自然语言
+        //    ——「一起听」三个字只是普通聊天内容。结束保留关键词判定）──
         if (musicHooks && !musicTagActed) {
             const kwSnap = musicHooks.getListeningSnapshot();
             const kwTogether = (kwSnap?.listeningTogetherWith || []).includes(charId);
@@ -484,34 +490,9 @@ export const ChatParser = {
                     role: 'system',
                     type: 'music_accept',
                     content: '[Ta 结束了这次一起听]',
-                    metadata: { source: 'music_accept', acceptCard: { action: 'exit', song: kwSnap } },
+                    metadata: { source: 'music_accept', acceptCard: { action: 'exit', by: 'char', song: kwSnap } },
                 });
                 addToast(`${charName} 结束了这次一起听`, 'info');
-            } else if (!kwTogether && keywordInviteAllowed(charId) && detectMusicInviteIntent(content)) {
-                // 他主动邀请：允许她没在放歌；歌名从回复文本里认（导入池），认不出就不带
-                // 冷却门：没有挂着的邀请 + 不在婉拒冷却期（防「拒绝→马上再邀」连环卡）
-                const inviteSongName = detectSongMentions(content, getMusicStore().importedSongs)[0]?.name || '';
-                const inviteCardId = await persist({
-                    charId,
-                    role: 'assistant',
-                    type: 'music_invite',
-                    content: inviteSongName ? `[Ta 邀请你一起听：《${inviteSongName}》]` : '[Ta 邀请你一起听首歌]',
-                    metadata: {
-                        source: 'music_invite',
-                        invite: {
-                            direction: 'char',
-                            inviteSongName: inviteSongName || undefined,
-                            status: 'pending',
-                        },
-                    },
-                });
-                addPendingInvite({
-                    charId,
-                    direction: 'char',
-                    inviteSongName: inviteSongName || undefined,
-                    cardMessageId: typeof inviteCardId === 'number' ? String(inviteCardId) : undefined,
-                });
-                addToast(`${charName} 邀请你一起听${inviteSongName ? `《${inviteSongName}》` : ''}`, 'info');
             }
         }
 

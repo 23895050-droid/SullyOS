@@ -1437,6 +1437,8 @@ interface MessageItemProps {
         customColors?: { bg?: string; accent?: string; text?: string };
         onOpenSettings?: () => void;
     };
+    /** 反馈3 #3：接受一起听邀请后 → 打开音乐 App 播放页（Chat 层拿 openApp，别在 memo 组件里读全局 context） */
+    onOpenMusicApp?: () => void;
 }
 
 const MessageItem = React.memo(({
@@ -1484,6 +1486,7 @@ const MessageItem = React.memo(({
     onResolveLifeRecord,
     onOpenCollaborationFile,
     thinkingChainOptions,
+    onOpenMusicApp,
 }: MessageItemProps) => {
     const isUser = m.role === 'user';
     const isSystem = m.role === 'system';
@@ -1696,9 +1699,11 @@ const MessageItem = React.memo(({
     );
 
     /** 邀请卡共用主体（不含外包装）：双头像头图 + 邀请文案 + 底部动作区（按钮/状态） */
-    const musicInviteCardBody = (inv: { song?: any; inviteSongName?: string; status?: string }, footer: React.ReactNode) => {
+    const musicInviteCardBody = (inv: { song?: any; inviteSongName?: string; direction?: string; status?: string }, footer: React.ReactNode) => {
         const song = inv.song || null;
         const name = song?.name || inv.inviteSongName || '';
+        // 反馈3 #2：按 direction 标清发起方——她发起 = 你邀请 Ta；他发起 = Ta 邀请你
+        const byUser = inv.direction === 'user';
         return (
             <div className="w-64 rounded-2xl overflow-hidden shadow-sm border"
                 style={{ borderColor: '#f3d9e6', background: 'linear-gradient(135deg, #fff2f7 0%, #f5edff 55%, #eaf1ff 100%)' }}>
@@ -1731,9 +1736,15 @@ const MessageItem = React.memo(({
                 </div>
                 <div className="p-3 pt-1.5">
                     <div className="text-[11px] leading-relaxed" style={{ color: '#6b5b8f' }}>
-                        {name ? (
-                            <>邀请你一起听 <span className="font-semibold" style={{ color: '#2a1f4d' }}>《{name}》</span></>
-                        ) : '想和你一起听首歌'}
+                        {byUser ? (
+                            name
+                                ? <>你邀请 <span className="font-semibold" style={{ color: '#2a1f4d' }}>{charName || 'Ta'}</span> 一起听 <span className="font-semibold" style={{ color: '#2a1f4d' }}>《{name}》</span></>
+                                : <>你邀请 <span className="font-semibold" style={{ color: '#2a1f4d' }}>{charName || 'Ta'}</span> 一起听首歌</>
+                        ) : (
+                            name
+                                ? <>邀请你一起听 <span className="font-semibold" style={{ color: '#2a1f4d' }}>《{name}》</span></>
+                                : '想和你一起听首歌'
+                        )}
                     </div>
                     {footer}
                 </div>
@@ -2166,11 +2177,13 @@ const MessageItem = React.memo(({
 
         // 一起听回应卡（accept / decline / exit，双向都落这一种卡）
         if (m.type === 'music_accept' && m.metadata?.acceptCard) {
-            const card = m.metadata.acceptCard as { action?: string; song?: any };
+            const card = m.metadata.acceptCard as { action?: string; by?: 'user' | 'char'; song?: any };
             const action = card.action || 'accept';
             const songName = card.song?.name;
             const isAccept = action === 'accept';
             const isDecline = action === 'decline';
+            // 反馈3 #2：按 by 标清回应方——你点的接受显示「你接受了一起听」，角色回应显示「Ta 接受了一起听」
+            const actor = card.by === 'user' ? '你' : (charName || 'Ta');
             return (
                 <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
                     {selectionMode && (
@@ -2185,7 +2198,7 @@ const MessageItem = React.memo(({
                             style={{ borderColor: '#f3d9e6', background: 'linear-gradient(135deg, #fff7fa 0%, #f7f1ff 100%)' }}>
                             <div className="text-base leading-none">{isAccept ? '💗' : isDecline ? '🍃' : '🎧'}</div>
                             <div className="text-[11px] font-semibold mt-1.5" style={{ color: '#383639' }}>
-                                {isAccept ? `${charName || 'Ta'} 接受了一起听` : isDecline ? `${charName || 'Ta'} 婉拒了这次邀请` : `${charName || 'Ta'} 结束了这次一起听`}
+                                {isAccept ? `${actor} 接受了一起听` : isDecline ? `${actor} 婉拒了这次邀请` : `${actor} 结束了这次一起听`}
                             </div>
                             {songName ? (
                                 <div className="text-[10px] mt-0.5 truncate" style={{ color: '#9c6fc2' }}>《{songName}》</div>
@@ -2518,13 +2531,15 @@ const MessageItem = React.memo(({
                 role: 'system',
                 type: 'music_accept',
                 content: accepted ? '[你接受了一起听]' : '[你婉拒了这次邀请]',
-                metadata: { source: 'music_accept', acceptCard: { action: accepted ? 'accept' : 'decline', song: inv.song || null } },
+                // 反馈3 #2：by='user' 标清回应方——渲染「你接受了一起听」不再写成角色名
+                metadata: { source: 'music_accept', acceptCard: { action: accepted ? 'accept' : 'decline', by: 'user', song: inv.song || null } },
             }).catch(() => {});
             if (accepted) {
-                // 他带歌名邀请：正在放歌就去搜这首来播（搜不到保持当前）；没在放就只激活状态，等她自己去放
+                // 反馈3 #3：接受 = 起播 + 跳转播放页。他带歌名邀请：搜这首来播（搜不到保持当前）；
+                // 之前只在「正在放歌」时搜，现在只要配置可用就搜。没歌名只跳转。
                 const name = inv.inviteSongName;
                 const snap = loadMusicPlaybackSnapshot();
-                if (name && snap?.playing && snap.current && snap.cfg) {
+                if (name && snap?.current && snap.cfg) {
                     try {
                         const r: any = await musicApi.search(snap.cfg, name);
                         const hit = (r?.result?.songs || [])[0];
@@ -2544,6 +2559,7 @@ const MessageItem = React.memo(({
                         }
                     } catch { /* 搜不到就保持当前播放 */ }
                 }
+                onOpenMusicApp?.();
             }
         };
         const footer = status === 'pending' ? (

@@ -1,6 +1,6 @@
 // 音乐挂载内容生成器单测（2026-08-26）——空态不注入/分组歌单概况/关键词并集/印象挑选/提歌注入
 import { describe, expect, it } from 'vitest';
-import { buildMusicMountContent, buildMusicMountKey, buildMusicRecordBlock, detectMusicExitIntent, detectMusicInviteIntent, detectSongMentions, groupImportedSongs, topPlayRecords, IMPORT_PLAYLIST_TITLE, MUSIC_MOUNT_KEY_LIMIT } from './musicMountContent';
+import { buildMusicMountContent, buildMusicMountKey, buildMusicRecordBlock, detectMusicExitIntent, detectSongMentions, groupImportedSongs, topPlayRecords, IMPORT_PLAYLIST_TITLE, MUSIC_MOUNT_KEY_LIMIT } from './musicMountContent';
 import type { ImportedSong, SongPlayRecord } from '../apps/couple/musicStore';
 
 const songs: ImportedSong[] = [
@@ -109,25 +109,7 @@ describe('提歌注入（批 2）', () => {
   });
 });
 
-describe('他发起/结束一起听的关键词判定（2026-08-27）', () => {
-  it('邀请话术命中；日常说法不误伤', () => {
-    for (const t of ['想听歌吗，一起听首歌', '要不要听《富士山下》', '给你放首歌', '陪我听歌好不好']) {
-      expect(detectMusicInviteIntent(t)).toBe(true);
-    }
-    for (const t of ['你先听我说', '你还在听歌吗', '这首歌好好听', '我听完再回你', '今天天气不错']) {
-      expect(detectMusicInviteIntent(t)).toBe(false);
-    }
-  });
-
-  it('反馈2 #1：裸「一起听」命中；非听歌场合不误伤', () => {
-    for (const t of ['好啊，一起听吧', '那我们一起听', '一起听，你想听什么？', '一起听呀']) {
-      expect(detectMusicInviteIntent(t)).toBe(true);
-    }
-    for (const t of ['改天一起听讲座', '一起听相声去', '一起听个故事', '晚上一起听广播']) {
-      expect(detectMusicInviteIntent(t)).toBe(false);
-    }
-  });
-
+describe('他结束一起听的关键词判定（2026-08-27 定；2026-09-08 反馈3 邀请改指令化，只剩结束）', () => {
   it('结束话术命中', () => {
     for (const t of ['今天就到这吧', '先不听了', '下次再听这首', '结束这次一起听']) {
       expect(detectMusicExitIntent(t)).toBe(true);
@@ -137,6 +119,12 @@ describe('他发起/结束一起听的关键词判定（2026-08-27）', () => {
 
   it('日常收尾话不误判成退出（先走了/去忙了 已经出名单）', () => {
     for (const t of ['那我先走了，晚安', '我先去忙了', '准备去睡了']) {
+      expect(detectMusicExitIntent(t)).toBe(false);
+    }
+  });
+
+  it('反馈3：「一起听」类邀请话术不再由前端拦截（指令化），这里无邀请判定', () => {
+    for (const t of ['想听歌吗，一起听首歌', '好啊，一起听吧', '要不要听《富士山下》']) {
       expect(detectMusicExitIntent(t)).toBe(false);
     }
   });

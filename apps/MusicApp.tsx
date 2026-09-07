@@ -140,6 +140,16 @@ const MusicApp: React.FC = () => {
   useEffect(() => { setToastHandler(addToast); }, [addToast, setToastHandler]);
 
   const [view, setView] = useState<View>('profile');
+  // 反馈3 #3：聊天里接受一起听邀请 → 打开音乐 App 直接进播放页（标记由 Chat 写入，挂载时消费一次）
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('sully_music_open_player')) {
+        sessionStorage.removeItem('sully_music_open_player');
+        setView('player');
+      }
+    } catch { /* 标记读取失败按默认视图 */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // ── 手动对轴 modal state ──
   const [showLyricSync, setShowLyricSync] = useState(false);
   const [syncDraft, setSyncDraft] = useState<number[]>([]);

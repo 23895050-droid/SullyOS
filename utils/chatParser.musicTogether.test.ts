@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatParser, MusicActionSnapshot } from './chatParser';
 import { DB } from './db';
-import { addPendingInvite, clearDeclinedInviteStamp, getMusicStore, importMusicJson, pendingInviteOf, removePendingInvite } from '../apps/couple/musicStore';
+import { addPendingInvite, clearDeclinedInviteStamp, getMusicStore, pendingInviteOf, removePendingInvite } from '../apps/couple/musicStore';
 
 const noop = () => {};
 
@@ -139,47 +139,17 @@ describe('exit（他主动结束）', () => {
   });
 });
 
-describe('关键词判定（2026-08-27：一起听交互不常驻指令集）', () => {
-  const seedSongs = async () => {
-    await importMusicJson('kw-seed', {
-      schema: 'sully-music-import-v1', exportedAt: '2026-08-27T00:00:00.000Z', accountName: 'cc',
-      songs: [{ neteaseId: 1, name: '富士山下', artists: ['陈奕迅'] }],
-    });
-  };
-
-  it('他自然说出邀请 → 落邀请卡 + 登记 pending，正文不动', async () => {
-    await seedSongs();
+describe('关键词判定（2026-08-27 定；2026-09-08 反馈3 邀请改指令化，只剩结束关键词）', () => {
+  it('他自然说出邀请话术 → 不再落卡（发起只能走 [[MUSIC_ACTION:invite]]）', async () => {
     const charId = `c-together-kw-invite-${Date.now()}`;
     const hooks = mkHooks();
     const out = await ChatParser.parseAndExecuteActions(
       '想听歌吗，一起听首富士山下？', charId, '阿一', noop, hooks,
     );
     expect(out).toBe('想听歌吗，一起听首富士山下？');
-    const [card] = await DB.getMessagesByCharId(charId, true);
-    expect(card.type).toBe('music_invite');
-    expect(card.metadata?.invite).toMatchObject({ direction: 'char', inviteSongName: '富士山下', status: 'pending' });
-    expect(pendingInviteOf(charId)).toMatchObject({ direction: 'char', inviteSongName: '富士山下' });
-    expect(hooks.joinListeningTogether).not.toHaveBeenCalled();
-  });
-
-  it('已经在一起听 → 邀请话术不重复落卡', async () => {
-    const charId = `c-together-kw-invite-dup-${Date.now()}`;
-    const hooks = mkHooks({ getListeningSnapshot: () => ({ ...SONG, listeningTogetherWith: [charId] }) });
-    const out = await ChatParser.parseAndExecuteActions(
-      '这首歌之后想听歌吗', charId, '阿一', noop, hooks,
-    );
-    expect(out).toBe('这首歌之后想听歌吗');
     expect(await DB.getMessagesByCharId(charId, true)).toHaveLength(0);
     expect(pendingInviteOf(charId)).toBeUndefined();
-  });
-
-  it('她的邀请还挂着 → 他再说听歌话术也不重复落卡', async () => {
-    const charId = `c-together-kw-invite-pending-${Date.now()}`;
-    addPendingInvite({ charId, direction: 'user' });
-    const hooks = mkHooks();
-    await ChatParser.parseAndExecuteActions('好啊，一起听歌吧', charId, '阿一', noop, hooks);
-    const msgs = await DB.getMessagesByCharId(charId, true);
-    expect(msgs.find((m) => m.type === 'music_invite' && m.metadata?.invite?.direction === 'char')).toBeUndefined();
+    expect(hooks.joinListeningTogether).not.toHaveBeenCalled();
   });
 
   it('他自然说出结束 → endListeningTogether + 退出卡', async () => {
@@ -211,36 +181,44 @@ describe('关键词判定（2026-08-27：一起听交互不常驻指令集）', 
     expect(await DB.getMessagesByCharId(charId, true)).toHaveLength(0);
   });
 
-  it('刚被婉拒 → 冷却期内关键词不再插卡（防连环邀请）', async () => {
+  it('反馈3：裸「一起听」只是普通聊天，不再弹卡（发起改指令化）', async () => {
+    const charId = `c-together-kw-bare-${Date.now()}`;
+    const hooks = mkHooks();
+    const out = await ChatParser.parseAndExecuteActions('好啊，一起听吧', charId, '阿一', noop, hooks);
+    expect(out).toBe('好啊，一起听吧');
+    expect(await DB.getMessagesByCharId(charId, true)).toHaveLength(0);
+  });
+
+  it('刚被婉拒 → 冷却期内 invite 标签被剥（防连环邀请）', async () => {
     const charId = `c-together-kw-cooldown-${Date.now()}`;
     // 模拟一轮「他邀请 → 她点拒绝」的落档：拒绝时 store 记下冷却起点
     addPendingInvite({ charId, direction: 'char' });
     removePendingInvite(charId, 'declined');
     const hooks = mkHooks();
-    const out = await ChatParser.parseAndExecuteActions('还是想听歌吗？', charId, '阿一', noop, hooks);
-    expect(out).toBe('还是想听歌吗？');
+    const out = await ChatParser.parseAndExecuteActions('再试一次[[MUSIC_ACTION:invite]]', charId, '阿一', noop, hooks);
+    expect(out).toBe('再试一次');
     expect(await DB.getMessagesByCharId(charId, true)).toHaveLength(0);
     expect(pendingInviteOf(charId)).toBeUndefined();
   });
 
-  it('接受了上一轮 → 冷却不生效，他还可以再邀', async () => {
+  it('接受了上一轮 → 冷却不生效，标签邀请照常出卡', async () => {
     const charId = `c-together-kw-cooldown-ok-${Date.now()}`;
     addPendingInvite({ charId, direction: 'char' });
     removePendingInvite(charId, 'accepted');
     const hooks = mkHooks();
-    const out = await ChatParser.parseAndExecuteActions('下次再想听歌吗？', charId, '阿一', noop, hooks);
-    expect(out).toBe('下次再想听歌吗？');
+    const out = await ChatParser.parseAndExecuteActions('再听一首[[MUSIC_ACTION:invite]]', charId, '阿一', noop, hooks);
+    expect(out).toBe('再听一首');
     const msgs = await DB.getMessagesByCharId(charId, true);
     expect(msgs.find((m) => m.type === 'music_invite')).toBeTruthy();
   });
 
-  it('反馈2 #1：裸「一起听」回复 → 出邀请卡', async () => {
-    const charId = `c-together-kw-bare-${Date.now()}`;
+  it('她的邀请还挂着 → 他再输出 invite 标签也不重复落卡', async () => {
+    const charId = `c-together-kw-invite-pending-${Date.now()}`;
+    addPendingInvite({ charId, direction: 'user' });
     const hooks = mkHooks();
-    const out = await ChatParser.parseAndExecuteActions('好啊，一起听吧', charId, '阿一', noop, hooks);
-    expect(out).toBe('好啊，一起听吧');
+    await ChatParser.parseAndExecuteActions('好啊[[MUSIC_ACTION:invite]]', charId, '阿一', noop, hooks);
     const msgs = await DB.getMessagesByCharId(charId, true);
-    expect(msgs.find((m) => m.type === 'music_invite')).toBeTruthy();
+    expect(msgs.find((m) => m.type === 'music_invite' && m.metadata?.invite?.direction === 'char')).toBeUndefined();
   });
 });
 
