@@ -13,7 +13,8 @@ import { getAnnivStore } from '../apps/couple/annivStore';
 import { getDietStore, type DietRecord, type FoodLibItem, type FridgeItem } from '../apps/couple/dietStore';
 import { getDiaryStore, diaryOn, type DiaryEntry } from '../apps/couple/diaryStore';
 import { getTogetherStore } from '../apps/couple/togetherStore';
-import { getMusicStore } from '../apps/couple/musicStore';
+import { getMusicStore, charPlayRecordsFromSessions } from '../apps/couple/musicStore';
+import { loadMusicPlaybackSnapshot, loadMusicTogetherState } from '../context/MusicContext';
 import { buildPromisesMountContent } from './togetherMath';
 import { buildMusicMountContent, buildMusicMountKey } from './musicMountContent';
 import { MEAL_LABELS, MEAL_ORDER } from './dietMath';
@@ -161,6 +162,16 @@ function load(): NoxhomeMountConfig {
 
 let state = load();
 const listeners = new Set<() => void>();
+
+// 导入备份后现场重读（2026-09-08 反馈3 根因修）：挂载配置是模块级 state，
+// 导入会整体重写 localStorage（charId/块参数来自旧设备或旧时刻），不重读就会整段
+// 会话继续用旧配置生成挂载内容——看起来就是「挂载数据不再更新/挂错了人」。
+if (typeof window !== 'undefined') {
+  window.addEventListener('our-backup-imported', () => {
+    state = load();
+    listeners.forEach((l) => l());
+  });
+}
 
 function commit(next: NoxhomeMountConfig) {
   state = next;
@@ -433,8 +444,36 @@ const BLOCK_BUILDERS: Record<MountBlockId, () => BlockBuilderResult> = {
     const s = getMusicStore();
     // 一起听会话按 charId 各存一份（批 2）——挂载块只给挂载角色的那一份
     const charId = getMountConfig().charId;
-    const togetherSessions = charId ? s.togetherSessions.filter((t) => t.charId === charId) : s.togetherSessions;
-    const input = { importedSongs: s.importedSongs, playRecords: s.playRecords, togetherSessions };
+    let togetherSessions = charId ? s.togetherSessions.filter((t) => t.charId === charId) : s.togetherSessions;
+    // 2026-09-08 反馈3：进行中的一起听实时可见——会话缓冲只在「结束一起听」时才 flush 落库，
+    // 之前挂载块看不到「正在听的这轮」（听了三次的新歌不在、旧纪录在，就是她报的现象）。
+    // 挂载角色此刻正在一起听时，把内存缓冲当作一条进行中的会话并入（结束落库后自然被正式记录替代）。
+    try {
+      const snap = loadMusicPlaybackSnapshot();
+      const live = loadMusicTogetherState();
+      if (charId && live && live.songs.length > 0 && (snap?.listeningTogetherWith || []).includes(charId)) {
+        togetherSessions = [
+          ...togetherSessions,
+          {
+            id: '__live__',
+            charId,
+            startedAt: new Date(live.startedAt).toISOString(),
+            endedAt: new Date().toISOString(),
+            songs: live.songs.map((x) => ({
+              neteaseId: x.id,
+              name: x.name,
+              artists: x.artists ? String(x.artists).split(/[/、,]+/).map((a) => a.trim()).filter(Boolean) : [],
+              count: x.count,
+              albumPic: x.albumPic,
+            })),
+          },
+        ];
+      }
+    } catch { /* 挂载块是同步纯路径，live 合并失败不拦主流程 */ }
+    // 「最近常听」按角色分源——有挂载角色时用其一起听会话聚合（含 live），
+    // 不用她自己点播的混合池（混合池全时排行被导入的旧计数定死，看起来不再更新）
+    const playRecords = charId ? charPlayRecordsFromSessions(togetherSessions, charId) : s.playRecords;
+    const input = { importedSongs: s.importedSongs, playRecords, togetherSessions };
     return {
       content: buildMusicMountContent(input),
       key: buildMusicMountKey([], input),

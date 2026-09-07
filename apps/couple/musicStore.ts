@@ -521,6 +521,39 @@ export const topCharTogetherSong = (
   return { neteaseId, name: item.name, artists: item.artists, albumPic: cover || undefined, count: item.count };
 };
 
+/**
+ * 挂载块/角色视角用的「角色自己听歌排行」（2026-09-08 反馈3）：把该角色的一起听会话
+ * 聚合成分局行（SongPlayRecord 形状），会话内次数=playCount、最后会话结束时间=lastPlayedAt。
+ * 不用混合池 playRecords——那里她自己点播的「自己听」占大头，且按全时次数排序，
+ * 导入备份后旧计数会把 top3 定死，看起来像数据不再更新。
+ * sessions 由调用方传（可含进行中的 live 会话，实时可见）。
+ */
+export const charPlayRecordsFromSessions = (sessions: TogetherSession[], charId: string): SongPlayRecord[] => {
+  const byId = new Map<number, SongPlayRecord>();
+  for (const t of sessions) {
+    if (t.charId !== charId) continue;
+    for (const song of t.songs) {
+      const cur = byId.get(song.neteaseId);
+      if (cur) {
+        cur.playCount += song.count;
+        if (t.endedAt > cur.lastPlayedAt) cur.lastPlayedAt = t.endedAt;
+        if (!cur.albumPic && song.albumPic) cur.albumPic = toHttps(song.albumPic);
+      } else {
+        byId.set(song.neteaseId, {
+          neteaseId: song.neteaseId,
+          name: song.name,
+          artists: song.artists,
+          playCount: song.count,
+          lastPlayedAt: t.endedAt,
+          context: '一起听',
+          albumPic: toHttps(song.albumPic || ''),
+        });
+      }
+    }
+  }
+  return Array.from(byId.values());
+};
+
 /** 内置 CSS 预设切换（2026-08-30）：'night' = 沉浸夜色；undefined = 默认 */
 export const setCssPreset = (preset: MusicCssPresetId | undefined) =>
   store.set((s) => ({ ...s, cssPreset: preset, updatedAt: isoNow() }));
