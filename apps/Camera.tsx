@@ -5,6 +5,7 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { mergedMountedWorldbooks } from '../utils/noxhomeMount';
 import ImageLightbox from '../components/chat/ImageLightbox';
+import TokenImg from '../components/os/TokenImg';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 import { downloadChatImage } from '../utils/imageDownload';
 import { useBlobRefUrl, putImageBlob, deleteBlobRef, getBlobForRef, blobToDataUrl } from '../utils/blobRef';
@@ -984,7 +985,7 @@ ${a2OutputMode === 'bubbles'
   return (
     <div className="h-full bg-black flex flex-col select-none">
       {/* ═══ 顶栏 ═══ */}
-      <div className="shrink-0 flex items-center justify-between px-3 py-2" style={{ paddingTop: 'calc(var(--chrome-top) + 0.25rem)' }}>
+      <div className="shrink-0 flex items-center justify-between px-3 py-2" style={{ paddingTop: 'calc(max(var(--chrome-top, 0px), env(safe-area-inset-top, 0px)) + 0.25rem)' }}>
         {/* 左侧：返回 + 留档 */}
         <div className="flex items-center gap-1">
           <button onClick={closeApp} className="w-9 h-9 rounded-full flex items-center justify-center text-white/80 active:scale-90 transition-transform">
@@ -1081,7 +1082,8 @@ ${a2OutputMode === 'bubbles'
       </div>
 
       {/* ═══ 底部：参考图 + 快门 + 重roll ═══ */}
-      <div className="shrink-0 flex items-center justify-between px-8 pb-6" style={{ paddingBottom: 'max(1.5rem, var(--safe-bottom))' }}>
+      {/* 反馈2 #6：安全区地板——--safe-bottom 在手机上可能为 0，env() 兜底（有值取大，不会双算） */}
+      <div className="shrink-0 flex items-center justify-between px-8" style={{ paddingBottom: 'max(1.5rem, var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px))' }}>
         {/* 左下：参考图（正方形） */}
         <button
           onClick={openRefPicker}
@@ -1120,7 +1122,8 @@ ${a2OutputMode === 'bubbles'
                   onClick={() => setPhotographerId('user')}
                   className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${photographerId === 'user' ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
                 >
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-sm font-bold">我</div>
+                  {/* 反馈2 #5：真头像（自己 = userProfile.avatar；默认是生成的字母头像，设了照片就是照片） */}
+                  <TokenImg value={userProfile?.avatar} alt={userName} className="w-12 h-12 rounded-full object-cover bg-slate-100" />
                   <span className="text-[10px] text-slate-600 truncate max-w-[60px]">{userName}</span>
                 </button>
                 {characters.map(c => (
@@ -1129,7 +1132,7 @@ ${a2OutputMode === 'bubbles'
                     onClick={() => setPhotographerId(c.id)}
                     className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${photographerId === c.id ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
                   >
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-slate-300 to-slate-400 flex items-center justify-center text-white text-sm font-bold">{c.name.charAt(0)}</div>
+                    <TokenImg value={c.avatar} alt={c.name} className="w-12 h-12 rounded-full object-cover bg-slate-100" />
                     <span className="text-[10px] text-slate-600 truncate max-w-[60px]">{c.name}</span>
                   </button>
                 ))}
@@ -1150,7 +1153,7 @@ ${a2OutputMode === 'bubbles'
                   onClick={() => { setCharId('user'); setCustomRefBlobRef(null); }}
                   className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${charId === 'user' && !customRefBlobRef ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
                 >
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white text-sm font-bold">我</div>
+                  <TokenImg value={userProfile?.avatar} alt={userName} className="w-12 h-12 rounded-full object-cover bg-slate-100" />
                   <span className="text-[10px] text-slate-600 truncate max-w-[60px]">{userName}</span>
                 </button>
                 {characters.map(c => (
@@ -1159,7 +1162,10 @@ ${a2OutputMode === 'bubbles'
                     onClick={() => selectCharRef(c.id)}
                     className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${c.id === charId && !customRefBlobRef ? 'bg-sky-100 ring-2 ring-sky-400' : 'hover:bg-slate-100'}`}
                   >
-                    {c.referenceImageAssetId ? (
+                    {/* 反馈2 #5：先显真头像（avatar 字段），没有头像才回退参考图/首字圆 */}
+                    {c.avatar ? (
+                      <TokenImg value={c.avatar} alt={c.name} className="w-12 h-12 rounded-full object-cover bg-slate-100" />
+                    ) : c.referenceImageAssetId ? (
                       <CharRefAvatar charId={c.id} />
                     ) : (
                       <div className="w-12 h-12 rounded-full bg-gradient-to-br from-slate-300 to-slate-400 flex items-center justify-center text-white text-sm font-bold">{c.name.charAt(0)}</div>
