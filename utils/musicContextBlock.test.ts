@@ -99,23 +99,27 @@ describe('buildUserListeningContext（双块组装）', () => {
     expect(paused!.lyricWindow).toHaveLength(5); // 窗口照切
   });
 
-  it('播放/暂停事件 → 带时间的时间线文案（反馈1 A4）', () => {
+  it('播放/暂停事件 → 带时间的时间线文案（反馈1 A4；反馈2 #3 换歌显式「切到」、同歌恢复「继续播放」）', () => {
     const t0 = new Date('2026-09-05T08:30:00').getTime();
     const on = buildUserListeningContext(
       mkSnap({
         playEvents: [
           { action: 'play', song: { name: '富士山下', artists: '陈奕迅' }, at: t0 },
           { action: 'pause', song: { name: '富士山下', artists: '陈奕迅' }, at: t0 + 120000 },
+          { action: 'play', song: { name: '富士山下', artists: '陈奕迅' }, at: t0 + 180000 },
           { action: 'play', song: { name: '十年', artists: '陈奕迅' }, at: t0 + 300000 },
+          { action: 'play', song: { name: '十年', artists: '陈奕迅' }, at: t0 + 330000 },
         ],
         sessionSongs: [{ name: '富士山下', artists: '陈奕迅' }, { name: '十年', artists: '陈奕迅' }],
       }),
       inject,
     );
     expect(on!.playTimeline).toEqual([
-      '08:30 开始播放《富士山下》',
+      '08:30 切到《富士山下》',
       '08:32 暂停《富士山下》',
-      '08:35 开始播放《十年》',
+      '08:33 继续播放《富士山下》',
+      '08:35 切到《十年》',
+      '08:35 继续播放《十年》',
     ]);
     expect(on!.sessionSongs).toEqual([{ name: '富士山下', artists: '陈奕迅' }, { name: '十年', artists: '陈奕迅' }]);
     expect(on!.playing).toBe(true);

@@ -10,7 +10,8 @@ import CoupleBeauty, { loadCoupleBeauty } from './couple/CoupleBeauty';
 import CoupleDiary from './couple/CoupleDiary';
 import CoupleCalendar from './couple/CoupleCalendar';
 import { useActivityStore } from './couple/activityStore';
-import { useMusicStore, topPlayedSong } from './couple/musicStore';
+import { useMusicStore, topCharTogetherSong } from './couple/musicStore';
+import { getMountConfig } from '../utils/noxhomeMount';
 import { useBlobRefUrl } from '../utils/blobRef';
 import { toHttps } from '../utils/musicContextBlock';
 import { House, Heart, Pulse, GearSix, MoonStars, ArrowLeft } from '@phosphor-icons/react';
@@ -111,9 +112,10 @@ const NoxHomeApp: React.FC = () => {
   const noxAvatarUrl = useBlobRefUrl(beauty.avatarNox);
   const homeDiscUrl = useBlobRefUrl(beauty.homeDisc);
   const homeBgUrl = useBlobRefUrl(beauty.homeBg);
-  // 歌曲页占位 → 真图（2026-08-30 她要求）：挂载角色收听次数最多的那首歌封面
+  // 专辑照片真图（2026-08-30 她要求）：挂载角色收听次数最多的那首歌封面。
+  // 反馈2 #9：数据源只取该角色的一起听会话——以前读全局 playRecords，自己点播的「自己听」记录把角色数据顶掉了
   const musicStore = useMusicStore();
-  const topSong = useMemo(() => topPlayedSong(musicStore), [musicStore]);
+  const topSong = useMemo(() => topCharTogetherSong(musicStore, getMountConfig().charId), [musicStore]);
   // 反馈1 A2：老数据 http 封面渲染前升级 https
   const topSongCover = useBlobRefUrl(toHttps(topSong?.albumPic));
   const now = new Date();
@@ -209,7 +211,7 @@ const NoxHomeApp: React.FC = () => {
           {topSong && (
             <div className="absolute left-0 right-0 bottom-0 px-1.5 pb-1 pointer-events-none">
               <div className="truncate text-center" style={{ fontSize: cqw(9, 7), color: '#fff', opacity: 0.75, textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
-                {topSong.record.name} · {topSong.record.artists.join(' / ')}
+                {topSong.name} · {topSong.artists.join(' / ')}
               </div>
             </div>
           )}

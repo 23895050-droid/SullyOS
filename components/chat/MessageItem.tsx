@@ -2143,7 +2143,9 @@ const MessageItem = React.memo(({
                 ? <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium" style={{ background: 'rgba(195,178,255,0.3)', color: '#7a5db0', border: '1px solid rgba(195,178,255,0.5)' }}>💗 {charName || 'Ta'} 已接受</span>
                 : status === 'declined'
                     ? <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium" style={{ background: 'rgba(148,163,184,0.15)', color: '#7a7a85', border: '1px solid rgba(148,163,184,0.3)' }}>🍃 婉拒了这次邀请</span>
-                    : <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium animate-pulse" style={{ background: 'rgba(255,181,207,0.25)', color: '#b06a8d', border: '1px solid rgba(255,181,207,0.4)' }}>⏳ 等 Ta 回应</span>;
+                    : status === 'cancelled'
+                        ? <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium" style={{ background: 'rgba(148,163,184,0.15)', color: '#7a7a85', border: '1px solid rgba(148,163,184,0.3)' }}>↩ 已取消，重新发起了邀请</span>
+                        : <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium animate-pulse" style={{ background: 'rgba(255,181,207,0.25)', color: '#b06a8d', border: '1px solid rgba(255,181,207,0.4)' }}>⏳ 等 Ta 回应</span>;
             return (
                 <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
                     {selectionMode && (
@@ -2561,6 +2563,8 @@ const MessageItem = React.memo(({
             </div>
         ) : status === 'accepted' ? (
             <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a5db0' }}>💗 已接受，正在一起听</div>
+        ) : status === 'cancelled' ? (
+            <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a7a85' }}>↩ 已取消，重新发起了邀请</div>
         ) : (
             <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a7a85' }}>已婉拒这次邀请</div>
         );

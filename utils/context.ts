@@ -681,7 +681,7 @@ export const ContextBuilder = {
         const lines: string[] = [];
         if ((userListening.playTimeline?.length ?? 0) > 0) {
             lines.push(`### 【播放器的动静】`);
-            lines.push(`最近几次播放/暂停记录（带时间）：`);
+            lines.push(`最近几次切歌/暂停/播完记录（带时间）：`);
             for (const t of userListening.playTimeline!) lines.push(`  - ${t}`);
         }
         if ((userListening.sessionSongs?.length ?? 0) > 0) {

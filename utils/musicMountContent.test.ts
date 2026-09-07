@@ -119,6 +119,15 @@ describe('他发起/结束一起听的关键词判定（2026-08-27）', () => {
     }
   });
 
+  it('反馈2 #1：裸「一起听」命中；非听歌场合不误伤', () => {
+    for (const t of ['好啊，一起听吧', '那我们一起听', '一起听，你想听什么？', '一起听呀']) {
+      expect(detectMusicInviteIntent(t)).toBe(true);
+    }
+    for (const t of ['改天一起听讲座', '一起听相声去', '一起听个故事', '晚上一起听广播']) {
+      expect(detectMusicInviteIntent(t)).toBe(false);
+    }
+  });
+
   it('结束话术命中', () => {
     for (const t of ['今天就到这吧', '先不听了', '下次再听这首', '结束这次一起听']) {
       expect(detectMusicExitIntent(t)).toBe(true);

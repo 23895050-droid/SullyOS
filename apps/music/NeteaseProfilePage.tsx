@@ -306,16 +306,6 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
     }
   }, []);
 
-  // 登出
-  const doLogout = useCallback(async () => {
-    const curCfg = cfgRef.current;
-    try { await musicApi.logout(curCfg); } catch {}
-    setCfg({ ...curCfg, cookie: '' });
-    toastRef.current('已退出', 'success');
-    trackEvent('退出网易云登录');
-    await refreshProfile();
-  }, [setCfg, refreshProfile]);
-
   // 未登录 → 默认展示「一起写的歌」本地专辑 + 网易云登录入口；
   // 没本地专辑 → 直接进登录面板（保持原来体验）。
   // ⚠️ 所有 hooks 必须在这个 early-return **之前** 声明完。
@@ -533,13 +523,6 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
             </button>
           </div>
 
-          <button
-            onClick={doLogout}
-            className="w-full mt-2 py-1.5 rounded-xl text-[10px] transition-all"
-            style={{ color: C.faint }}
-          >
-            退出登录
-          </button>
         </div>
 
         {/* 拜访 · 其他人的音乐角落 */}

@@ -16,7 +16,7 @@ import { shareOrDownloadBlob } from '../utils/shareExport';
 import { getProxyWorkerUrl } from '../utils/proxyWorker';
 import PlaylistHomePage from './music/PlaylistHomePage';
 import MusicChatBox from './music/MusicChatBox';
-import { useMusicStore, musicStoreApi, importMusicJson, exportMusicJson, setCssGlobal, setCssPage, clearCssPage, setCssPerChar, clearCssPerChar, setLyricInject, setMusicApi, setChatBg, setChatShowAvatar, setCssPreset, setMusicPalette, resetMusicPalette, addPendingInvite, pendingInviteOf } from './couple/musicStore';
+import { useMusicStore, musicStoreApi, importMusicJson, exportMusicJson, setCssGlobal, setCssPage, clearCssPage, setCssPerChar, clearCssPerChar, setLyricInject, setMusicApi, setChatBg, setChatShowAvatar, setCssPreset, setMusicPalette, resetMusicPalette, addPendingInvite, pendingInviteOf, cancelPendingInviteForResend } from './couple/musicStore';
 import DataBackupPanel from './couple/DataBackupPanel';
 import { buildPaletteCss, MUSIC_PALETTE_KEYS, MUSIC_PALETTE_DEFAULTS, SURFACE_DEFAULT_PCT, GLASS_DEFAULT_PCT } from '../utils/musicPalette';
 import { putImageBlob } from '../utils/blobRef';
@@ -151,13 +151,7 @@ const MusicApp: React.FC = () => {
   const [chatCharId, setChatCharId] = useState<string | null>(null);
 
   /** 方向 A：她发起邀请 → 系统邀请卡（等 AI accept/decline）+ pendingInvites 记录 */
-  const sendInvite = async (c: { id: string; name: string }) => {
-    setShowInvitePicker(false);
-    // 同一个角色还挂着未回应的邀请 → 不再堆新卡（一卡多等会重复进模型上下文，还容易把它看晕）
-    if (pendingInviteOf(c.id)) {
-      addToast(`${c.name} 还没回应上一次邀请，先等等 Ta`, 'info');
-      return;
-    }
+  const doSendInvite = async (c: { id: string; name: string }) => {
     const song = current
       ? { songId: current.id, name: current.name, artists: current.artists, album: current.album, albumPic: current.albumPic, duration: current.duration, fee: current.fee }
       : null;
@@ -177,6 +171,31 @@ const MusicApp: React.FC = () => {
     addPendingInvite({ charId: c.id, direction: 'user', inviteSongName: song?.name, cardMessageId: String(cardId) });
     addToast(`已邀请 ${c.name} 一起听`, 'info');
     trackEvent('邀请角色一起听');
+  };
+
+  // 反馈2 #3：旧邀请状态删不掉会卡死双方（她的再发起被挡、他的关键词再邀也被挡）。
+  // 还挂着未回应的邀请 → 弹确认（不再静默 toast 拒绝）；确认 = 取消旧状态 + 旧卡标「已取消」+ 重新发起。
+  const [inviteResend, setInviteResend] = useState<{ id: string; name: string } | null>(null);
+  const sendInvite = (c: { id: string; name: string }) => {
+    setShowInvitePicker(false);
+    if (pendingInviteOf(c.id)) {
+      setInviteResend(c);
+      return;
+    }
+    void doSendInvite(c);
+  };
+  const confirmResendInvite = async () => {
+    const c = inviteResend;
+    setInviteResend(null);
+    if (!c) return;
+    const old = cancelPendingInviteForResend(c.id);
+    if (old?.cardMessageId) {
+      await DB.updateMessageMetadata(Number(old.cardMessageId), (prev) => ({
+        ...(prev || {}),
+        invite: { ...((prev || {}).invite || {}), status: 'cancelled' },
+      })).catch(() => {});
+    }
+    await doSendInvite(c);
   };
 
   /** 退出确认：charId 有值 = 只结束和这一个；null = 全部结束（统一出口） */
@@ -767,6 +786,14 @@ const MusicApp: React.FC = () => {
   };
 
   // ════════════════ 设置页 ════════════════
+  // 退出网易云登录（反馈2 #7 挪到设置页；行为与「我的」页原按钮一致：清 cookie 即回未登录态）
+  const doLogout = async () => {
+    try { await musicApi.logout(cfg); } catch {}
+    setCfg({ ...cfg, cookie: '' });
+    addToast('已退出', 'success');
+    trackEvent('退出网易云登录');
+  };
+
   const renderSettings = () => {
     const setDraft = (updates: Partial<typeof cfg>) => setCfg({ ...cfg, ...updates });
     const commit = () => {
@@ -800,6 +827,23 @@ const MusicApp: React.FC = () => {
             <div className="text-[9px] mt-1.5 italic" style={{ color: C.faint }}>
               也可以在「我的」页面里扫码 / 手机号登录，自动填入 cookie
             </div>
+          </SettingsFold>
+          {/* 账号（反馈2 #7：退出登录从「我的」页挪到设置页） */}
+          <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.danger} delay={0.3} /> 账号</span>}>
+            {cfg.cookie ? (
+              <>
+                <div className="text-[9px] mb-2" style={{ color: C.faint }}>已登录网易云——Cookie 可在「会员 Cookie」里查看 / 修改</div>
+                <button
+                  onClick={() => void doLogout()}
+                  className="w-full py-2 rounded-xl text-[10px] transition-all shizuku-glass"
+                  style={{ color: C.danger, border: `1px solid rgba(var(--mz-danger-rgb, 224,86,122), 0.25)` }}
+                >
+                  退出登录
+                </button>
+              </>
+            ) : (
+              <div className="text-[9px] italic" style={{ color: C.faint }}>未登录——去「我的」页面扫码 / 手机号登录</div>
+            )}
           </SettingsFold>
           <SettingsFold title={<span className="flex items-center gap-1.5"><Sparkle size={6} color={C.lavender} delay={1} /> 音质</span>}>
             <div className="grid grid-cols-5 gap-1.5">
@@ -1614,6 +1658,18 @@ const MusicApp: React.FC = () => {
         variant="info"
         onConfirm={() => doEndTogether(confirmEndChar)}
         onCancel={() => setConfirmEndChar(null)}
+      />
+
+      {/* 重新发起前取消旧邀请（反馈2 #3：旧状态删不掉 → 确认后直接取消再发） */}
+      <ConfirmDialog
+        isOpen={inviteResend !== null}
+        title="重新发起一起听"
+        message={inviteResend ? `${inviteResend.name}还没回应一起听，是否要取消上次的邀请重新发起？` : ''}
+        confirmText="重新发起"
+        cancelText="先不"
+        variant="info"
+        onConfirm={() => void confirmResendInvite()}
+        onCancel={() => setInviteResend(null)}
       />
       </div>
     </div>

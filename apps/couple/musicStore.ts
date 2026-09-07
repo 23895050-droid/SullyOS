@@ -489,6 +489,38 @@ export const topPlayedSong = (s: CoupleMusicV1): { record: SongPlayRecord; album
   return { record, albumPic: toHttps(record.albumPic ?? song?.albumPic ?? ''), duration: song?.duration, fee: song?.fee, album: song?.album };
 };
 
+/**
+ * 角色自己听歌数据（反馈2 #9）：只聚合该角色的一起听会话，按会话内次数取 top1。
+ * playRecords 是混合池（她自己点播的「自己听」也写进去），角色主页/情侣左卡要用角色数据就得走这里。
+ * 没一起听过 → undefined，界面保持占位。
+ */
+export const topCharTogetherSong = (
+  s: CoupleMusicV1,
+  charId: string | null | undefined,
+): { neteaseId: number; name: string; artists: string[]; albumPic?: string; count: number } | undefined => {
+  if (!charId) return undefined;
+  const byId = new Map<number, { name: string; artists: string[]; albumPic?: string; count: number }>();
+  for (const t of s.togetherSessions) {
+    if (t.charId !== charId) continue;
+    for (const song of t.songs) {
+      const cur = byId.get(song.neteaseId);
+      if (cur) {
+        cur.count += song.count;
+        if (!cur.albumPic && song.albumPic) cur.albumPic = song.albumPic;
+      } else {
+        byId.set(song.neteaseId, { name: song.name, artists: song.artists, albumPic: song.albumPic, count: song.count });
+      }
+    }
+  }
+  const best = [...byId.entries()].sort((a, b) => b[1].count - a[1].count)[0];
+  if (!best) return undefined;
+  const [neteaseId, item] = best;
+  // 封面兜底：会话里没带封面 → 查播放记录/导入歌库
+  const cover = item.albumPic
+    || toHttps(playRecordById(s.playRecords, neteaseId)?.albumPic ?? importedSongById(s.importedSongs, neteaseId)?.albumPic ?? '');
+  return { neteaseId, name: item.name, artists: item.artists, albumPic: cover || undefined, count: item.count };
+};
+
 /** 内置 CSS 预设切换（2026-08-30）：'night' = 沉浸夜色；undefined = 默认 */
 export const setCssPreset = (preset: MusicCssPresetId | undefined) =>
   store.set((s) => ({ ...s, cssPreset: preset, updatedAt: isoNow() }));
@@ -574,6 +606,19 @@ export const dropPendingInviteByCard = (charId: string, cardMessageId?: string) 
     }),
     updatedAt: isoNow(),
   }));
+
+/**
+ * 重新发起前取消旧邀请（反馈2 #3：旧状态删不掉会卡死双方——她点「重新发起」时先清掉旧记录）。
+ * 与 removePendingInvite 的区别：不带婉拒冷却；返回旧记录让调用方把旧卡标成「已取消」。
+ * 旧卡标记是尽力而为——老数据里 cardMessageId 可能没存（更早版本），清了记录就足够解卡。
+ */
+export const cancelPendingInviteForResend = (charId: string): PendingInvite | undefined => {
+  const s = store.get();
+  const old = s.pendingInvites.find((p) => p.charId === charId);
+  if (!old) return undefined;
+  store.set((prev) => ({ ...prev, pendingInvites: prev.pendingInvites.filter((p) => p.charId !== charId), updatedAt: isoNow() }));
+  return old;
+};
 
 /** 关键词发起邀请的冷却时长：婉拒后这段时间内他不再自动插邀请卡 */
 export const KEYWORD_INVITE_COOLDOWN_MS = 10 * 60 * 1000;

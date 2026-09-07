@@ -146,9 +146,15 @@ const MUSIC_EXIT_PHRASES = [
 /** 「要不要听/想听/放」+《歌名》形态：他点名某首歌邀请（没进短语表也能认出来）。 */
 const MUSIC_INVITE_TITLE_RE = /(?:要不要听|想听|一起听|陪我听|放)[《「]([^》」]{1,30})[》」]/;
 
+// 反馈2 #1：裸「一起听」（不带歌字）也要认——她问「一起听吗」，角色回「好啊，一起听吧」，
+// 以前短语表全不命中、一张卡都没有。误伤护栏：明显不是听歌的场合（讲座/课/故事…）不认。
+const MUSIC_INVITE_DENY_WORDS = ['讲座', '上课', '讲课', '报告', '会议', '故事', '广播', '电台', '相声', '新闻', '播客', '读书', '听书'];
+
 /** 他是否在这条回复里发起一起听（普通聊天和聊歌框共用；不含歌名也成立）。 */
 export const detectMusicInviteIntent = (text: string): boolean =>
-  MUSIC_INVITE_PHRASES.some((p) => text.includes(p)) || MUSIC_INVITE_TITLE_RE.test(text);
+  MUSIC_INVITE_PHRASES.some((p) => text.includes(p))
+  || MUSIC_INVITE_TITLE_RE.test(text)
+  || (text.includes('一起听') && !MUSIC_INVITE_DENY_WORDS.some((w) => text.includes(w)));
 
 /** 他是否在这条回复里提出结束一起听。 */
 export const detectMusicExitIntent = (text: string): boolean =>

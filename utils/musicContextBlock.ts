@@ -117,7 +117,9 @@ export const fmtPlayEventClock = (t: number): string => {
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-const PLAY_EVENT_WORD = { play: '开始播放', pause: '暂停', ended: '播完' } as const;
+// play 不在这里定词：反馈2 #3 要求换歌显式写「切到《歌名》」、同歌恢复写「继续播放《歌名》」，
+// 见 buildUserListeningContext 里按上一条事件对比成文。
+const PLAY_EVENT_WORD = { pause: '暂停', ended: '播完' } as const;
 
 /**
  * 从播放快照组装 userListening 上下文（两个组装点共用，行为一致）：
@@ -134,11 +136,18 @@ export function buildUserListeningContext(
   const radius = clampRadius(inject.windowRadius);
 
   // 最近 5 条播放/暂停/播完（带时间），共用三件
-  const playTimeline = (snap.playEvents ?? []).map((e) =>
-    e.song
+  const playTimeline = (snap.playEvents ?? []).map((e, i, all) => {
+    if (e.action === 'play') {
+      if (!e.song) return `${fmtPlayEventClock(e.at)} 播放`;
+      // 上一条带歌的事件：同歌 = 暂停后继续播；换歌/第一条 = 切到
+      const prevSong = all.slice(0, i).reverse().find((p) => p.song)?.song?.name;
+      const word = prevSong === e.song.name ? '继续播放' : '切到';
+      return `${fmtPlayEventClock(e.at)} ${word}《${e.song.name}》`;
+    }
+    return e.song
       ? `${fmtPlayEventClock(e.at)} ${PLAY_EVENT_WORD[e.action]}《${e.song.name}》`
-      : `${fmtPlayEventClock(e.at)} ${PLAY_EVENT_WORD[e.action]}`,
-  );
+      : `${fmtPlayEventClock(e.at)} ${PLAY_EVENT_WORD[e.action]}`;
+  });
   const common = {
     songName: snap.current.name,
     artists: snap.current.artists,

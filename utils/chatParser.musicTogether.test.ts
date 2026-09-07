@@ -233,6 +233,15 @@ describe('关键词判定（2026-08-27：一起听交互不常驻指令集）', 
     const msgs = await DB.getMessagesByCharId(charId, true);
     expect(msgs.find((m) => m.type === 'music_invite')).toBeTruthy();
   });
+
+  it('反馈2 #1：裸「一起听」回复 → 出邀请卡', async () => {
+    const charId = `c-together-kw-bare-${Date.now()}`;
+    const hooks = mkHooks();
+    const out = await ChatParser.parseAndExecuteActions('好啊，一起听吧', charId, '阿一', noop, hooks);
+    expect(out).toBe('好啊，一起听吧');
+    const msgs = await DB.getMessagesByCharId(charId, true);
+    expect(msgs.find((m) => m.type === 'music_invite')).toBeTruthy();
+  });
 });
 
 describe('join 系列（已废弃：一起听全显式）', () => {
@@ -242,9 +251,9 @@ describe('join 系列（已废弃：一起听全显式）', () => {
       getListeningSnapshot: () => ({ ...SONG, listeningTogetherWith: [] }),
     });
     const out = await ChatParser.parseAndExecuteActions(
-      '一起听[[MUSIC_ACTION:join]]', charId, '阿一', noop, hooks,
+      '好呀[[MUSIC_ACTION:join]]', charId, '阿一', noop, hooks,
     );
-    expect(out).toBe('一起听');
+    expect(out).toBe('好呀');
     expect(hooks.joinListeningTogether).not.toHaveBeenCalled();
     expect(await DB.getMessagesByCharId(charId, true)).toHaveLength(0);
   });

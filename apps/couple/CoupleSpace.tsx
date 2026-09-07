@@ -19,7 +19,8 @@ import { AppID } from '../../types';
 import { useTodoStore, fixedTodos, shortTodosOn, toggleTodo as toggleTodoStore, addTodo as addTodoStore } from './todoStore';
 import { useAnnivStore, daysUntilAnniv } from './annivStore';
 import { getLocalDateKey } from '../../utils/localDate';
-import { useMusicStore, topPlayedSong, setMySongPick, importedSongById } from './musicStore';
+import { useMusicStore, topCharTogetherSong, setMySongPick, importedSongById } from './musicStore';
+import { getMountConfig } from '../../utils/noxhomeMount';
 import { useCouplePaletteStore } from './couplePaletteStore';
 import { buildCouplePaletteCss } from './couplePalette';
 
@@ -343,7 +344,8 @@ const CoupleFirstScreen: React.FC<{ onOpen: (route: string) => void }> = ({ onOp
   // 歌曲双卡真数据（2026-08-30）：左 = 角色听最多的歌；右 = 她亲手选的歌
   const musicStore = useMusicStore();
   const { current, playing: musicPlaying, playSong } = useMusic();
-  const topSong = topPlayedSong(musicStore);
+  // 反馈2 #9：左卡只取挂载角色的一起听会话（角色自己的听歌数据），不再读混合池
+  const topSong = topCharTogetherSong(musicStore, getMountConfig().charId);
   // 反馈1 A2：老数据里的 http 封面渲染前升级 https（blobRef 令牌由 useBlobRefUrl 解析，toHttps 只碰 http 前缀）
   const topSongCover = useBlobRefUrl(toHttps(topSong?.albumPic));
   const myPick = musicStore.mySongPick;
@@ -424,7 +426,7 @@ const CoupleFirstScreen: React.FC<{ onOpen: (route: string) => void }> = ({ onOp
       fee: song?.fee ?? 0,
     });
   };
-  const leftPlaying = !!topSong && current?.id === topSong.record.neteaseId && musicPlaying;
+  const leftPlaying = !!topSong && current?.id === topSong.neteaseId && musicPlaying;
   const rightPlaying = myPick?.neteaseId !== undefined && current?.id === myPick.neteaseId && musicPlaying;
 
   return (
@@ -617,18 +619,18 @@ const CoupleFirstScreen: React.FC<{ onOpen: (route: string) => void }> = ({ onOp
         <div className="absolute overflow-hidden" style={{ left: wPct(150), top: hPct(2165), width: wPct(245), aspectRatio: '1 / 1', zIndex: 11, borderRadius: cqw(14, 6), border: '1px solid rgba(60,30,50,0.05)' }}>
           <img src={topSongCover || '/Couple/留白图.jpg'} alt="" draggable={false} className="w-full h-full object-cover pointer-events-none select-none" />
         </div>
-        <Text x={150} y={2420} w={150} h={26} size={15} min={9} color="#3a2a33" weight={600} z={11} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{topSong ? topSong.record.name : '他听最多的歌'}</Text>
-        <Text x={150} y={2452} w={150} h={22} size={12} min={8} color="#b0909c" z={11} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{topSong ? topSong.record.artists.join(' / ') : '还没有听歌记录'}</Text>
+        <Text x={150} y={2420} w={150} h={26} size={15} min={9} color="#3a2a33" weight={600} z={11} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{topSong ? topSong.name : '他听最多的歌'}</Text>
+        <Text x={150} y={2452} w={150} h={22} size={12} min={8} color="#b0909c" z={11} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{topSong ? topSong.artists.join(' / ') : '还没有听歌记录'}</Text>
         <button
           type="button"
           aria-label={leftPlaying ? '暂停' : '播放'}
-          onClick={(e) => { e.stopPropagation(); if (topSong) playPicked(topSong.record.neteaseId, topSong.record.name, topSong.record.artists, topSong.albumPic); }}
+          onClick={(e) => { e.stopPropagation(); if (topSong) playPicked(topSong.neteaseId, topSong.name, topSong.artists, topSong.albumPic); }}
           className="absolute rounded-full flex items-center justify-center border-0 cursor-pointer transition-transform active:scale-90"
           style={{ left: wPct(335), top: hPct(2392), width: cqw(38, 24), aspectRatio: '1 / 1', zIndex: 14, background: '#2b2b2b', boxShadow: '0 3px 10px rgba(0,0,0,0.25)' }}
         >
           <PlayBtn playing={!!leftPlaying} />
         </button>
-        <Hotspot x={140} y={2155} w={265} h={340} z={12} onTap={() => (topSong ? playPicked(topSong.record.neteaseId, topSong.record.name, topSong.record.artists, topSong.albumPic) : onOpen('c5'))} />
+        <Hotspot x={140} y={2155} w={265} h={340} z={12} onTap={() => (topSong ? playPicked(topSong.neteaseId, topSong.name, topSong.artists, topSong.albumPic) : onOpen('c5'))} />
 
         {/* 右卡（她的选择） */}
         <div className="absolute" style={{ left: wPct(420), top: hPct(2155), width: wPct(265), height: hPct(340), zIndex: 10, background: 'var(--cp-card, #fff)', borderRadius: cqw(24, 10), boxShadow: CARD_SHADOW }} />
