@@ -493,7 +493,39 @@ const MusicApp: React.FC = () => {
   };
 
   const renderPlayer = () => {
-    if (!current) return null;
+    if (!current) {
+      // 兜底（2026-09-08）：接受一起听邀请跳进播放页时 current 可能还没就位（搜索/拉播放地址中）。
+      // 之前 return null → 全屏空白连返回键都没有，看起来像卡死。
+      return (
+        <div className="mz-player flex flex-col h-full relative"
+          style={{ background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDeep} 50%, ${C.bgTint} 100%)` }}>
+          <MizuHeader title="Now Playing" onBack={() => setView('search')} />
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8">
+            {loadingSong ? (
+              <>
+                <div className="w-9 h-9 rounded-full animate-spin"
+                  style={{ border: `2px solid ${C.glow}`, borderTopColor: 'transparent' }} />
+                <span className="text-[12px] tracking-wider" style={{ color: C.muted, fontFamily: `'Noto Serif','Georgia',serif` }}>
+                  正在准备播放…
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-[12px] tracking-wider" style={{ color: C.faint, fontFamily: `'Noto Serif','Georgia',serif` }}>
+                  还没有正在播放的歌
+                </span>
+                <button
+                  onClick={() => { setView('search'); trackEvent('空播放页去找歌'); }}
+                  className="px-5 py-2 rounded-full text-[11px] font-semibold active:scale-95 transition-transform"
+                  style={{ background: C.primary, color: '#fff', boxShadow: '0 2px 10px rgba(0,0,0,0.15)' }}>
+                  去找首歌听
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="mz-player flex flex-col h-full relative"
         style={{ background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDeep} 50%, ${C.bgTint} 100%)` }}>

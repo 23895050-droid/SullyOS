@@ -2536,10 +2536,10 @@ const MessageItem = React.memo(({
             }).catch(() => {});
             if (accepted) {
                 // 反馈3 #3：接受 = 起播 + 跳转播放页。他带歌名邀请：搜这首来播（搜不到保持当前）；
-                // 之前只在「正在放歌」时搜，现在只要配置可用就搜。没歌名只跳转。
+                // 只要配置可用就搜——不再要求「正在放歌」：没放歌时接受原来会跳进空白播放页（current=null 无兜底）。
                 const name = inv.inviteSongName;
                 const snap = loadMusicPlaybackSnapshot();
-                if (name && snap?.current && snap.cfg) {
+                if (name && snap?.cfg) {
                     try {
                         const r: any = await musicApi.search(snap.cfg, name);
                         const hit = (r?.result?.songs || [])[0];

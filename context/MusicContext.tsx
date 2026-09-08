@@ -766,8 +766,17 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const onPlay = () => { setPlaying(true); recordPlayEvent('play'); };
     // 自然播完时浏览器会连发 pause+ended：pause 在 a.ended=true 时不算「用户暂停」，跳过免得时间线里多一条假暂停
-    const onPause = () => { setPlaying(false); if (!a.ended) recordPlayEvent('pause'); };
-    const onTime = () => setProgress(a.currentTime);
+    // 暂停时补一次最终进度（timeupdate 已节流，最多 1 秒滞后，这里收尾到精确值）
+    const onPause = () => { setPlaying(false); setProgress(a.currentTime); if (!a.ended) recordPlayEvent('pause'); };
+    // 节流（2026-09-08）：timeupdate 浏览器默认每 ~250ms 一次 → provider 每秒 4 次全量重渲染，
+    // 音乐页整树跟着抖。进度条/歌词高亮 1 秒精度足够（网易云官方同款），风暴降到 1/4。
+    const lastProgressAtRef = { t: 0 };
+    const onTime = () => {
+      const now = Date.now();
+      if (now - lastProgressAtRef.t < 1000) return;
+      lastProgressAtRef.t = now;
+      setProgress(a.currentTime);
+    };
     const onMeta = () => setDuration(a.duration || 0);
     // 播放出错 → 清掉 playing 状态 + 走统一出口结束"一起听"（会话照常落库，防 UI 卡残留）
     const onErr = () => { setPlaying(false); endTogetherRef.current(undefined); toast('播放失败', 'error'); };
@@ -1011,7 +1020,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const seek = useCallback((pct: number) => {
     const a = audioRef.current; if (!a || !duration) return;
-    a.currentTime = Math.max(0, Math.min(duration, duration * pct));
+    const next = Math.max(0, Math.min(duration, duration * pct));
+    a.currentTime = next;
+    setProgress(next); // 节流下拖动进度条即时回显，不等下一次 timeupdate
   }, [duration]);
 
   // Media Session handlers (锁屏播放/暂停/上下首)
