@@ -4,10 +4,10 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { CharacterProfile, DiaryEntry, StickerData, DiaryPage, MemoryFragment, type JournalAppearance } from '../types';
 import { ContextBuilder } from '../utils/context';
-import { processImage } from '../utils/file';
+import { processImage, processImageToBlob } from '../utils/file';
 import Modal from '../components/os/Modal';
 import TokenImg from '../components/os/TokenImg';
-import { isImageValue } from '../utils/blobRef';
+import { isImageValue, putImageBlob } from '../utils/blobRef';
 import { safeResponseJson, extractJson } from '../utils/safeApi';
 import { normalizeMessageContent } from '../utils/messageFormat';
 import { getPrompt } from '../utils/promptRegistry';
@@ -120,6 +120,7 @@ const JournalApp: React.FC = () => {
         palace: DiaryIngestResult | null;
     } | null>(null);
     const [showStickerPanel, setShowStickerPanel] = useState(false);
+    const photoInputRef = useRef<HTMLInputElement>(null); // 上传照片当贴纸
     const [activeTab, setActiveTab] = useState<'user' | 'char'>('user'); // View Tab
     const [hideCharStickers, setHideCharStickers] = useState(false); // Toggle to hide char stickers
     
@@ -224,6 +225,17 @@ const JournalApp: React.FC = () => {
         updatePage({ stickers: [...currentStickers, newSticker] }, side);
         setShowStickerPanel(false);
         trackEvent('往日记页贴一张贴纸', { kind: DEFAULT_STICKERS.includes(url) ? 'default' : 'custom' });
+    };
+
+    // 上传自己的照片当贴纸：压缩后存 blob_assets，渲染走 TokenImg（拖动/旋转/缩放是贴纸现成交互）
+    const handleUploadPhoto = async (f: File) => {
+        try {
+            const blob = await processImageToBlob(f, { maxWidth: 900, quality: 0.85 });
+            const ref = await putImageBlob(blob);
+            addSticker(ref);
+        } catch {
+            addToast('照片保存失败', 'error');
+        }
     };
 
     const handleImportStickers = async () => {
@@ -483,34 +495,13 @@ const JournalApp: React.FC = () => {
                 .replace(/\{\{char\}\}/g, selectedChar.name)
                 .replace(/\{\{user\}\}/g, userProfile.name)
                 .replace(/\{\{lang\}\}/g, exchangeLangs.join('、'));
-            systemPrompt += `### [Exchange Diary Mode Instructions]
-你正在和用户进行【交换日记】互动。
-
-### 关键：最近发生的互动 (Recent Context)
-这是你们最近在聊天软件或见面时的对话记录。请**务必**阅读这些记录，并在日记中提及今天发生的具体事情（例如聊过的话题、去过的地方、用户发过的图片）。
-[RECENT LOGS START]
-${recentContext}
-[RECENT LOGS END]
-
-### 任务
-阅读用户今天的日记 (${currentEntry.date})，以你的角色口吻写一篇**回复日记**——先结合聊天记录回应用户的内容，再分享至少一件用户不知道的、你今天独立经历的小事。
-
-${diaryPrompt}
-
-### 关于贴纸 (Stickers)
-你可以使用默认的 Emoji，也可以使用【Custom Stickers】。
-${customStickerContext}
-如果要使用 Custom Sticker，请将 URL 直接放入返回的 stickers 数组中。
-
-### 输出格式 (必须是纯 JSON)
-- 只输出这个 JSON 对象本身，前后不要有任何多余文字。
-- text 是一个 JSON 字符串：内部的换行必须写成 \\n，引号必须写成 \\"，反斜杠必须写成 \\\\。**绝对不要**在字符串里直接放真实换行或未转义的引号，否则会解析失败。
-- 在上面提示词的 JSON 基础上，额外带两个字段：
-{
-  ...,
-  "paperStyle": "one of: ${styleOptions}",
-  "stickers": ["sticker1", "http://custom-sticker-url..."] (从默认列表或 Custom Stickers 中选0-3个)
-}`;
+            // 交换日记模式指令（任务/贴纸/输出格式）也走注册表，可整段改；{{写作要求}} 处插入上面的写作提示词
+            systemPrompt += getPrompt('交换日记·格式指令')
+                .replace(/\{\{写作要求\}\}/g, diaryPrompt)
+                .replace(/\{\{最近对话\}\}/g, recentContext)
+                .replace(/\{\{日期\}\}/g, currentEntry.date)
+                .replace(/\{\{纸张样式\}\}/g, styleOptions)
+                .replace(/\{\{自定义贴纸\}\}/g, customStickerContext);
 
             const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST',
@@ -1254,6 +1245,10 @@ ${charPart}
                             <button onClick={() => { setShowImportModal(true); trackEvent('打开自定义贴纸导入弹窗'); }} className="flex items-center justify-center bg-white/10 rounded-xl border-2 border-dashed border-white/20 text-white/50 text-xl font-bold hover:bg-white/20 hover:text-white transition-all aspect-square">
                                 +
                             </button>
+                            <button onClick={() => photoInputRef.current?.click()} title="从相册选照片" className="flex items-center justify-center bg-white/10 rounded-xl border-2 border-dashed border-white/20 text-white/50 text-xl hover:bg-white/20 hover:text-white transition-all aspect-square">
+                                📷
+                            </button>
+                            <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void handleUploadPhoto(f); }} />
                             {DEFAULT_STICKERS.map((s, i) => (
                                 <button key={`def-${i}`} onClick={() => addSticker(s)} className="hover:scale-110 transition-transform p-2 bg-white/5 rounded-xl border border-white/5 flex items-center justify-center">
                                     <img src={s} alt="" className="w-8 h-8 object-contain pointer-events-none" />

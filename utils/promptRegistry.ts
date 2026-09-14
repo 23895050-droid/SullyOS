@@ -96,6 +96,31 @@ const PROMPT_ENTRIES: PromptEntry[] = [
   },
   {
     category: '日记',
+    label: '交换日记·格式指令',
+    description: '原版交换日记 App 的模式指令：任务 / 贴纸 / 输出格式（模板里 {{写作要求}} 会插入「喊他写日记」）',
+    defaultValue:
+      '### [Exchange Diary Mode Instructions]\n' +
+      '你正在和用户进行【交换日记】互动。\n\n' +
+      '### 关键：最近发生的互动 (Recent Context)\n' +
+      '这是你们最近在聊天软件或见面时的对话记录。请**务必**阅读这些记录，并在日记中提及今天发生的具体事情（例如聊过的话题、去过的地方、用户发过的图片）。\n' +
+      '[RECENT LOGS START]\n' +
+      '{{最近对话}}\n' +
+      '[RECENT LOGS END]\n\n' +
+      '### 任务\n' +
+      '阅读用户今天的日记 ({{日期}})，以你的角色口吻写一篇**回复日记**——先结合聊天记录回应用户的内容，再分享至少一件用户不知道的、你今天独立经历的小事。\n\n' +
+      '{{写作要求}}\n\n' +
+      '### 关于贴纸 (Stickers)\n' +
+      '你可以使用默认的 Emoji，也可以使用【Custom Stickers】。\n' +
+      '{{自定义贴纸}}\n' +
+      '如果要使用 Custom Sticker，请将 URL 直接放入返回的 stickers 数组中。\n\n' +
+      '### 输出格式 (必须是纯 JSON)\n' +
+      '- 只输出这个 JSON 对象本身，前后不要有任何多余文字。\n' +
+      '- text 是一个 JSON 字符串：内部的换行必须写成 \\n，引号必须写成 \\"，反斜杠必须写成 \\\\。**绝对不要**在字符串里直接放真实换行或未转义的引号，否则会解析失败。\n' +
+      '- 在上面提示词的 JSON 基础上，额外带两个字段：\n' +
+      '{\n  ...,\n  "paperStyle": "one of: {{纸张样式}}",\n  "stickers": ["sticker1", "http://custom-sticker-url..."] (从默认列表或 Custom Stickers 中选0-3个)\n}',
+  },
+  {
+    category: '日记',
     label: '批注她的日记',
     description: '生成 Nox 对 Angelica 日记的旁批（显示在她日记下面，可重roll）',
     defaultValue:
