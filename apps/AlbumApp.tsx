@@ -898,11 +898,28 @@ const AlbumApp: React.FC = () => {
 
   const back = () => setView({ name: 'home' });
 
-  return (
-    <div className="h-full bg-slate-50 flex flex-col">
+  // 页面常驻 + 聚焦转场（2026-09-14 定稿规范）：访问过的视图留在树上（display:none 隐藏、不卸载），
+  // 切视图时旧页 260ms 失焦淡出、新页 120ms 后 340ms 聚焦淡入，460ms 收工并摘掉动画类。
+  const vkey = (v: View) => (v.name === 'charAlbum' ? `charAlbum:${v.charId}` : v.name);
+  const [shownView, setShownView] = useState<View>(view);
+  const [focusing, setFocusing] = useState(false);
+  const [mountedViews, setMountedViews] = useState<View[]>([view]);
+  const lastViewRef = useRef(vkey(view));
+  useEffect(() => {
+    const k = vkey(view);
+    if (lastViewRef.current === k) return;
+    lastViewRef.current = k;
+    setMountedViews(m => (m.some(v => vkey(v) === k) ? m : [...m, view]));
+    setFocusing(true);
+    const t = window.setTimeout(() => { setShownView(view); setFocusing(false); }, 460);
+    return () => window.clearTimeout(t);
+  }, [view]);
+
+  const renderBody = (view: View) => (
+    <>
       {view.name === 'receipts' ? (
-        /* 内嵌页淡入（2026-09-14 G3）：口径同 PhoneShell 的 appEnterFade——只动 opacity */
-        <div className="app-fade-in h-full">
+        /* 内嵌页：进场动画交给外层视图层（聚焦转场），这里不再自带淡入 */
+        <div className="h-full">
           <ImageReceiptsApp embedded onEmbeddedBack={() => setView({ name: 'myAlbums' })} />
         </div>
       ) : view.name === 'archives' ? (
@@ -1044,6 +1061,25 @@ const AlbumApp: React.FC = () => {
           </div>
         </div>
       )}
+    </>
+  );
+
+  return (
+    <div className="relative h-full bg-slate-50">
+      {mountedViews.map((v) => {
+        const k = vkey(v);
+        const isNew = focusing && k === vkey(view);
+        const isOld = k === vkey(shownView);
+        return (
+          <div
+            key={k}
+            className={`absolute inset-0${isNew ? ' page-focus' : focusing && isOld ? ' page-defocus' : ''}`}
+            style={{ display: isNew || isOld ? undefined : 'none', zIndex: isNew ? 10 : undefined }}
+          >
+            {renderBody(v)}
+          </div>
+        );
+      })}
 
       {showRecall && (
         <RecallModal

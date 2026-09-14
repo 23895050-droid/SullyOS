@@ -2,7 +2,7 @@
 // 月经模式 = CouplePeriod 真内容；日常页 = 轻量月视图红标 + 待办（日历下面）+ 当天记录 + 转发（当天日常/待办二选一）
 // 活动页 = 月经记录同步时间轴（她的粉 · 我的蓝，分条转发）；纪念日 = 卡片 + 添加 + 长按编辑/删除（删除确认框）+ 单条转发
 // 入口：首屏纪念日倒计时卡、日历卡（默认日常）；组合卡经期区 → 月经模式（initialMode）
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, PaperPlaneTilt, PencilSimple, Plus, Trash, X } from '@phosphor-icons/react';
 import { loadCoupleBeauty, buildTheme } from './CoupleBeauty';
 import CouplePeriod, { CycleMonthView, derive, EVENT_STYLE, ForwardPicker, hhmm, MedCard } from './CouplePeriod';
@@ -518,6 +518,9 @@ const AnnivModal: React.FC<{ initial?: Anniversary; onClose: () => void }> = ({ 
 
 const CoupleCalendar: React.FC<{ initialMode: ModeKey; onBack: () => void }> = ({ initialMode, onBack }) => {
   const [mode, setMode] = useState<ModeKey>(initialMode);
+  // 页面常驻（CoupleSpace 2026-09-14 聚焦转场）：本组件不再每次进都重挂载，
+  // initialMode 变化时手动跟一次——「经期区直进月经模式」/「日历卡回日常」两个门才能每次生效。
+  useEffect(() => { setMode(initialMode); }, [initialMode]);
   const [beauty] = useState(loadCoupleBeauty);
   const theme = buildTheme(beauty.accent);
   const themeVars = {

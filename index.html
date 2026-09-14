@@ -238,21 +238,6 @@
       .pb-safe {
         padding-bottom: var(--safe-bottom);
       }
-      /* NoxHome 页签切换过渡（2026-08-31 换成原版方案）：只动 opacity，不做 translate——
-         translate 会把整棵页面树（背景图/玻璃卡/头像全在里面）拖着重绘，手机上很卡。
-         与 PhoneShell 的 appEnterFade 同款：200ms ease-out both，key 重挂载触发。 */
-      @keyframes noxhome-tab-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-      .noxhome-tab-in {
-        animation: noxhome-tab-in 200ms ease-out both;
-      }
-      /* 通用「只动 opacity」淡入（2026-09-14 G3）：解锁进桌面 / 相机会话卡 / 相册内嵌页 /
-         情侣空间切内页 等局部过渡都复用它——口径与上面同款（200ms ease-out、key 重挂载触发）。 */
-      .app-fade-in {
-        animation: noxhome-tab-in 200ms ease-out both;
-      }
       /* 页面切换「聚焦」转场（2026-09-14 七版，她选定，定稿）。
          她说左右扫会晕 → 去掉一切位移，只做「失焦/聚焦」：
          旧页 260ms 失焦淡出（模糊到 14px）→ 新页等 120ms 再 340ms 聚焦淡入（从 14px 收到清晰）。
@@ -275,8 +260,18 @@
         animation: pageFocus 340ms cubic-bezier(0.33, 0.7, 0.4, 1) 120ms both;
         will-change: opacity, filter;
       }
+      /* 上面两个是「旧页还在」的两层交叉版（页面常驻的地方用）。这一层是一次性版：
+         卡片 / 整页直接替换（没有旧页可留）的进场用——只做失焦→聚焦、不淡透明度，
+         免得开头露一帧空底；动画不带 fill，收工后 filter 自动消失（不产生常驻 containing block）。 */
+      @keyframes focusIn {
+        from { filter: blur(14px); }
+        to { filter: blur(0px); }
+      }
+      .page-focus-once {
+        animation: focusIn 340ms cubic-bezier(0.33, 0.7, 0.4, 1);
+      }
       @media (prefers-reduced-motion: reduce) {
-        .page-defocus, .page-focus { animation-duration: 1ms !important; animation-delay: 0ms !important; }
+        .page-defocus, .page-focus, .page-focus-once { animation-duration: 1ms !important; animation-delay: 0ms !important; }
       }
       /* 软键盘弹出时（iosStandalone 在 body 上挂 .ios-keyboard-open），收掉底部给 home 条留的 safe 间隙，
          让聊天输入栏直接贴住键盘：① 外壳容器不再把底边钉在 safe 上方，铺到可视区底；② 输入栏收掉自己的 pb-safe 白条。

@@ -1348,11 +1348,11 @@ ${a2OutputMode === 'bubbles'
       {/* ═══ a2 给他看 — 全屏 PNG 镂空设计 ═══ */}
       {showA2Card && (
         <div
-          className="app-fade-in fixed inset-0 z-[300] bg-black/60 flex justify-center"
+          className="fixed inset-0 z-[300] bg-black/60 flex justify-center"
           onClick={() => { setShowA2Card(false); if (!a2HasStarted) setA2Messages([]); }}
         >
           <div
-            className="a2-card relative h-full w-full max-w-[420px] bg-white flex flex-col overflow-hidden transition-transform duration-200"
+            className="a2-card page-focus-once relative h-full w-full max-w-[420px] bg-white flex flex-col overflow-hidden transition-transform duration-200"
             onClick={e => e.stopPropagation()}
             style={{ paddingTop: 'max(0px, var(--safe-top))' }}
           >

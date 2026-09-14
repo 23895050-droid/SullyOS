@@ -3,7 +3,7 @@
 // 图层（z）：宣告区背景占位(1) → 白色主卡(2) → 心电图(3) → 头像(4) → 气泡(5) → 胶囊条(5) → 内容(6) → 各卡片(10) → 便签(11) → 整卡热区(12) → 播放按钮(14) → 快捷卡(20) → 待办弹窗(100)
 // 自绘：粉色爱心(#ffe3ef) / 黑白播放按钮 / 心电图动画；素材：public/Couple/（定位图标 / 耳机 / 留白图 / 猫爪1 / 月亮）
 // 占位数据：location / songs 等；「在一起天数」已接 annivStore（2026-09-14 G1），改日期在设置页「在一起」卡里
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import QuickBankModal from './QuickBankModal';
 import CoupleDiet from './CoupleDiet';
 import CoupleDiary from './CoupleDiary';
@@ -732,30 +732,56 @@ const CoupleSpace: React.FC = () => {
   }, [paletteCss]);
   const open = (route: string) => {
     if (route === 'c1-period') { setC1Mode('period'); setPage('c1'); return; }
+    if (route === 'c1') { setC1Mode('daily'); setPage('c1'); return; } // 日历卡：按文档口径默认日常
     if (route === 'c3') { setBankOpen(true); return; } // 记账：弹大卡片直接写 Sully 银行，不跳转
     if (route === 'c5') { openApp(AppID.Music); return; } // 音乐：入口打开原版音乐 App（我们在它上面加东西）
     setPage(route as Route);
   };
+  // 页面常驻 + 聚焦转场（2026-09-14 定稿规范）：访问过的内页留在树上（display:none 隐藏、不卸载），
+  // 切页时旧页 260ms 失焦淡出、新页 120ms 后 340ms 聚焦淡入，460ms 收工并摘掉动画类（不留 filter）。
+  // 常驻顺带治了「重挂载 → blobref 图重读 → 闪一帧」；最糊的那一下正好盖住换页。
+  const [shownPage, setShownPage] = useState<Route>('first');
+  const [focusing, setFocusing] = useState(false);
+  const [mountedPages, setMountedPages] = useState<Route[]>(['first']);
+  const lastPageRef = useRef<Route>('first');
+  useEffect(() => {
+    if (lastPageRef.current === page) return;
+    lastPageRef.current = page;
+    setMountedPages(m => (m.includes(page) ? m : [...m, page]));
+    setFocusing(true);
+    const t = window.setTimeout(() => { setShownPage(page); setFocusing(false); }, 460);
+    return () => window.clearTimeout(t);
+  }, [page]);
   return (
     <div className="cs-palette absolute inset-0 flex items-center justify-center overflow-hidden" style={coupleBgUrl ? { backgroundImage: `url(${coupleBgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: '#ffe3ef' }}>
-      {/* 切内页 / 回首屏淡入（2026-09-14 G3）：key 换 → 重挂载 → 200ms 只动 opacity 的淡入 */}
-      <div key={page} className="app-fade-in absolute inset-0 flex items-center justify-center">
-      {page === 'first' ? (
-        <CoupleFirstScreen onOpen={open} />
-      ) : page === 'c1' ? (
-        <CoupleCalendar initialMode={c1Mode} onBack={() => setPage('first')} />
-      ) : page === 'c2' ? (
-        <CoupleDiet onBack={() => setPage('first')} />
-      ) : page === 'c4' ? (
-        <CoupleDiary initialOwner="me" onBack={() => setPage('first')} />
-      ) : page === 'c4her' ? (
-        <CoupleDiary initialOwner="her" onBack={() => setPage('first')} />
-      ) : page === 'c9' ? (
-        <CoupleTogether initialTab="memories" onBack={() => setPage('first')} />
-      ) : (
-        <StubPage title={STUB_COPY[page][0]} note={STUB_COPY[page][1]} onBack={() => setPage('first')} />
-      )}
-      </div>
+      {/* 切内页 / 回首屏：聚焦转场（定稿规范）——旧页失焦淡出、新页聚焦淡入，460ms 收工 */}
+      {mountedPages.map((p) => {
+        const isNew = focusing && p === page;
+        const isOld = p === shownPage;
+        return (
+          <div
+            key={p}
+            className={`absolute inset-0 flex items-center justify-center${isNew ? ' page-focus' : focusing && isOld ? ' page-defocus' : ''}`}
+            style={{ display: isNew || isOld ? undefined : 'none', zIndex: isNew ? 10 : undefined }}
+          >
+            {p === 'first' ? (
+              <CoupleFirstScreen onOpen={open} />
+            ) : p === 'c1' ? (
+              <CoupleCalendar initialMode={c1Mode} onBack={() => setPage('first')} />
+            ) : p === 'c2' ? (
+              <CoupleDiet onBack={() => setPage('first')} />
+            ) : p === 'c4' ? (
+              <CoupleDiary initialOwner="me" onBack={() => setPage('first')} />
+            ) : p === 'c4her' ? (
+              <CoupleDiary initialOwner="her" onBack={() => setPage('first')} />
+            ) : p === 'c9' ? (
+              <CoupleTogether initialTab="memories" onBack={() => setPage('first')} />
+            ) : (
+              <StubPage title={STUB_COPY[p][0]} note={STUB_COPY[p][1]} onBack={() => setPage('first')} />
+            )}
+          </div>
+        );
+      })}
       {bankOpen && <QuickBankModal onClose={() => setBankOpen(false)} />}
     </div>
   );
