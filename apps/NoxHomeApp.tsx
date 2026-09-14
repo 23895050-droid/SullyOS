@@ -138,39 +138,28 @@ const NoxHomeApp: React.FC = () => {
   const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
   const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
 
-  // ── 页面常驻 + 幕布转场（2026-09-14 四版）────────────────────────
+  // ── 页面常驻 + 聚焦转场（2026-09-14 七版）────────────────────────
   // 常驻（二版留下，是对的）：访问过的页面留在树上、不卸载 —— 图片 objectURL 不会被 revoke
   // 重读、整棵页面不重建，内存由「离开 App 整棵卸载」兜住（上游那套）。
-  // 转场（四版，学上游 CompanionStageLoadingCurtain/AppLoadingFallback 的换场法）：
-  // 切页先落幕布盖满 → 幕布后面把当前页换掉 → 再揭幕。换页、图解码、布局全藏在幕布后面，
-  // 所以底下闪不闪都看不见；不再让页面元素自己淡入淡出（那不叫转场，是一种「闪」的来源）。
+  // 转场（七版，她定：左右滑会晕 → 不做任何位移）：旧页 260ms 失焦淡出 → 新页 120ms 后
+  // 340ms 聚焦淡入。最糊的一下正好盖住换页，所以底下闪不闪都看不见。
   const pageKey = `${tab}:${inner ?? 'root'}`;
-  const [shownKey, setShownKey] = useState(pageKey);   // 幕布后面真正在展示的那一页
-  const [curtain, setCurtain] = useState<'covering' | 'revealing' | null>(null);
-  const [curtainRun, setCurtainRun] = useState(0);   // 连点两下时换 key，让横扫动画重新开始
+  const [shownKey, setShownKey] = useState(pageKey);   // 转场结束后真正在展示的那一页
+  const [focusing, setFocusing] = useState(false);
   const [mounted, setMounted] = useState<string[]>([pageKey]);
   const lastPageRef = useRef(pageKey);
   useEffect(() => {
     if (lastPageRef.current === pageKey) return;
     lastPageRef.current = pageKey;
-    setCurtain('covering');
-    setCurtainRun((n) => n + 1);
-    // 节拍：扫进来 280ms 盖满 → 换页（被挡着）→ 停 40ms → 继续往左扫出去 320ms
-    const t1 = window.setTimeout(() => {
-      setMounted((m) => (m.includes(pageKey) ? m : [...m, pageKey]));
-      setShownKey(pageKey);
-      setCurtain('revealing');
-    }, 280);
-    const t2 = window.setTimeout(() => setCurtain(null), 280 + 40 + 320);
-    return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+    setMounted((m) => (m.includes(pageKey) ? m : [...m, pageKey]));
+    setFocusing(true);
+    // 节拍：旧页失焦 260ms + 新页延迟 120ms 再聚焦 340ms → 460ms 收工
+    const t = window.setTimeout(() => { setShownKey(pageKey); setFocusing(false); }, 460);
+    return () => window.clearTimeout(t);
   }, [pageKey]);
 
-  // 幕布材料 = **目标页自己的底色**（家 = 壁纸或深底；我们/设置 = 粉）。为什么不用上游那层
-  // 「虚化壁纸 + 白蒙版」：上游那层幕是透明的、脚下有壳铺好的稳定底；我们是全屏页面、没有那个底，
-  // 只好拿一块外来材料去补 —— 结果就是「白的很突然、消失也很突然」（她 2026-09-14 报的）。
-  // 换成本页自己的底色后：扫到哪儿都是新页面本来该有的颜色，没有外来材料、没有亮度冲击；
-  // 前缘的软影 + 柔光缝让「边」在同底色页面之间也看得见。
-  const veilStyle = () => ({ ...bgFor(tab) });
+  /** 'home:root' → 'home'（页面的底色按页签取） */
+  const tabOfKey = (k: string) => k.split(':')[0];
 
   // 空闲预热（2026-09-14）：首屏落定后、浏览器空闲时把「我们」「设置」两页先在后台挂上
   // （隐藏）——图片那时就解析好了，第一次切过去幕布揭开就已经是完整页面。
@@ -374,31 +363,25 @@ const NoxHomeApp: React.FC = () => {
       style={bgFor(tab)}
     >
       {/* 页面层：每层自己滚、自带背景；访问过的都留着（display:none 不重建）。
-          同一时刻只有 shownKey 那一层可见——「什么时候换」由幕布节奏决定，不由点击决定。 */}
+          转场期间「旧页（shownKey）+ 新页（pageKey）」同时可见：旧页失焦淡出、新页在上层聚焦淡入；
+          460ms 后收工，只剩新页。 */}
       {mounted.map((k) => {
         const [layerTab, layerInnerRaw] = k.split(':');
         const layerInner = layerInnerRaw === 'root' ? null : layerInnerRaw;
+        const isNew = focusing && k === pageKey;
+        const isOld = k === shownKey;
+        const visible = isNew || isOld;
+        const cls = isNew ? 'page-focus' : (focusing && isOld ? 'page-defocus' : '');
         return (
           <div
             key={k}
-            className="absolute inset-0 overflow-y-auto"
-            style={{ ...bgFor(layerTab), display: k === shownKey ? undefined : 'none' }}
+            className={`absolute inset-0 overflow-y-auto ${cls}`}
+            style={{ ...bgFor(tabOfKey(k)), display: visible ? undefined : 'none', zIndex: isNew ? 10 : undefined }}
           >
             {renderPage(layerTab, layerInner)}
           </div>
         );
       })}
-
-      {/* 转场幕布：目标页底色板横扫——扫入盖满 → 后面换页 → 继续往左扫出（一块板一直在动）
-          z 阶梯（重要）：画布内容 ≤60（文字层 40 / 热区 50 / 圆钮 60）＜ 幕布 65 ＜ 底部胶囊导航 70。
-          幕布必须压过画布里所有 z-index 的元素，否则会有文字浮在幕布上面（她 2026-09-14 报的）。 */}
-      {curtain && (
-        <div
-          key={curtainRun}
-          className={`veil-slab absolute inset-0 pointer-events-none ${curtain === 'covering' ? 'veil-cover' : 'veil-reveal'}`}
-          style={{ zIndex: 65, ...veilStyle() }}
-        />
-      )}
 
       {/* ── 底部胶囊导航（固定悬浮） ── */}
       <div

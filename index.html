@@ -253,44 +253,30 @@
       .app-fade-in {
         animation: noxhome-tab-in 200ms ease-out both;
       }
-      /* 页面切换「幕布」六版：目标页底色板横扫（2026-09-14 定稿方向）。
-         走过的弯路记在这：① 元素淡入淡出 → 违和 ② 两拍淡出淡入 → 中间露空底，闪
-         ③ 单拍淡入 → 还是闪 ④ 白色雾板淡入淡出 → 「白的很突然、消失也很突然」
-         ⑤ 白色雾板横扫 → 亮度冲击仍在（65ms 就白掉 3/4 屏）。
-         ⑥ 定稿：板上带的不是外来材料，而是**目标页自己的底色/壁纸**——扫到哪儿都是新页面本来
-         该有的颜色（家=壁纸或深底，我们/设置=粉）。全程同一块板连续移动，没有凭空出现/消失；
-         前缘给一道软影 + 柔光缝，所以同底色页面之间（我们 → 日历）也看得见「边」在走。
-         节拍：扫入 280ms 盖满 → 后面换页 → 停 40ms → 继续往左扫出 320ms。 */
-      @keyframes veilSweepIn {
-        from { transform: translate3d(100%, 0, 0); }
-        to { transform: translate3d(0, 0, 0); }
+      /* 页面切换「聚焦」转场（2026-09-14 七版，她选定，定稿）。
+         她说左右扫会晕 → 去掉一切位移，只做「失焦/聚焦」：
+         旧页 260ms 失焦淡出（模糊到 14px）→ 新页等 120ms 再 340ms 聚焦淡入（从 14px 收到清晰）。
+         两段错开：最糊的那一下正好盖住换页，同底色页面之间也不会变成「内容凭空消失」。
+         帧能完整描述这个动效（没有运动信息），改之前先用胶片条自检（见压缩交接 8 的验证手段）。
+         走过的弯路（别回去）：元素淡入淡出 / 两拍露空底 / 白雾板淡入淡出 / 白雾板横扫 / 目标色板横扫（晕）。 */
+      @keyframes pageDefocus {
+        from { opacity: 1; filter: blur(0px); }
+        to { opacity: 0; filter: blur(14px); }
       }
-      @keyframes veilSweepOut {
-        from { transform: translate3d(0, 0, 0); }
-        to { transform: translate3d(-100%, 0, 0); }
+      @keyframes pageFocus {
+        from { opacity: 0; filter: blur(14px); }
+        to { opacity: 1; filter: blur(0px); }
       }
-      .veil-cover {
-        animation: veilSweepIn 280ms cubic-bezier(0.65, 0, 0.35, 1) both;
-        will-change: transform;
+      .page-defocus {
+        animation: pageDefocus 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
+        will-change: opacity, filter;
       }
-      .veil-reveal {
-        animation: veilSweepOut 320ms cubic-bezier(0.65, 0, 0.35, 1) both;
-        will-change: transform;
-      }
-      /* 前缘：软影 + 柔光缝（同底色页面上全靠它把「边」显出来） */
-      .veil-slab {
-        box-shadow: -28px 0 44px rgba(40, 28, 38, 0.28);
-      }
-      .veil-slab::before {
-        content: ''; position: absolute; top: 0; bottom: 0; left: -26px; width: 26px;
-        background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.5) 60%, rgba(255,255,255,0.8) 100%);
-      }
-      .veil-slab::after {
-        content: ''; position: absolute; top: 0; bottom: 0; left: -4px; width: 4px;
-        background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.85));
+      .page-focus {
+        animation: pageFocus 340ms cubic-bezier(0.33, 0.7, 0.4, 1) 120ms both;
+        will-change: opacity, filter;
       }
       @media (prefers-reduced-motion: reduce) {
-        .veil-cover, .veil-reveal { animation-duration: 1ms !important; }
+        .page-defocus, .page-focus { animation-duration: 1ms !important; animation-delay: 0ms !important; }
       }
       /* 软键盘弹出时（iosStandalone 在 body 上挂 .ios-keyboard-open），收掉底部给 home 条留的 safe 间隙，
          让聊天输入栏直接贴住键盘：① 外壳容器不再把底边钉在 safe 上方，铺到可视区底；② 输入栏收掉自己的 pb-safe 白条。
