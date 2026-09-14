@@ -16,6 +16,7 @@ import { useCouplePaletteStore, setCouplePalette, resetCouplePalette, saveCouple
 import { useAnnivStore, saveAnniv, togetherStartKey } from './annivStore';
 import { COUPLE_PALETTE_KEYS, COUPLE_PALETTE_DEFAULTS, CARD_ALPHA_DEFAULT } from './couplePalette';
 import { useUrlGallery } from './urlGalleryStore';
+import { CARD_INJECT_ITEMS, setCardInject, useWeatherPrefs } from './weatherPrefsStore';
 import { normalizeImageUrl } from './urlGalleryMath';
 import TokenImg from '../../components/os/TokenImg';
 
@@ -317,6 +318,45 @@ const DiarySettings: React.FC = () => {
 };
 
 // ── 设置页折叠卡（2026-08-30 她要求：家里设置页每个类别也折叠，点开再展开） ──
+// ── 天气设置（2026-09-15）：转发天气卡片时角色能读到的详细数据，逐项开关 ──
+// 常驻注入（平时聊天就知道天气）不在这里——去「挂载到角色」里把「天气」那块打开。
+const MiniToggle: React.FC<{ on: boolean; onChange: (v: boolean) => void }> = ({ on, onChange }) => (
+  <button
+    type="button"
+    onClick={() => onChange(!on)}
+    className="border-0 cursor-pointer shrink-0"
+    style={{
+      width: 42, height: 26, borderRadius: 999, padding: 2, transition: 'background 0.2s',
+      background: on ? '#e9a0be' : '#e5d5db', display: 'flex', justifyContent: on ? 'flex-end' : 'flex-start',
+    }}
+  >
+    <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+  </button>
+);
+
+const WeatherSettings: React.FC = () => {
+  const prefs = useWeatherPrefs();
+  return (
+    <div className="flex flex-col gap-1">
+      <div style={{ fontSize: 11, color: '#9a7a8a', lineHeight: 1.6 }}>
+        转发天气卡片时：卡片上固定四样（城市 / 温度 / 状况 / 今天 H·L），下面这些是角色额外读得到的——不想要哪样就关哪样。
+      </div>
+      {CARD_INJECT_ITEMS.map((it) => (
+        <div key={it.key} className="flex items-center justify-between" style={{ padding: '7px 0' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#3a2a33' }}>{it.label}</div>
+            <div style={{ fontSize: 11, color: '#b0909c' }}>{it.hint}</div>
+          </div>
+          <MiniToggle on={prefs.cardInject[it.key]} onChange={(v) => setCardInject(it.key, v)} />
+        </div>
+      ))}
+      <div style={{ fontSize: 11, color: '#9a7a8a', lineHeight: 1.6 }}>
+        想让角色平时聊天就知道你那边天气（不用转发卡片）？去下面「挂载到角色」把「天气」那块打开。
+      </div>
+    </div>
+  );
+};
+
 const BeautyFold: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
   const [open, setOpen] = useState(false);
   return (
@@ -604,6 +644,10 @@ const CoupleBeauty: React.FC = () => {
 
         <BeautyFold title="挂载到角色">
           <MountSettings />
+        </BeautyFold>
+
+        <BeautyFold title="天气设置">
+          <WeatherSettings />
         </BeautyFold>
 
         <BeautyFold title="留言板批阅输入">

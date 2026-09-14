@@ -1,6 +1,6 @@
 // noxhomeMount 内容生成器单测（2026-08-23）——纯函数，不碰 localStorage
 import { describe, expect, it } from 'vitest';
-import { buildAnnivContent, buildDailyContent, buildDiaryContent, buildDietFridgeContent, buildDietLibraryContent, buildDietTodayContent, buildPeriodContent, DEFAULT_BLOCKS, MOUNT_BLOCK_IDS, MOUNT_BLOCK_LABELS } from './noxhomeMount';
+import { buildAnnivContent, buildDailyContent, buildDiaryContent, buildDietFridgeContent, buildDietLibraryContent, buildDietTodayContent, buildPeriodContent, buildWeatherContent, DEFAULT_BLOCKS, MOUNT_BLOCK_IDS, MOUNT_BLOCK_LABELS } from './noxhomeMount';
 
 describe('buildPeriodContent', () => {
   it('经期中：阶段行 + 当天记录 + 吃药提醒 + 数据不足提示', () => {
@@ -237,5 +237,29 @@ describe('music 挂载块注册', () => {
     expect(MOUNT_BLOCK_LABELS.music).toBe('音乐');
     expect(DEFAULT_BLOCKS.music.key).toContain('一起听');
     expect(DEFAULT_BLOCKS.music.order).toBeGreaterThan(DEFAULT_BLOCKS.promises.order);
+  });
+});
+
+describe('weather 挂载块注册（2026-09-15）', () => {
+  it('MOUNT_BLOCK_IDS 含 weather、标签与默认关键词就位，order 排在 music 之后', () => {
+    expect(MOUNT_BLOCK_IDS).toContain('weather');
+    expect(MOUNT_BLOCK_LABELS.weather).toBe('天气');
+    expect(DEFAULT_BLOCKS.weather.key).toContain('天气');
+    expect(DEFAULT_BLOCKS.weather.order).toBeGreaterThan(DEFAULT_BLOCKS.music.order);
+  });
+
+  it('buildWeatherContent：有数据出 {{user}} 城市/温度/体感/今天，无数据空串', () => {
+    const data = {
+      now: { temp: 26, feels: 25, code: 0 },
+      hours: [],
+      days: [{ date: '2026-09-14', code: 1, min: 17, max: 33, pop: 20 }],
+      aqi: { aqi: 42 },
+    };
+    const s = buildWeatherContent({ cityName: '上海', data });
+    expect(s).toContain('{{user}} 那边的天气（上海）');
+    expect(s).toContain('Clear 26°（体感 25°）');
+    expect(s).toContain('今天 17° ~ 33°，降水概率 20%');
+    expect(s).toContain('空气质量 42（Good）');
+    expect(buildWeatherContent({ cityName: '上海', data: null })).toBe('');
   });
 });

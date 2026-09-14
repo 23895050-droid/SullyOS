@@ -92,6 +92,7 @@ export const forwardTogetherCard = async (target: CharacterProfile, card: Togeth
 };
 
 /** 转发单个食物的详细单卡（评分/升糖/家常做法/外卖记录全带上） */
+
 export const forwardFoodDetail = async (target: CharacterProfile, food: FoodDetailInput): Promise<void> => {
   const lines = [
     `${food.name}（每 100g：${food.kcal} 千卡，蛋白 ${food.protein}g，碳水 ${food.carbs}g，脂肪 ${food.fat}g）`,
@@ -114,4 +115,28 @@ export const forwardFoodDetail = async (target: CharacterProfile, food: FoodDeta
     });
   }
   await forwardCoupleCard(target, { kind: '饮食·食物', title: food.name, body: lines.join('\n') });
+};
+
+// ── 天气转发（2026-09-15）：卡片表面四样（城市/温度/状况/今天 H L）+ 天空渐变卡；
+// 角色读到的是 card.body（详细版，逐项开关见「天气设置」）。表面四样固定、正文按开关裁。
+
+export interface WeatherForwardCard {
+  kind: string;    // 「天气」
+  city: string;
+  temp: number;
+  text: string;    // 状况（Clear 等）
+  high: number;
+  low: number;
+  isDay: boolean;  // 卡片天空：白天蓝天 / 夜里星空
+  body: string;    // 详细正文（AI 只读）
+}
+
+export const forwardWeatherCard = async (target: CharacterProfile, card: WeatherForwardCard): Promise<void> => {
+  await DB.saveMessage({
+    charId: target.id,
+    role: 'system',
+    type: 'text',
+    content: `[天气：${card.city}] ${card.body}`,
+    metadata: { source: 'weather_forward', forwardCard: card },
+  });
 };

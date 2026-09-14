@@ -31,6 +31,8 @@ import { useDietStore } from './dietStore';
 import { useDiaryStore } from './diaryStore';
 import { useTogetherStore } from './togetherStore';
 import { useMusicStore } from './musicStore';
+import { cityKey, currentCity, useWeatherStore } from './weatherStore';
+import { ensureFreshWeather } from './weatherApi';
 
 const SELECTIVE_LOGIC_LABELS: Record<number, string> = {
   0: '任一命中',
@@ -49,6 +51,7 @@ const BLOCK_DESCS: Record<MountBlockId, string> = {
   diary: '今天两人写没写日记；Nox 写了带全文（她的内容不进——他只能通过她转发的批阅卡片读到）',
   promises: '约好还没做的事（谁提议/地点/时限）；提到「约好了/你答应我的」时触发，只挂未完成的',
   music: '我的歌单概况 + 最近常听 + 首条印象 + 一起听会话；歌单里的歌名直接是触发词（提到就命中）',
+  weather: '她那边当前城市的实时天气：状况/温度/体感 + 今天区间 + 空气质量（没打开过天气页就没数据，不注入）',
 };
 
 // ── 小组件 ──
@@ -305,6 +308,11 @@ const MountSettings: React.FC = () => {
   const diaryStore = useDiaryStore();
   const togetherStore = useTogetherStore();
   const musicStore = useMusicStore();
+  const weatherStore = useWeatherStore();
+  // 进设置页顺手补拉一次天气（天气块预览要数据；30 分钟内命中缓存）
+  useEffect(() => {
+    void ensureFreshWeather(currentCity()).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -324,7 +332,7 @@ const MountSettings: React.FC = () => {
         : { entry: null, expanded: '' };
     }
     return out;
-  }, [mount, periodStore, todoStore, annivStore, dietStore, diaryStore, togetherStore, musicStore, charName, userName]);
+  }, [mount, periodStore, todoStore, annivStore, dietStore, diaryStore, togetherStore, musicStore, weatherStore, charName, userName]);
 
   return (
     <div className="flex flex-col gap-3">

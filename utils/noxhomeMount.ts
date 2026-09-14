@@ -18,11 +18,13 @@ import { loadMusicPlaybackSnapshot, loadMusicTogetherState } from '../context/Mu
 import { buildPromisesMountContent } from './togetherMath';
 import { buildMusicMountContent, buildMusicMountKey } from './musicMountContent';
 import { MEAL_LABELS, MEAL_ORDER } from './dietMath';
+import { weatherMountBody, type WeatherForwardDataLike } from './weatherMath';
+import { cityKey, currentCity, getWeatherStore } from '../apps/couple/weatherStore';
 
 // ── 配置类型 ──
 
-export type MountBlockId = 'period' | 'anniv' | 'daily' | 'dietToday' | 'dietLibrary' | 'dietFridge' | 'diary' | 'promises' | 'music';
-export const MOUNT_BLOCK_IDS: MountBlockId[] = ['period', 'anniv', 'daily', 'dietToday', 'dietLibrary', 'dietFridge', 'diary', 'promises', 'music'];
+export type MountBlockId = 'period' | 'anniv' | 'daily' | 'dietToday' | 'dietLibrary' | 'dietFridge' | 'diary' | 'promises' | 'music' | 'weather';
+export const MOUNT_BLOCK_IDS: MountBlockId[] = ['period', 'anniv', 'daily', 'dietToday', 'dietLibrary', 'dietFridge', 'diary', 'promises', 'music', 'weather'];
 export const MOUNT_BLOCK_LABELS: Record<MountBlockId, string> = {
   period: '当日经期',
   anniv: '纪念日',
@@ -33,6 +35,7 @@ export const MOUNT_BLOCK_LABELS: Record<MountBlockId, string> = {
   diary: '日记',
   promises: '约好的事',
   music: '音乐',
+  weather: '天气',
 };
 
 /** 每块数据的完整世界书参数（默认照抄上游世界书条目形状，UI 全部可调） */
@@ -123,6 +126,13 @@ export const DEFAULT_BLOCKS: Record<MountBlockId, MountBlockConfig> = {
     enabled: false, position: 4, order: 108,
     // 动态关键词：配置关键词 ∪ 歌单全部歌名（buildBlockEntry 里并集）
     key: ['音乐', '歌', '听歌', '歌单', '歌词', '网易云', '一起听'],
+    keysecondary: [], selective: false, selectiveLogic: 0,
+    constant: false, probability: 100, useProbability: false,
+    depth: 4, role: 0, scanDepth: 8,
+  },
+  weather: {
+    enabled: false, position: 4, order: 109,
+    key: ['天气', '下雨', '降温', '热不热', '冷不冷', '穿什么', '带伞'],
     keysecondary: [], selective: false, selectiveLogic: 0,
     constant: false, probability: 100, useProbability: false,
     depth: 4, role: 0, scanDepth: 8,
@@ -419,6 +429,13 @@ export function buildDiaryContent(input: { dateKey: string; entries: DiaryEntry[
   return lines.join('\n');
 }
 
+/** 天气块（2026-09-15）：她那边当前城市的实时天气；没拉到过数据 → 空串（不注入）。
+ *  常驻注入的参数（开关/关键词/概率/深度）在挂载设置页调，与「转发卡片注入」是两套。 */
+export function buildWeatherContent(input: { cityName: string; data: WeatherForwardDataLike | null }): string {
+  if (!input.data) return '';
+  return weatherMountBody(input.cityName, input.data);
+}
+
 /** builder 可返回纯内容或带动态关键词（music 块把歌名并进 key，提到歌名直接命中） */
 type BlockBuilderResult = string | { content: string; key?: string[] };
 
@@ -478,6 +495,11 @@ const BLOCK_BUILDERS: Record<MountBlockId, () => BlockBuilderResult> = {
       content: buildMusicMountContent(input),
       key: buildMusicMountKey([], input),
     };
+  },
+  weather: () => {
+    const s = getWeatherStore();
+    const city = currentCity(s);
+    return buildWeatherContent({ cityName: city.name, data: s.datas[cityKey(city)] ?? null });
   },
 };
 

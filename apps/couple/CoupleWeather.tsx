@@ -5,15 +5,19 @@
 // 数据 Open-Meteo（weatherApi）→ weatherStore 缓存：重进先用缓存秒开，超 30 分钟后台刷新；
 // 从没拉到过数据时才显示错误页。白天/夜晚两套主题照图（背景见 WeatherSky，与列表卡共用）。
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, CalendarBlank, ListDashes, MapTrifold } from '@phosphor-icons/react';
+import { ArrowLeft, CalendarBlank, ListDashes, MapTrifold, PaperPlaneTilt } from '@phosphor-icons/react';
+import type { CharacterProfile } from '../../types';
 import { ensureFreshWeather } from './weatherApi';
+import { ForwardPicker } from './CouplePeriod';
+import { forwardWeatherCard } from './coupleForward';
+import { getWeatherPrefs } from './weatherPrefsStore';
 import { cityKey, currentCity, getWeatherStore, setCurrentCity, useWeatherStore, WEATHER_FRESH_MS } from './weatherStore';
 import type { WeatherData } from './weatherStore';
 import WeatherIcon from './WeatherIcon';
 import Sky, { DAY_CLOUDS, DAY_SKY, NIGHT_SKY } from './WeatherSky';
 import CoupleCityList from './CoupleCityList';
 import {
-  aqiLevel, aqiPos, dayLabel, fmtTemp, hourLabel, rangeBar, summaryText, swipeStep, tempColor, wmoIcon, wmoText,
+  aqiLevel, aqiPos, dayLabel, fmtTemp, hourLabel, rangeBar, summaryText, swipeStep, tempColor, weatherForwardBody, wmoIcon, wmoText,
 } from '../../utils/weatherMath';
 
 // 文字阴影（2026-09-15 她指出白天可读性低）——照例图：iOS 白字全带柔和暗晕，压在任何云上都清楚。
@@ -206,6 +210,7 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const isDay = data?.now.isDay ?? true;
 
   const [view, setView] = useState<'detail' | 'list'>('detail');
+  const [forwardOpen, setForwardOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [t, setT] = useState(0);
@@ -289,6 +294,28 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setT(next);
   };
 
+  /** 转发当前城市的天气卡片（表面四样 + 正文按「天气设置」逐项开关） */
+  const doForward = async (c: CharacterProfile) => {
+    if (data) {
+      const today = data.days[0];
+      try {
+        await forwardWeatherCard(c, {
+          kind: '天气',
+          city: curCity.name,
+          temp: Math.round(data.now.temp),
+          text: wmoText(data.now.code),
+          high: Math.round(today?.max ?? data.now.temp),
+          low: Math.round(today?.min ?? data.now.temp),
+          isDay: data.now.isDay,
+          body: weatherForwardBody(curCity.name, data, getWeatherPrefs().cardInject),
+        });
+      } catch {
+        // 转发失败静默关掉（同日记页）
+      }
+    }
+    setForwardOpen(false);
+  };
+
   const backBtn = (
     <button
       onClick={onBack}
@@ -301,6 +328,21 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       }}
     >
       <ArrowLeft size={20} color="#fff" />
+    </button>
+  );
+
+  const forwardBtn = (
+    <button
+      onClick={() => setForwardOpen(true)}
+      aria-label="转发天气"
+      style={{
+        position: 'absolute', top: 'calc(var(--chrome-top, 0px) + 6px)', right: 12, zIndex: 30,
+        width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        border: '0.5px solid rgba(255,255,255,0.3)',
+      }}
+    >
+      <PaperPlaneTilt size={19} color="#fff" />
     </button>
   );
 
@@ -388,6 +430,7 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             <div style={{ height: 'calc(var(--safe-bottom, 0px) + 74px)' }} />
           </div>
           {backBtn}
+          {forwardBtn}
         </div>
       </div>
       {/* 底部工具栏（原版样式：通栏贴底；此页全局胶囊导航已隐藏） */}
@@ -423,6 +466,14 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           <ListDashes size={22} color="rgba(255,255,255,0.95)" />
         </button>
       </div>
+      {forwardOpen && (
+        <ForwardPicker
+          onClose={() => setForwardOpen(false)}
+          onPick={(c) => {
+            void doForward(c);
+          }}
+        />
+      )}
     </div>
   );
 };

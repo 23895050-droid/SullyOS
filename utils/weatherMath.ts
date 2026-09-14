@@ -175,3 +175,51 @@ export function swipeStep(dx: number, ms: number, width: number): -1 | 0 | 1 {
   if (!far && !flick) return 0;
   return dx > 0 ? -1 : 1;
 }
+
+// ── 转发卡片正文（2026-09-15）：表面四样之外给角色读的详细版，逐项按开关取舍 ──
+
+/** 卡片注入偏好（store 在 apps，纯函数只认形状） */
+export interface WeatherForwardPrefs { feels: boolean; aqi: boolean; hourly: boolean; daily: boolean }
+export interface WeatherForwardDataLike {
+  now: { temp: number; feels: number; code: number };
+  hours: Array<{ time: string; temp: number; code: number }>;
+  days: Array<{ date: string; code: number; min: number; max: number; pop: number }>;
+  aqi: { aqi: number } | null;
+}
+
+/**
+ * 天气卡片给角色读的正文：首行「城市 · 状况 温度（体感）」恒在，
+ * 其余按开关逐项加——体感 / 今天区间 / 空气质量 / 接下来 6 小时 / 未来 3 天。
+ */
+export function weatherForwardBody(
+  cityName: string,
+  data: WeatherForwardDataLike,
+  prefs: WeatherForwardPrefs,
+): string {
+  const lines: string[] = [
+    `${cityName} · ${wmoText(data.now.code)} ${fmtTemp(data.now.temp)}${prefs.feels ? `（体感 ${fmtTemp(data.now.feels)}）` : ''}`,
+  ];
+  const today = data.days[0];
+  if (today) {
+    lines.push(`今天 ${fmtTemp(today.min)} ~ ${fmtTemp(today.max)}${today.pop > 0 ? `，降水概率 ${today.pop}%` : ''}`);
+  }
+  if (prefs.aqi && data.aqi) lines.push(`空气质量 ${data.aqi.aqi}（${aqiLevel(data.aqi.aqi).text}）`);
+  if (prefs.hourly && data.hours.length > 0) {
+    const pick = data.hours.slice(0, 6).map((h) => `${hourLabel(h.time, false)} ${fmtTemp(h.temp)} ${wmoText(h.code)}`);
+    lines.push(`接下来：${pick.join('｜')}`);
+  }
+  if (prefs.daily && data.days.length > 1) {
+    const pick = data.days.slice(1, 4).map((d) => `${d.date.slice(5).replace('-', '/')} ${wmoText(d.code)} ${fmtTemp(d.min)}~${fmtTemp(d.max)}${d.pop > 0 ? `（降水 ${d.pop}%）` : ''}`);
+    lines.push(`未来几天：${pick.join('｜')}`);
+  }
+  return lines.join('\n');
+}
+
+/** 常驻挂载块正文（聊天时角色能随时知道她那边天气）：全量几句，开关走挂载设置的关键词/概率参数 */
+export function weatherMountBody(cityName: string, data: WeatherForwardDataLike): string {
+  const lines = [`{{user}} 那边的天气（${cityName}）：${wmoText(data.now.code)} ${fmtTemp(data.now.temp)}（体感 ${fmtTemp(data.now.feels)}）`];
+  const today = data.days[0];
+  if (today) lines.push(`今天 ${fmtTemp(today.min)} ~ ${fmtTemp(today.max)}${today.pop > 0 ? `，降水概率 ${today.pop}%` : ''}`);
+  if (data.aqi) lines.push(`空气质量 ${data.aqi.aqi}（${aqiLevel(data.aqi.aqi).text}）`);
+  return lines.join('\n');
+}

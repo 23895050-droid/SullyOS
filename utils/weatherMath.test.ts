@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   wmoText, wmoIcon, tempColor, rangeBar, hourLabel, dayLabel,
   fmtTemp, aqiLevel, aqiPos, summaryText, fmtCityTime, starField, swipeStep,
+  weatherForwardBody, weatherMountBody,
 } from './weatherMath';
 
 describe('weatherMath · wmoText', () => {
@@ -170,5 +171,51 @@ describe('weatherMath · 城市列表（2026-09-15）', () => {
     expect(swipeStep(-40, 140, W)).toBe(1);           // 快速甩动（左）→ 下一座
     expect(swipeStep(40, 140, W)).toBe(-1);
     expect(swipeStep(40, 600, W)).toBe(0);            // 小位移慢速 → 回弹
+  });
+});
+
+describe('weatherMath · 天气转发卡片正文（2026-09-15）', () => {
+  const D = {
+    now: { temp: 26, feels: 24.6, code: 0 },
+    hours: Array.from({ length: 8 }, (_, i) => ({
+      time: `2026-09-14T${String(19 + i).padStart(2, '0')}:00`, temp: 20 + i, code: i % 2 ? 0 : 2,
+    })),
+    days: Array.from({ length: 5 }, (_, i) => ({
+      date: `2026-09-1${4 + i}`, code: 1, min: 15 + i, max: 30 - i, pop: i === 1 ? 40 : 0,
+    })),
+    aqi: { aqi: 42 },
+  };
+  const ALL = { feels: true, aqi: true, hourly: true, daily: true };
+
+  it('全开：首行 + 今天 + 空气质量 + 接下来 + 未来几天', () => {
+    const body = weatherForwardBody('上海', D, ALL);
+    expect(body.split('\n')[0]).toBe('上海 · Clear 26°（体感 25°）');
+    expect(body).toContain('今天 15° ~ 30°');
+    expect(body).toContain('空气质量 42（Good）');
+    expect(body).toContain('接下来：7PM 20° Partly Cloudy');
+    expect(body).toContain('未来几天：09/15');
+    expect(body).toContain('降水 40%');
+  });
+
+  it('逐项关闭：关哪样少哪样（首行体感也随 feels 关）', () => {
+    const off = weatherForwardBody('上海', D, { feels: false, aqi: false, hourly: false, daily: false });
+    expect(off.split('\n')[0]).toBe('上海 · Clear 26°');
+    expect(off).not.toContain('体感');
+    expect(off).not.toContain('空气质量');
+    expect(off).not.toContain('接下来：');
+    expect(off).not.toContain('未来几天：');
+    expect(off).toContain('今天 15° ~ 30°'); // 今天区间跟卡片走，不受开关影响
+  });
+
+  it('没有 AQI 数据时不出空气质量行', () => {
+    expect(weatherForwardBody('上海', { ...D, aqi: null }, ALL)).not.toContain('空气质量');
+  });
+
+  it('weatherMountBody：{{user}} 宏 + 城市 + 体感 + 今天', () => {
+    const body = weatherMountBody('上海', D);
+    expect(body).toContain('{{user}} 那边的天气（上海）');
+    expect(body).toContain('Clear 26°（体感 25°）');
+    expect(body).toContain('空气质量 42（Good）');
+    expect(body).toContain('今天 15° ~ 30°');
   });
 });

@@ -128,7 +128,7 @@ const HISTORY_WINDOW_BATCH_SIZE = 30;
 // 反馈2 #2：我们的功能卡片（一起听/转发/相机 a2 等）都是 role='system'，会被角色的「隐藏系统消息」
 // 开关整组滤掉——按角色分片消失（她报的卡消失现象）就是这个开关。卡片是内容不是系统日志，
 // 永远豁免。list 与 reloadMessages 两处过滤共用这一个判定。
-const FEATURE_CARD_SOURCES = new Set(['camera_a2', 'diary_forward', 'together_forward', 'couple_forward', 'album_forward']);
+const FEATURE_CARD_SOURCES = new Set(['camera_a2', 'diary_forward', 'together_forward', 'couple_forward', 'album_forward', 'weather_forward']);
 const FEATURE_CARD_TYPES = new Set(['music_invite', 'music_accept', 'music_summary', 'music_chat_summary']);
 const isFeatureCardMessage = (message: Message) => (
     (message.metadata?.source != null && FEATURE_CARD_SOURCES.has(String(message.metadata.source)))

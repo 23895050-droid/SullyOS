@@ -13,6 +13,8 @@ import { resolveBubbleCornerRadii, shouldHideBubbleTail } from '../../utils/bubb
 import { isImageValue, useBlobRefUrl } from '../../utils/blobRef';
 import { buildReplySnapshotContent } from '../../utils/applyAssistantPostProcessing';
 import TokenImg from '../os/TokenImg';
+import Sky from '../../apps/couple/WeatherSky';
+import { starField } from '../../utils/weatherMath';
 import McdCard from './McdCard';
 import HtmlCard from './HtmlCard';
 import LuckinCard from './LuckinCard';
@@ -1968,6 +1970,54 @@ const MessageItem = React.memo(({
                                     </div>
                                 </div>
                             )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 天气转发卡片（weather_forward：表面四样 + 天空渐变底——白天蓝天/夜里星空；详细版只进 AI 上下文，不铺在卡上）
+        if (m.metadata?.source === 'weather_forward') {
+            const card = (m.metadata.forwardCard || {}) as { kind?: string; city?: string; temp?: number; text?: string; high?: number; low?: number; isDay?: boolean };
+            const stars = starField(card.city || 'sky', 14);
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div
+                            className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md relative"
+                            style={{ height: 132, textShadow: card.isDay ? '0 1px 5px rgba(0,0,0,0.35), 0 0 2px rgba(0,0,0,0.18)' : undefined }}
+                        >
+                            <Sky isDay={!!card.isDay} stars={stars} />
+                            {/* 压色层（与城市列表卡同款）：白天盖饱和蓝让白字站得住，夜里轻暗化更贴原图 */}
+                            <div
+                                className="absolute inset-0"
+                                style={{
+                                    background: card.isDay
+                                        ? 'linear-gradient(180deg, rgba(56,110,182,0.5) 0%, rgba(34,80,150,0.62) 100%)'
+                                        : 'rgba(8,14,32,0.1)',
+                                }}
+                            />
+                            <div className="absolute" style={{ left: 14, top: 11, color: '#fff' }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, opacity: 0.78 }}>天气</div>
+                                <div style={{ fontSize: 17, fontWeight: 600, lineHeight: '21px' }}>{card.city || ''}</div>
+                            </div>
+                            <div className="absolute" style={{ right: 14, top: 8, color: '#fff', fontSize: 40, fontWeight: 200, letterSpacing: -1, lineHeight: '48px' }}>
+                                {card.temp}°
+                            </div>
+                            <div className="absolute" style={{ left: 14, bottom: 12, color: '#fff', fontSize: 13.5, fontWeight: 500 }}>
+                                {card.text || ''}
+                            </div>
+                            <div className="absolute" style={{ right: 14, bottom: 13, color: '#fff', fontSize: 12, fontWeight: 600 }}>
+                                <span style={{ opacity: 0.62 }}>H:</span>{card.high}°
+                                <span style={{ opacity: 0.62, marginLeft: 6 }}>L:</span>{card.low}°
+                            </div>
                         </div>
                     </div>
                 </div>
