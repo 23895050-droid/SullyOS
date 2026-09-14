@@ -253,15 +253,22 @@
       .app-fade-in {
         animation: noxhome-tab-in 200ms ease-out both;
       }
-      /* 页面切换过渡（2026-09-14 三版，对齐上游 App 入场口径）：
-         旧页干脆让位（不做淡出——一版两拍会在中间露出空底，看着就是闪），
-         新页内容 200ms 淡入；底下的容器背景与页面同色，所以「换底」这一下看不出来。 */
-      @keyframes pageEnter {
+      /* 页面切换「幕布」（2026-09-14 四版，学上游 CompanionStageLoadingCurtain 的换场法）：
+         先落幕（170ms 盖满）→ 幕布后面把新旧页换掉（看不见）→ 揭幕（240ms）。
+         换页/图解码/布局全在幕布后面发生，所以底下闪不闪都看不见了——这才叫转场。 */
+      @keyframes veilIn {
         from { opacity: 0; }
         to { opacity: 1; }
       }
-      .page-enter {
-        animation: pageEnter 200ms ease-out both;
+      @keyframes veilOut {
+        from { opacity: 1; }
+        to { opacity: 0; }
+      }
+      .veil-in {
+        animation: veilIn 170ms ease-out both;
+      }
+      .veil-out {
+        animation: veilOut 240ms ease-out both;
       }
       /* 软键盘弹出时（iosStandalone 在 body 上挂 .ios-keyboard-open），收掉底部给 home 条留的 safe 间隙，
          让聊天输入栏直接贴住键盘：① 外壳容器不再把底边钉在 safe 上方，铺到可视区底；② 输入栏收掉自己的 pb-safe 白条。

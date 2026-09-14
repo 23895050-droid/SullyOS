@@ -138,30 +138,38 @@ const NoxHomeApp: React.FC = () => {
   const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
   const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
 
-  // ── 页面常驻 + 切换过渡（2026-09-14 二版）────────────────────────
-  // 一版是 key 变化 → 整棵树卸载重建：每点一下都要重建整棵页面、图片 objectURL 全被
-  // revoke 再重新读一遍（整屏背景先空一帧 = 闪，重建本身 = 卡）。上游 App 内部不这么干：
-  // 组件不卸载，图片就一直挂着，内存由「离开 App 整棵卸载」兜住（她的原话：上游保住了
-  // 内存也保住了流畅，别动它的管线）。
-  // 现在照这条：访问过的页面**留在树上**（懒挂载、不卸载），切页只切显示/隐藏 + 淡入淡出。
+  // ── 页面常驻 + 幕布转场（2026-09-14 四版）────────────────────────
+  // 常驻（二版留下，是对的）：访问过的页面留在树上、不卸载 —— 图片 objectURL 不会被 revoke
+  // 重读、整棵页面不重建，内存由「离开 App 整棵卸载」兜住（上游那套）。
+  // 转场（四版，学上游 CompanionStageLoadingCurtain/AppLoadingFallback 的换场法）：
+  // 切页先落幕布盖满 → 幕布后面把当前页换掉 → 再揭幕。换页、图解码、布局全藏在幕布后面，
+  // 所以底下闪不闪都看不见；不再让页面元素自己淡入淡出（那不叫转场，是一种「闪」的来源）。
   const pageKey = `${tab}:${inner ?? 'root'}`;
+  const [shownKey, setShownKey] = useState(pageKey);   // 幕布后面真正在展示的那一页
+  const [curtain, setCurtain] = useState<'in' | 'out' | null>(null);
   const [mounted, setMounted] = useState<string[]>([pageKey]);
-  // enteringKey = 本次「切进来」的那一层：给它跑一次 200ms 内容淡入，跑完把类摘掉
-  // （摘掉后才能在下一次切回来时重新触发）。旧页不做淡出——两拍会在中间露出空底。
-  const [enteringKey, setEnteringKey] = useState<string | null>(null);
   const lastPageRef = useRef(pageKey);
   useEffect(() => {
     if (lastPageRef.current === pageKey) return;
     lastPageRef.current = pageKey;
-    setMounted((m) => (m.includes(pageKey) ? m : [...m, pageKey]));
-    setEnteringKey(pageKey);
-    const t = window.setTimeout(() => setEnteringKey(null), 240);
-    return () => window.clearTimeout(t);
+    setCurtain('in');
+    const t1 = window.setTimeout(() => {
+      // 幕布已盖满：这时才换页（挂上新页、切显示），换的过程被幕布挡住
+      setMounted((m) => (m.includes(pageKey) ? m : [...m, pageKey]));
+      setShownKey(pageKey);
+      setCurtain('out');
+    }, 170);
+    const t2 = window.setTimeout(() => setCurtain(null), 170 + 260);
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
   }, [pageKey]);
 
+  // 幕布配色：跟目标页一个色系（家的深色壁纸 / 我们·设置的粉），揭幕时颜色接得上
+  const veilFor = (k: string) => (k.startsWith('home')
+    ? { background: 'rgba(24,28,46,0.86)' }
+    : { background: 'rgba(255,233,242,0.94)' });
+
   // 空闲预热（2026-09-14）：首屏落定后、浏览器空闲时把「我们」「设置」两页先在后台挂上
-  // （隐藏）——图片那时就解析好了，第一次切过去也不会有图慢半拍。上游也是这么预热 App 的；
-  // 放空闲时段是为了别跟首屏抢时间（手机上首屏那一下最金贵）。
+  // （隐藏）——图片那时就解析好了，第一次切过去幕布揭开就已经是完整页面。
   useEffect(() => {
     const warm = () => {
       setMounted((m) => ['couple:root', 'settings:root'].reduce((acc, k) => (acc.includes(k) ? acc : [...acc, k]), m));
@@ -361,22 +369,35 @@ const NoxHomeApp: React.FC = () => {
       className="h-full w-full relative overflow-hidden select-none"
       style={bgFor(tab)}
     >
-      {/* 页面层：每层自己滚、自带背景；访问过的都留着（display:none 不重建），同一时刻只有当前页可见。
-          切页 = 旧页瞬间让位 + 新页内容 200ms 淡入（上游 App 入场同款口径）。 */}
+      {/* 页面层：每层自己滚、自带背景；访问过的都留着（display:none 不重建）。
+          同一时刻只有 shownKey 那一层可见——「什么时候换」由幕布节奏决定，不由点击决定。 */}
       {mounted.map((k) => {
         const [layerTab, layerInnerRaw] = k.split(':');
         const layerInner = layerInnerRaw === 'root' ? null : layerInnerRaw;
-        const isActive = k === pageKey;
         return (
           <div
             key={k}
-            className={`absolute inset-0 overflow-y-auto${isActive && enteringKey === k ? ' page-enter' : ''}`}
-            style={{ ...bgFor(layerTab), display: isActive ? undefined : 'none' }}
+            className="absolute inset-0 overflow-y-auto"
+            style={{ ...bgFor(layerTab), display: k === shownKey ? undefined : 'none' }}
           >
             {renderPage(layerTab, layerInner)}
           </div>
         );
       })}
+
+      {/* 转场幕布：盖满 → 后面换页 → 揭开（只动 opacity；盖着的时候不接事件） */}
+      {curtain && (
+        <div
+          className={`absolute inset-0 pointer-events-none ${curtain === 'in' ? 'veil-in' : 'veil-out'}`}
+          style={{
+            // 用目标页的色（不是当前展示页）：整屏先落到目标色，揭开就是同一色系的页面，不跳色
+            ...veilFor(pageKey),
+            zIndex: 30,
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+          }}
+        />
+      )}
 
       {/* ── 底部胶囊导航（固定悬浮） ── */}
       <div
