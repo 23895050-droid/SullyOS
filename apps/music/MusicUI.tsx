@@ -715,14 +715,14 @@ export const PlayControls: React.FC<{
   onToggle: () => void;
   onNext: () => void;
 }> = ({ playing, loading, onPrev, onToggle, onNext }) => (
-  <div className="flex items-center justify-center gap-8 mt-3 mb-1">
-    <button onClick={onPrev} className="p-2 rounded-full transition-all"
+  <div className="mz-play-controls flex items-center justify-center gap-8 mt-3 mb-1">
+    <button onClick={onPrev} className="mz-skip-btn p-2 rounded-full transition-all"
       style={{ color: C.muted }}>
       <SkipBack size={22} weight="fill" />
     </button>
     <button
       onClick={onToggle}
-      className="w-[56px] h-[56px] rounded-full flex items-center justify-center transition-transform active:scale-95 relative"
+      className="mz-play-btn w-[56px] h-[56px] rounded-full flex items-center justify-center transition-transform active:scale-95 relative"
       style={{
         background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
         boxShadow: `0 4px 24px rgba(var(--mz-glow-rgb, 205,198,233), 0.25), 0 0 60px rgba(var(--mz-glow-rgb, 205,198,233), 0.08)`,
@@ -730,16 +730,17 @@ export const PlayControls: React.FC<{
       }}
     >
       {loading ? (
-        <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+        <span className="relative z-10 w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
       ) : playing ? (
-        <Pause size={22} weight="fill" color="white" />
+        <Pause size={22} weight="fill" color="white" className="relative z-10" />
       ) : (
-        <Play size={22} weight="fill" color="white" />
+        <Play size={22} weight="fill" color="white" className="relative z-10" />
       )}
-      {/* 外圈装饰 */}
+      {/* 外圈装饰（不是按钮本体：只画那圈细描边。给它加背景/尺寸会正好盖住上面的图标——
+          所以图标压了 z-10 兜底，改按钮请用 .mz-play-btn） */}
       <div className="absolute inset-[-3px] rounded-full pointer-events-none mz-play-ring" />
     </button>
-    <button onClick={onNext} className="p-2 rounded-full transition-all"
+    <button onClick={onNext} className="mz-skip-btn p-2 rounded-full transition-all"
       style={{ color: C.muted }}>
       <SkipForward size={22} weight="fill" />
     </button>

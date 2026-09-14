@@ -15,7 +15,15 @@ describe('音乐内部基础层', () => {
     for (const cls of [
       '.mz-vinyl-disc', '.mz-vinyl-label', '.mz-vinyl-pivot', '.mz-vinyl-sheen',
       '.mz-mizu-header', '.mz-metachip', '.mz-play-ring', '.mz-progress-track', '.mz-lyric-box',
+      '.mz-play-btn', '.mz-skip-btn', '.mz-play-controls',
     ]) expect(MUSIC_APP_BASE_CSS).toContain(cls);
+  });
+
+  it('播放页提示词点明主播放键是 .mz-play-btn，且警告别把 .mz-play-ring 当按钮（小白球事故）', () => {
+    const player = getPromptEntries().find((e) => e.label === '美化助手-播放页')!;
+    expect(player.defaultValue).toContain('.mz-play-btn');
+    expect(player.defaultValue).toContain('不是按钮本体');
+    expect(player.defaultValue).toContain('.mz-play-btn svg');
   });
 
   it('聊歌页类都在（气泡/头像/输入/发送/语音卡/顶栏）', () => {

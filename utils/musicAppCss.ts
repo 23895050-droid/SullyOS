@@ -12,7 +12,9 @@
  * 类名速查：
  *   播放页：.mz-vinyl-disc（唱片描边）/ -label（中心标签）/ -pivot（轴心）/
  *          -sheen（表面反光）/ .mz-mizu-header（顶部毛玻璃条下边线）/
- *          .mz-metachip（时间小签）/ .mz-play-ring（播控大钮外圈）/
+ *          .mz-metachip（时间小签）/ .mz-play-btn（主播放键本体；图标 = .mz-play-btn svg）/
+ *          .mz-play-ring（主键**外面**那圈描边，不是按钮本体）/ .mz-skip-btn（上/下一首）/
+ *          .mz-play-controls（播控整行）/
  *          .mz-progress-track（进度条轨道内影）/ .mz-lyric-box（歌词区上下渐隐）
  *   装饰：.mz-bokeh-blob（全部光斑/星芒背景，想清干净就 display:none）+ 编号 -1~-6
  *   聊歌页：.mz-chat-bubble-ai / -user（气泡描边）/ .mz-chat-avatar（头像描边）/
@@ -41,6 +43,13 @@ export const MUSIC_APP_BASE_CSS = `
 .mz-mizu-header{border-bottom:1px solid rgba(255,255,255,0.3)}
 .mz-metachip{background:rgba(255,255,255,0.55)}
 .mz-play-ring{border:1px solid rgba(255,255,255,0.2)}
+/* 播控区钩子（2026-09-14 补）：主播放键本体 = .mz-play-btn（图标 = .mz-play-btn svg）；
+   上一首/下一首 = .mz-skip-btn；整行 = .mz-play-controls。
+   ⚠️ .mz-play-ring 是主键**外面**那圈细描边（按钮里一个绝对定位空 div），不是按钮本体——
+   给它加 background/宽度/尺寸会正好盖住按钮和图标（小助手反复踩：写出来变成一个白球）。 */
+.mz-play-btn{position:relative}
+.mz-skip-btn{position:relative}
+.mz-play-controls{position:relative}
 .mz-progress-track{box-shadow:inset 0 1px 3px rgba(0,0,0,0.06)}
 .mz-lyric-box{mask-image:linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);-webkit-mask-image:linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)}
 .mz-header-btn{border:1px solid rgba(255,255,255,0.45)}
