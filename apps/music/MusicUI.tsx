@@ -150,11 +150,7 @@ export const SearchBar: React.FC<{
     >
       <span className="relative z-10">{searching ? '...' : '搜索'}</span>
       {/* shimmer 扫光 */}
-      <div className="absolute inset-0 pointer-events-none" style={{
-        background: `linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.3) 50%, transparent 70%)`,
-        backgroundSize: '200% 100%',
-        animation: 'shizuku-shimmer 3s ease-in-out infinite',
-      }} />
+      <div className="absolute inset-0 pointer-events-none mz-shimmer-sweep-30" />
     </button>
   </div>
 );
@@ -229,7 +225,7 @@ export const TinyAvatar: React.FC<{
       style={{
         ...style,
         background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`,
-        color: 'white',
+        color: 'var(--mz-on-text, #fff)',
         fontSize: Math.round(size * 0.42),
       }}
     >
@@ -301,10 +297,9 @@ export const TogetherHeader: React.FC<{
         <button
           onClick={(e) => { e.stopPropagation(); onKick(main.id); }}
           aria-label={`结束和 ${main.name} 的一起听`}
-          className="absolute top-1 right-1.5 p-0.5 rounded-full transition-colors"
-          style={{ color: C.primary, background: 'rgba(255,255,255,0.5)' }}
-          title="结束一起听"
-        >
+          className="absolute top-1 right-1.5 p-0.5 rounded-full transition-colors mz-glass-fill"
+          style={{ color: C.primary }}
+          title="结束一起听">
           <X size={10} weight="bold" />
         </button>
       )}
@@ -334,11 +329,10 @@ export const InviteTogetherModal: React.FC<{
   <div className="fixed inset-0 flex items-end justify-center"
     style={{ zIndex: 130, background: 'rgba(30,22,40,0.35)' }}
     onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div className="flex flex-col"
+    <div className="flex flex-col mz-sheet"
       style={{
-        width: 'min(100%, 560px)', background: 'rgba(255,255,255,0.97)', borderRadius: '28px 28px 0 0',
+        width: 'min(100%, 560px)',
         padding: 20, paddingBottom: 'calc(20px + var(--safe-bottom, 0px))', gap: 12,
-        boxShadow: '0 -12px 40px rgba(0,0,0,0.18)',
       }}>
       {/* 标题 */}
       <div className="flex items-center justify-between">
@@ -374,8 +368,8 @@ export const InviteTogetherModal: React.FC<{
             key={c.id}
             type="button"
             onClick={() => onPick(c)}
-            className="w-full flex items-center gap-2.5 rounded-2xl px-3 py-2.5 transition-all active:scale-[0.98] text-left"
-            style={{ background: C.glass, border: '1px solid rgba(255,255,255,0.45)' }}
+            className="w-full flex items-center gap-2.5 rounded-2xl px-3 py-2.5 transition-all active:scale-[0.98] text-left mz-glass-edge-45"
+            style={{ background: C.glass }}
           >
             <InviteCharAvatar avatar={c.avatar} name={c.name} />
             <span className="flex-1 min-w-0 truncate text-[12px] font-medium" style={{ color: C.text }}>{c.name}</span>
@@ -467,8 +461,7 @@ export const MiniPlayer: React.FC<{
           style={{ border: `1.5px solid rgba(var(--mz-accent-rgb, 179,168,206), 0.25)`, opacity: regenStatus ? 0.4 : 1 }} />
         {playing && !regenStatus && <div className="absolute -bottom-1 -right-1"><Sparkle size={6} color={C.glow} /></div>}
         {regenStatus && (
-          <div className="absolute inset-0 rounded-xl flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}>
+          <div className="absolute inset-0 rounded-xl flex items-center justify-center mz-regen-veil">
             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
           </div>
         )}

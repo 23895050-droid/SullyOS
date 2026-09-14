@@ -296,7 +296,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
 
   return (
     <div className="mz-visitchar flex flex-col h-full relative"
-      style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
+      style={{ background: `linear-gradient(180deg, var(--mz-sheet-top, #ffffff) 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
       <BokehBg />
       <MizuHeader
         title={`拜访 · ${char.name}`}
@@ -325,7 +325,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
                   style={{ border: `2px solid rgba(var(--mz-glow-rgb, 205,198,233), 0.38)`, boxShadow: `0 4px 20px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }} />
               ) : (
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl"
-                  style={{ background: gradientFor('gradient-04'), color: 'white' }}>
+                  style={{ background: gradientFor('gradient-04'), color: 'var(--mz-on-text, #fff)' }}>
                   {char.avatar || char.name.slice(0, 1)}
                 </div>
               )}
@@ -393,7 +393,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
                 <TokenImg value={profile.currentListening.albumPic} className="w-12 h-12 rounded-xl object-cover" alt="" />
               ) : (
                 <div className="w-12 h-12 rounded-xl flex items-center justify-center"
-                  style={{ background: gradientFor('gradient-03'), color: 'white' }}>
+                  style={{ background: gradientFor('gradient-03'), color: 'var(--mz-on-text, #fff)' }}>
                   <MusicNote size={20} weight="bold" />
                 </div>
               )}
@@ -446,8 +446,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
                   <div key={pl.id} className="rounded-2xl shizuku-glass overflow-hidden">
                     <button
                       onClick={() => togglePlaylist(pl.id)}
-                      className="w-full flex items-center gap-3 p-3 text-left"
-                    >
+                      className="w-full flex items-center gap-3 p-3 text-left">
                       <div className="w-12 h-12 rounded-xl shrink-0 flex items-center justify-center overflow-hidden"
                         style={{ background: gradientFor(pl.coverStyle) }}>
                         {pl.songs[0]?.albumPic ? (
@@ -656,8 +655,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
                   background: `rgba(var(--mz-sakura-rgb, 244,194,207), 0.08)`,
                   border: `1px solid rgba(var(--mz-sakura-rgb, 244,194,207), 0.21)`,
                 }}
-                title="清空后重新生成。"
-              >
+                title="清空后重新生成。">
                 {initializing ? '重新敲门中…' : '重新生成音乐人格'}
               </button>
             </div>

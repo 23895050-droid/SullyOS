@@ -64,8 +64,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
     />
     <button
       onClick={() => setExpanded((v: boolean) => !v)}
-      className="relative w-full flex items-center gap-3 p-2.5 text-left"
-    >
+      className="relative w-full flex items-center gap-3 p-2.5 text-left">
       <div className="relative w-12 h-12 shrink-0">
         <div className="absolute inset-0 rounded-xl flex items-center justify-center overflow-hidden"
           style={{
@@ -87,7 +86,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
           <span className="text-[8px] px-1.5 py-[1px] rounded-full font-bold"
             style={{
               background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`,
-              color: 'white',
+              color: 'var(--mz-on-text, #fff)',
               letterSpacing: '0.1em',
             }}>
             OURS
@@ -109,8 +108,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
             <div key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/30 transition-colors">
               <button
                 onClick={() => onPlay(s, idx)}
-                className="flex-1 flex items-center gap-2 min-w-0 text-left"
-              >
+                className="flex-1 flex items-center gap-2 min-w-0 text-left">
                 <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
                   style={{ background: active ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : `rgba(var(--mz-faint-rgb, 188,184,204), 0.15)` }}>
                   {active && playing ? (
@@ -143,8 +141,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
                 }}
                 className="text-[10px] px-1.5 py-0.5 rounded shrink-0 transition-colors"
                 style={{ color: C.faint }}
-                title="移除"
-              >
+                title="移除">
                 ✕
               </button>
             </div>
@@ -327,7 +324,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
     // 有本地专辑 → 简洁单页：仅 album + 一个登录入口卡
     return (
       <div className="flex flex-col h-full relative"
-        style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
+        style={{ background: `linear-gradient(180deg, var(--mz-sheet-top, #ffffff) 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
         <BokehBg />
         <MizuHeader title="My Cloud" onBack={onBack} />
         <div className="relative z-10 flex-1 overflow-y-auto pb-24 px-3 pt-3 shizuku-scrollbar">
@@ -347,8 +344,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
           {/* 登录入口卡 */}
           <button
             onClick={() => setShowNeteaseLogin(true)}
-            className="mt-3 w-full rounded-2xl shizuku-glass p-4 flex items-center gap-3 transition-all active:scale-[0.99]"
-          >
+            className="mt-3 w-full rounded-2xl shizuku-glass p-4 flex items-center gap-3 transition-all active:scale-[0.99]">
             <div className="w-10 h-10 rounded-full flex items-center justify-center"
               style={{ background: `linear-gradient(135deg, rgba(var(--mz-faint-rgb, 188,184,204), 0.25), rgba(var(--mz-muted-rgb, 124,119,154), 0.19))`, border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.25)` }}>
               <UserIcon size={18} color={C.muted} weight="duotone" />
@@ -383,7 +379,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
 
   return (
     <div className="mz-profile flex flex-col h-full relative"
-      style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
+      style={{ background: `linear-gradient(180deg, var(--mz-sheet-top, #ffffff) 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
       <BokehBg />
       <MizuHeader
         title="My Cloud"
@@ -395,8 +391,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 onClick={onOpenSearch}
                 className="p-1.5 rounded-full transition-all"
                 style={{ color: C.primary }}
-                title="搜索"
-              >
+                title="搜索">
                 <MagnifyingGlass size={16} weight="bold" />
               </button>
             )}
@@ -405,8 +400,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 onClick={onOpenSettings}
                 className="p-1.5 rounded-full transition-all"
                 style={{ color: C.primary }}
-                title="设置"
-              >
+                title="设置">
                 <Gear size={16} weight="bold" />
               </button>
             )}
@@ -604,7 +598,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
               className="flex-1 py-1.5 rounded-full text-[11px] tracking-wider transition-all"
               style={{
                 background: tab === t.k ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : 'transparent',
-                color: tab === t.k ? 'white' : C.muted,
+                color: tab === t.k ? 'var(--mz-on-text, #fff)' : C.muted,
               }}
             >
               {t.label}
@@ -643,8 +637,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
               <div key={pl.id} className="rounded-2xl shizuku-glass overflow-hidden">
                 <button
                   onClick={() => expandPlaylist(pl)}
-                  className="w-full flex items-center gap-3 p-2.5 text-left"
-                >
+                  className="w-full flex items-center gap-3 p-2.5 text-left">
                   <img src={pl.coverImgUrl} alt=""
                     className="w-12 h-12 rounded-xl object-cover"
                     style={{ border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.19)` }} />
@@ -699,9 +692,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                   onOpenPlayer();
                   trackEvent('播放「我的」页列表里的一首歌', { source: 'record' });
                 }}
-                className="w-full flex items-center gap-3 p-2 rounded-2xl text-left transition-all"
-                style={{ background: 'rgba(255,255,255,0.06)' }}
-              >
+                className="w-full flex items-center gap-3 p-2 rounded-2xl text-left transition-all mz-soft-card">
                 <div className="text-[10px] w-5 text-center shrink-0" style={{ color: C.faint }}>{i + 1}</div>
                 <TokenImg value={r.song.albumPic} alt="" className="w-10 h-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0">
@@ -729,9 +720,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                   onOpenPlayer();
                   trackEvent('播放「我的」页列表里的一首歌', { source: 'cloud' });
                 }}
-                className="w-full flex items-center gap-3 p-2 rounded-2xl text-left transition-all"
-                style={{ background: 'rgba(255,255,255,0.06)' }}
-              >
+                className="w-full flex items-center gap-3 p-2 rounded-2xl text-left transition-all mz-soft-card">
                 <TokenImg value={s.albumPic || 'https://p1.music.126.net/y19E5SadGUmSR8SZxkrNtw==/109951163965029180.jpg'}
                   alt="" className="w-10 h-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0">

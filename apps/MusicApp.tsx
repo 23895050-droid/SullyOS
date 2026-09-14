@@ -384,16 +384,14 @@ const MusicApp: React.FC = () => {
               onClick={() => setView('playlist')}
               className="p-1.5 rounded-full transition-all"
               style={{ color: C.primary }}
-              title="角色歌单"
-            >
+              title="角色歌单">
               <MusicNote size={16} weight="bold" />
             </button>
             <button
               onClick={() => setView('profile')}
               className="p-1.5 rounded-full transition-all"
               style={{ color: C.primary }}
-              title="我的"
-            >
+              title="我的">
               <UserIcon size={16} weight="bold" />
             </button>
             <button
@@ -519,7 +517,7 @@ const MusicApp: React.FC = () => {
                 <button
                   onClick={() => { setView('search'); trackEvent('空播放页去找歌'); }}
                   className="px-5 py-2 rounded-full text-[11px] font-semibold active:scale-95 transition-transform"
-                  style={{ background: C.primary, color: '#fff', boxShadow: '0 2px 10px rgba(0,0,0,0.15)' }}>
+                  style={{ background: C.primary, color: 'var(--mz-on-text, #fff)', boxShadow: '0 2px 10px rgba(0,0,0,0.15)' }}>
                   去找首歌听
                 </button>
               </>
@@ -560,7 +558,7 @@ const MusicApp: React.FC = () => {
                 onClick={() => addToast(`${companions[0]?.name || 'Ta'} 正在和你一起听`, 'info')}
                 aria-label="正在一起听"
                 className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
-                style={{ color: '#fff', background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`, boxShadow: `0 2px 8px rgba(var(--mz-sakura-rgb, 244,194,207), 0.35)` }}
+                style={{ color: 'var(--mz-on-text, #fff)', background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`, boxShadow: `0 2px 8px rgba(var(--mz-sakura-rgb, 244,194,207), 0.35)` }}
               >
                 <Headphones size={15} weight="fill" />
               </button>
@@ -582,11 +580,9 @@ const MusicApp: React.FC = () => {
             <VinylDisc albumPic={current.albumPic} playing={playing} size={150} bitrate={bitrateMap[cfg.quality]} />
             {/* 重录中覆盖层 — 只在本地歌且 regeneratingId 匹配时显示 */}
             {isCurrentRegenerating && (
-              <div className="absolute inset-0 rounded-full flex items-center justify-center pointer-events-none"
+              <div className="absolute inset-0 rounded-full flex items-center justify-center pointer-events-none mz-regen-veil-disc"
                 style={{
-                  background: `radial-gradient(circle, rgba(0,0,0,0.55) 30%, rgba(0,0,0,0.35) 70%)`,
-                  backdropFilter: 'blur(6px)',
-                  WebkitBackdropFilter: 'blur(6px)',
+
                   boxShadow: `0 0 30px rgba(var(--mz-glow-rgb, 205,198,233), 0.5)`,
                   animation: 'shizuku-glow 2s ease-in-out infinite',
                 }}
@@ -632,8 +628,7 @@ const MusicApp: React.FC = () => {
 
           <div
             ref={lyricBoxRef}
-            className="flex-1 w-full my-3 min-h-0 overflow-y-auto text-center scroll-smooth shizuku-scrollbar px-2 mz-lyric-box"
-          >
+            className="flex-1 w-full my-3 min-h-0 overflow-y-auto text-center scroll-smooth shizuku-scrollbar px-2 mz-lyric-box">
             {lyric.length === 0 ? (
               <div className="pt-6 flex flex-col items-center gap-2" style={{ color: C.faint }}>
                 <Sparkle size={12} color={C.glow} />
@@ -784,30 +779,23 @@ const MusicApp: React.FC = () => {
         {/* 夜色预设：底部「听歌 | 聊歌」胶囊切换台（附件图一） */}
         {nightPreset && (
           <div className="shrink-0 relative z-10 flex items-center justify-center pb-[calc(var(--safe-bottom)+10px)]">
-            <div className="flex items-center rounded-full px-1 py-1"
-              style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)' }}>
+            <div className="flex items-center rounded-full px-1 py-1 mz-night-tabbar">
               <button
-                className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] font-semibold transition-all"
-                style={{ background: 'rgba(255,255,255,0.16)', color: '#fff' }}
-              >
+                className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] font-semibold transition-all mz-night-tab-on">
                 <MusicNote size={12} weight="duotone" /> 听歌
               </button>
               <button
                 onClick={() => { setChatCharId(companions[0]?.id ?? playlistCharId); setView('chat'); }}
-                className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] transition-all"
-                style={{ color: 'rgba(255,255,255,0.55)' }}
-              >
+                className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] transition-all mz-night-tab-off">
                 <ChatCircleText size={12} weight="duotone" /> 聊歌
               </button>
             </div>
             {companions.length > 0 && (
               <button
                 onClick={() => requestEndTogether(null)}
-                className="absolute right-4 w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90"
-                style={{ color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.15)' }}
+                className="absolute right-4 w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90 mz-night-close"
                 aria-label="结束一起听"
-                title="结束一起听"
-              >
+                title="结束一起听">
                 <X size={11} weight="bold" />
               </button>
             )}
@@ -889,11 +877,11 @@ const MusicApp: React.FC = () => {
             <div className="grid grid-cols-5 gap-1.5">
               {(['standard', 'higher', 'exhigh', 'lossless', 'hires'] as const).map(q => (
                 <button key={q} onClick={() => { setDraft({ quality: q }); trackEvent('切换音质档位', { quality: q }); }}
-                  className="py-2 rounded-xl text-[10px] transition-all"
+                  className="py-2 rounded-xl text-[10px] transition-all mz-glass-edge"
                   style={{
                     background: cfg.quality === q ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
-                    color: cfg.quality === q ? 'white' : C.muted,
-                    border: cfg.quality === q ? '1px solid transparent' : `1px solid rgba(255,255,255,0.3)`,
+                    color: cfg.quality === q ? 'var(--mz-on-text, #fff)' : C.muted,
+                    border: cfg.quality === q ? '1px solid transparent' : undefined,
                     boxShadow: cfg.quality === q ? `0 2px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` : 'none',
                     backdropFilter: 'blur(8px)',
                   }}
@@ -917,12 +905,12 @@ const MusicApp: React.FC = () => {
                     key={c.id}
                     type="button"
                     onClick={() => setVisitCharId(c.id)}
-                    className="rounded-full px-3 py-1.5 transition-all"
+                    className="rounded-full px-3 py-1.5 transition-all mz-pill"
                     style={{
                       fontSize: 10, fontWeight: 600,
                       background: selected ? C.primary : C.glass,
-                      color: selected ? '#fff' : C.muted,
-                      border: `1px solid ${selected ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                      color: selected ? 'var(--mz-on-text, #fff)' : C.muted,
+                      border: selected ? '1px solid transparent' : undefined,
                     }}
                   >
                     {c.name}
@@ -995,15 +983,15 @@ const MusicApp: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setLyricInject({ windowRadius: Math.max(0, (musicStore.lyricInject.windowRadius ?? 2) - 1) })}
-                  className="w-7 h-7 rounded-full flex items-center justify-center"
-                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)' }}
+                  className="w-7 h-7 rounded-full flex items-center justify-center mz-pill"
+                  style={{ color: C.muted }}
                 >−</button>
                 <div className="min-w-[20px] text-center text-[12px] font-bold" style={{ color: C.text }}>{musicStore.lyricInject.windowRadius ?? 2}</div>
                 <button
                   type="button"
                   onClick={() => setLyricInject({ windowRadius: Math.min(8, (musicStore.lyricInject.windowRadius ?? 2) + 1) })}
-                  className="w-7 h-7 rounded-full flex items-center justify-center"
-                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)' }}
+                  className="w-7 h-7 rounded-full flex items-center justify-center mz-pill"
+                  style={{ color: C.muted }}
                 >+</button>
               </div>
             </div>
@@ -1015,11 +1003,11 @@ const MusicApp: React.FC = () => {
                     key={pos}
                     type="button"
                     onClick={() => setLyricInject({ fullLyricPos: pos })}
-                    className="rounded-full px-2.5 py-1 text-[9px] font-semibold transition-all"
+                    className="rounded-full px-2.5 py-1 text-[9px] font-semibold transition-all mz-pill"
                     style={{
                       background: (musicStore.lyricInject.fullLyricPos ?? 1) === pos ? C.primary : C.glass,
-                      color: (musicStore.lyricInject.fullLyricPos ?? 1) === pos ? '#fff' : C.muted,
-                      border: (musicStore.lyricInject.fullLyricPos ?? 1) === pos ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                      color: (musicStore.lyricInject.fullLyricPos ?? 1) === pos ? 'var(--mz-on-text, #fff)' : C.muted,
+                      border: (musicStore.lyricInject.fullLyricPos ?? 1) === pos ? '1px solid transparent' : undefined,
                     }}
                   >{label}</button>
                 ))}
@@ -1033,11 +1021,11 @@ const MusicApp: React.FC = () => {
                     key={pos}
                     type="button"
                     onClick={() => setLyricInject({ windowPos: pos })}
-                    className="rounded-full px-2.5 py-1 text-[9px] font-semibold transition-all"
+                    className="rounded-full px-2.5 py-1 text-[9px] font-semibold transition-all mz-pill"
                     style={{
                       background: (musicStore.lyricInject.windowPos ?? 4) === pos ? C.primary : C.glass,
-                      color: (musicStore.lyricInject.windowPos ?? 4) === pos ? '#fff' : C.muted,
-                      border: (musicStore.lyricInject.windowPos ?? 4) === pos ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                      color: (musicStore.lyricInject.windowPos ?? 4) === pos ? 'var(--mz-on-text, #fff)' : C.muted,
+                      border: (musicStore.lyricInject.windowPos ?? 4) === pos ? '1px solid transparent' : undefined,
                     }}
                   >{label}</button>
                 ))}
@@ -1052,15 +1040,15 @@ const MusicApp: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setLyricInject({ windowDepth: Math.max(0, (musicStore.lyricInject.windowDepth ?? 4) - 1) })}
-                  className="w-7 h-7 rounded-full flex items-center justify-center"
-                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)' }}
+                  className="w-7 h-7 rounded-full flex items-center justify-center mz-pill"
+                  style={{ color: C.muted }}
                 >−</button>
                 <div className="min-w-[20px] text-center text-[12px] font-bold" style={{ color: C.text }}>{musicStore.lyricInject.windowDepth ?? 4}</div>
                 <button
                   type="button"
                   onClick={() => setLyricInject({ windowDepth: Math.min(8, (musicStore.lyricInject.windowDepth ?? 4) + 1) })}
-                  className="w-7 h-7 rounded-full flex items-center justify-center"
-                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)' }}
+                  className="w-7 h-7 rounded-full flex items-center justify-center mz-pill"
+                  style={{ color: C.muted }}
                 >+</button>
               </div>
             </div>
@@ -1072,11 +1060,11 @@ const MusicApp: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setLyricInject({ fullLyric: !(musicStore.lyricInject.fullLyric ?? true) })}
-                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all"
+                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all mz-pill"
                 style={{
                   background: (musicStore.lyricInject.fullLyric ?? true) ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
-                  color: (musicStore.lyricInject.fullLyric ?? true) ? '#fff' : C.muted,
-                  border: (musicStore.lyricInject.fullLyric ?? true) ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                  color: (musicStore.lyricInject.fullLyric ?? true) ? 'var(--mz-on-text, #fff)' : C.muted,
+                  border: (musicStore.lyricInject.fullLyric ?? true) ? '1px solid transparent' : undefined,
                 }}
               >
                 {(musicStore.lyricInject.fullLyric ?? true) ? '已开启' : '已关闭'}
@@ -1090,11 +1078,11 @@ const MusicApp: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setLyricInject({ keywordTrigger: !(musicStore.lyricInject.keywordTrigger ?? true) })}
-                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all"
+                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all mz-pill"
                 style={{
                   background: (musicStore.lyricInject.keywordTrigger ?? true) ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
-                  color: (musicStore.lyricInject.keywordTrigger ?? true) ? '#fff' : C.muted,
-                  border: (musicStore.lyricInject.keywordTrigger ?? true) ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                  color: (musicStore.lyricInject.keywordTrigger ?? true) ? 'var(--mz-on-text, #fff)' : C.muted,
+                  border: (musicStore.lyricInject.keywordTrigger ?? true) ? '1px solid transparent' : undefined,
                 }}
               >
                 {(musicStore.lyricInject.keywordTrigger ?? true) ? '已开启' : '已关闭'}
@@ -1126,11 +1114,11 @@ const MusicApp: React.FC = () => {
                         setMusicApiForm({ baseUrl: patch.baseUrl ?? '', apiKey: patch.apiKey ?? '', model: patch.model ?? '' });
                         addToast(`音乐总结 API 已切换到预设「${preset.name}」`, 'success');
                       }}
-                      className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all"
+                      className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all mz-pill"
                       style={{
                         background: active ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
-                        color: active ? '#fff' : C.muted,
-                        border: active ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                        color: active ? 'var(--mz-on-text, #fff)' : C.muted,
+                        border: active ? '1px solid transparent' : undefined,
                       }}
                     >
                       {preset.name}{active ? ' · 使用中' : ''}
@@ -1140,15 +1128,15 @@ const MusicApp: React.FC = () => {
               </div>
             )}
             <div className="flex flex-col mb-2" style={{ gap: 6 }}>
-              <input value={musicApiForm.baseUrl} onChange={(e) => setMusicApiForm({ ...musicApiForm, baseUrl: e.target.value })} placeholder="总结 API Base URL（已带 /v1）" className="shizuku-input text-[10px]" style={{ background: C.glass, color: C.text, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
-              <input value={musicApiForm.apiKey} onChange={(e) => setMusicApiForm({ ...musicApiForm, apiKey: e.target.value })} placeholder="总结 API Key" className="shizuku-input text-[10px]" style={{ background: C.glass, color: C.text, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
-              <input value={musicApiForm.model} onChange={(e) => setMusicApiForm({ ...musicApiForm, model: e.target.value })} placeholder="总结模型名" className="shizuku-input text-[10px]" style={{ background: C.glass, color: C.text, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
+              <input value={musicApiForm.baseUrl} onChange={(e) => setMusicApiForm({ ...musicApiForm, baseUrl: e.target.value })} placeholder="总结 API Base URL（已带 /v1）" className="shizuku-input text-[10px] mz-input" style={{ background: C.glass, color: C.text, borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
+              <input value={musicApiForm.apiKey} onChange={(e) => setMusicApiForm({ ...musicApiForm, apiKey: e.target.value })} placeholder="总结 API Key" className="shizuku-input text-[10px] mz-input" style={{ background: C.glass, color: C.text, borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
+              <input value={musicApiForm.model} onChange={(e) => setMusicApiForm({ ...musicApiForm, model: e.target.value })} placeholder="总结模型名" className="shizuku-input text-[10px] mz-input" style={{ background: C.glass, color: C.text, borderRadius: 8, padding: '6px 8px', outline: 'none' }} />
             </div>
             <button
               type="button"
               onClick={() => { setMusicApi({ baseUrl: musicApiForm.baseUrl.trim(), apiKey: musicApiForm.apiKey.trim(), model: musicApiForm.model.trim() }); addToast('音乐总结 API 已保存', 'success'); }}
               className="rounded-full w-full border-0 cursor-pointer"
-              style={{ padding: '8px 0', fontSize: 11, fontWeight: 700, color: '#fff', background: `linear-gradient(135deg, ${C.primary}, ${C.accent})` }}
+              style={{ padding: '8px 0', fontSize: 11, fontWeight: 700, color: 'var(--mz-on-text, #fff)', background: `linear-gradient(135deg, ${C.primary}, ${C.accent})` }}
             >
               保存
             </button>
@@ -1198,11 +1186,11 @@ const MusicApp: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setChatShowAvatar(musicStore.chatShowAvatar === false)}
-                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all"
+                className="rounded-full px-3 py-1.5 text-[10px] font-semibold transition-all mz-pill"
                 style={{
                   background: musicStore.chatShowAvatar !== false ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
-                  color: musicStore.chatShowAvatar !== false ? '#fff' : C.muted,
-                  border: musicStore.chatShowAvatar !== false ? '1px solid transparent' : '1px solid rgba(255,255,255,0.25)',
+                  color: musicStore.chatShowAvatar !== false ? 'var(--mz-on-text, #fff)' : C.muted,
+                  border: musicStore.chatShowAvatar !== false ? '1px solid transparent' : undefined,
                 }}
               >
                 {musicStore.chatShowAvatar !== false ? '已开启' : '已关闭'}
@@ -1234,8 +1222,8 @@ const MusicApp: React.FC = () => {
                 type="button"
                 disabled={!musicStore.chatBgImage}
                 onClick={() => { setChatBg(undefined, musicStore.chatBgColor); addToast('背景图已撤下', 'info'); }}
-                className="rounded-xl px-3 py-2 text-[10px] transition-all disabled:opacity-40"
-                style={{ color: C.muted, background: C.glass, border: '1px solid rgba(255,255,255,0.3)' }}
+                className="rounded-xl px-3 py-2 text-[10px] transition-all disabled:opacity-40 mz-glass-edge"
+                style={{ color: C.muted, background: C.glass }}
               >
                 撤图
               </button>
@@ -1243,8 +1231,8 @@ const MusicApp: React.FC = () => {
                 type="color"
                 value={musicStore.chatBgColor || '#fdf4f7'}
                 onChange={(e) => setChatBg(musicStore.chatBgImage, e.target.value)}
-                className="w-9 h-9 rounded-lg cursor-pointer"
-                style={{ border: '1px solid rgba(255,255,255,0.35)', background: C.glass }}
+                className="w-9 h-9 rounded-lg cursor-pointer mz-glass-edge-35"
+                style={{ background: C.glass }}
                 aria-label="聊歌背景底色"
               />
             </div>
@@ -1271,15 +1259,14 @@ const MusicApp: React.FC = () => {
             </div>
             <div className="grid grid-cols-4 gap-1.5 mb-2.5">
               {MUSIC_PALETTE_KEYS.map((key) => (
-                <div key={key} className="flex flex-col items-center gap-0.5 rounded-xl px-1 py-1.5"
-                  style={{ background: 'rgba(255,255,255,0.5)' }}>
+                <div key={key} className="flex flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 mz-glass-fill">
                   <span className="text-[8px]" style={{ color: C.muted }}>{PALETTE_LABELS[key]}</span>
                   <input
                     type="color"
                     value={musicStore.palette?.[key] ?? MUSIC_PALETTE_DEFAULTS[key]}
                     onChange={(e) => setMusicPalette({ [key]: e.target.value })}
-                    className="w-7 h-7 rounded-md cursor-pointer"
-                    style={{ border: '1px solid rgba(255,255,255,0.45)', background: 'transparent' }}
+                    className="w-7 h-7 rounded-md cursor-pointer mz-glass-edge-45"
+                    style={{ background: 'transparent' }}
                     aria-label={`${PALETTE_LABELS[key]}调色`}
                   />
                 </div>
@@ -1333,12 +1320,12 @@ const MusicApp: React.FC = () => {
                   key={label}
                   type="button"
                   onClick={() => setCssPreset(key)}
-                  className="rounded-full px-3 py-1.5 transition-all"
+                  className="rounded-full px-3 py-1.5 transition-all mz-pill"
                   style={{
                     fontSize: 10, fontWeight: 600,
                     background: (musicStore.cssPreset ?? undefined) === key ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : C.glass,
-                    color: (musicStore.cssPreset ?? undefined) === key ? '#fff' : C.muted,
-                    border: `1px solid ${(musicStore.cssPreset ?? undefined) === key ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                    color: (musicStore.cssPreset ?? undefined) === key ? 'var(--mz-on-text, #fff)' : C.muted,
+                    border: (musicStore.cssPreset ?? undefined) === key ? '1px solid transparent' : undefined,
                   }}
                 >
                   {label}
@@ -1362,12 +1349,12 @@ const MusicApp: React.FC = () => {
                   key={key}
                   type="button"
                   onClick={() => pickCssScope(key)}
-                  className="rounded-full px-3 py-1.5 transition-all"
+                  className="rounded-full px-3 py-1.5 transition-all mz-pill"
                   style={{
                     fontSize: 10, fontWeight: 600,
                     background: cssScope === key ? C.primary : C.glass,
-                    color: cssScope === key ? '#fff' : C.muted,
-                    border: `1px solid ${cssScope === key ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                    color: cssScope === key ? 'var(--mz-on-text, #fff)' : C.muted,
+                    border: cssScope === key ? '1px solid transparent' : undefined,
                   }}
                 >
                   {label}
@@ -1380,12 +1367,12 @@ const MusicApp: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => pickCssChar('')}
-                  className="rounded-full px-3 py-1 transition-all"
+                  className="rounded-full px-3 py-1 transition-all mz-pill"
                   style={{
                     fontSize: 10, fontWeight: 600,
                     background: cssCharId === '' ? C.primary : C.glass,
-                    color: cssCharId === '' ? '#fff' : C.muted,
-                    border: `1px solid ${cssCharId === '' ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                    color: cssCharId === '' ? 'var(--mz-on-text, #fff)' : C.muted,
+                    border: cssCharId === '' ? '1px solid transparent' : undefined,
                   }}
                 >
                   所有角色
@@ -1395,12 +1382,12 @@ const MusicApp: React.FC = () => {
                     key={c.id}
                     type="button"
                     onClick={() => pickCssChar(c.id)}
-                    className="rounded-full px-3 py-1 transition-all"
+                    className="rounded-full px-3 py-1 transition-all mz-pill"
                     style={{
                       fontSize: 10, fontWeight: 600,
                       background: cssCharId === c.id ? C.primary : C.glass,
-                      color: cssCharId === c.id ? '#fff' : C.muted,
-                      border: `1px solid ${cssCharId === c.id ? 'transparent' : 'rgba(255,255,255,0.25)'}`,
+                      color: cssCharId === c.id ? 'var(--mz-on-text, #fff)' : C.muted,
+                      border: cssCharId === c.id ? '1px solid transparent' : undefined,
                     }}
                   >
                     {c.name}
@@ -1464,10 +1451,7 @@ const MusicApp: React.FC = () => {
               className="w-full py-3 rounded-2xl text-xs text-white tracking-wider transition-all relative overflow-hidden"
               style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 3px 18px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}>
               <span className="relative z-10">保存</span>
-              <div className="absolute inset-0 pointer-events-none" style={{
-                background: `linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.25) 50%, transparent 70%)`,
-                backgroundSize: '200% 100%', animation: 'shizuku-shimmer 3s ease-in-out infinite',
-              }} />
+              <div className="absolute inset-0 pointer-events-none mz-shimmer-sweep" />
             </button>
           </div>
         </div>
@@ -1533,8 +1517,8 @@ const MusicApp: React.FC = () => {
             style={{ background: `linear-gradient(180deg, ${C.bg} 0%, ${C.bgDeep} 50%, ${C.bgTint} 100%)` }}>
             <BokehBg />
             {/* Header */}
-            <div className="relative z-10 shizuku-glass-strong"
-              style={{ borderBottom: `1px solid rgba(255,255,255,0.3)`, paddingTop: 'var(--safe-top)' }}>
+            <div className="relative z-10 shizuku-glass-strong mz-mizu-header"
+              style={{ paddingTop: 'var(--safe-top)' }}>
               <div className="flex items-center justify-between h-12 px-4">
                 <button onClick={() => setShowLyricSync(false)} className="text-[11px] px-2 py-1 rounded-full" style={{ color: C.muted }}>取消</button>
                 <div className="flex items-center gap-1.5">
@@ -1544,7 +1528,7 @@ const MusicApp: React.FC = () => {
                 <button onClick={saveSync} className="text-[11px] font-bold px-3 py-1 rounded-full"
                   style={{
                     background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
-                    color: 'white',
+                    color: 'var(--mz-on-text, #fff)',
                     boxShadow: `0 2px 10px rgba(var(--mz-glow-rgb, 205,198,233), 0.31)`,
                   }}>保存</button>
               </div>
@@ -1557,7 +1541,7 @@ const MusicApp: React.FC = () => {
                   className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 active:scale-95 transition-transform"
                   style={{
                     background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
-                    color: 'white',
+                    color: 'var(--mz-on-text, #fff)',
                     boxShadow: `0 3px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.31)`,
                   }}
                 >
@@ -1603,11 +1587,11 @@ const MusicApp: React.FC = () => {
                     const isActive = i === activeLyricIdx;
                     return (
                       <div key={i}
-                        className="flex items-center gap-2 rounded-xl px-2.5 py-2 transition-all"
+                        className="flex items-center gap-2 rounded-xl px-2.5 py-2 transition-all mz-glass-fill"
                         style={{
                           background: isActive
                             ? `linear-gradient(135deg, rgba(var(--mz-glow-rgb, 205,198,233), 0.15), rgba(var(--mz-lavender-rgb, 207,195,232), 0.09))`
-                            : 'rgba(255,255,255,0.5)',
+                            : undefined,
                           border: `1px solid ${isActive ? C.glow + '60' : C.faint + '30'}`,
                           boxShadow: isActive ? `0 2px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` : 'none',
                         }}
@@ -1621,8 +1605,7 @@ const MusicApp: React.FC = () => {
                             border: `1px solid rgba(var(--mz-primary-rgb, 128,124,157), 0.19)`,
                             color: C.primary,
                           }}
-                          title="把这一句设到当前播放时间"
-                        >
+                          title="把这一句设到当前播放时间">
                           ⊙
                         </button>
                         <div className="flex-1 min-w-0">

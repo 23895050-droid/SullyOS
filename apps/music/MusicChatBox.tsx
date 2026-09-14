@@ -234,7 +234,7 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
 
   return (
     <div className="mz-chat absolute inset-0 flex flex-col"
-      style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 55%, ${C.bgDeep} 100%)` }}>
+      style={{ background: `linear-gradient(180deg, var(--mz-sheet-top, #ffffff) 0%, ${C.bg} 55%, ${C.bgDeep} 100%)` }}>
       {/* 背景自设层（2026-08-30）：图铺满 + 底色按图透/不透明度叠加；没设图只盖底色 */}
       {(chatBgUrl || musicStore.chatBgColor) && (
         <div className="absolute inset-0 z-0 pointer-events-none"
@@ -267,8 +267,7 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
             className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
             style={{ color: C.primary, background: showPanel ? C.soft : 'transparent', border: `1px solid ${showPanel ? 'transparent' : 'rgba(255,255,255,0.45)'}` }}
             aria-label="歌曲上下文"
-            title="当前歌 · 歌词 · 歌单"
-          >
+            title="当前歌 · 歌词 · 歌单">
             <MusicNotes size={15} weight="duotone" />
           </button>
         </div>
@@ -341,18 +340,16 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
             className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 mz-chat-send"
             style={{ background: C.soft, color: C.primary }}
             aria-label="发送（只存进会话）"
-            title="只存进会话，回复要点 ▶"
-          >
+            title="只存进会话，回复要点 ▶">
             <PaperPlaneTilt size={16} weight="fill" />
           </button>
           <button
             onClick={() => chat.trigger()}
             disabled={chat.busy}
             className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, color: '#fff', boxShadow: `0 3px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.3)` }}
+            style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, color: 'var(--mz-on-text, #fff)', boxShadow: `0 3px 12px rgba(var(--mz-glow-rgb, 205,198,233), 0.3)` }}
             aria-label="触发回复"
-            title="点这里 Ta 才会回复"
-          >
+            title="点这里 Ta 才会回复">
             {chat.busy ? (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
@@ -366,30 +363,23 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
       {/* 夜色预设：底部「听歌 | 聊歌」胶囊切换台（附件图一/图二） */}
       {night && (
         <div className="shrink-0 relative z-10 flex items-center justify-center pb-[calc(var(--safe-bottom)+10px)]">
-          <div className="flex items-center rounded-full px-1 py-1"
-            style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)' }}>
+          <div className="flex items-center rounded-full px-1 py-1 mz-night-tabbar">
             <button
               onClick={onBack}
-              className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] transition-all"
-              style={{ color: 'rgba(255,255,255,0.55)' }}
-            >
+              className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] transition-all mz-night-tab-off">
               <MusicNotes size={12} weight="duotone" /> 听歌
             </button>
             <button
-              className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] font-semibold transition-all"
-              style={{ background: 'rgba(255,255,255,0.16)', color: '#fff' }}
-            >
+              className="mz-night-tab flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[10px] font-semibold transition-all mz-night-tab-on">
               <CaretRight size={12} weight="bold" /> 聊歌
             </button>
           </div>
           {togetherNow && (
             <button
               onClick={() => void endListeningTogether(charId)}
-              className="absolute right-4 w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90"
-              style={{ color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.15)' }}
+              className="absolute right-4 w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90 mz-night-close"
               aria-label="结束一起听"
-              title="结束一起听"
-            >
+              title="结束一起听">
               <X size={11} weight="bold" />
             </button>
           )}
@@ -519,8 +509,8 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
               >
                 保存
               </button>
-              <button onClick={() => setEditMsg(null)} className="flex-1 py-2 rounded-full text-[11px]"
-                style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.3)' }}>
+              <button onClick={() => setEditMsg(null)} className="flex-1 py-2 rounded-full text-[11px] mz-glass-edge"
+                style={{ color: C.muted }}>
                 取消
               </button>
             </div>

@@ -25,6 +25,22 @@ describe('音乐内部基础层', () => {
     ]) expect(MUSIC_APP_BASE_CSS).toContain(cls);
   });
 
+  it('设置页/夜色切换台类都在（胶囊/玻璃面/淡白小卡/扫光/切换台）', () => {
+    for (const cls of [
+      '.mz-pill', '.mz-glass-edge', '.mz-glass-edge-35', '.mz-glass-edge-45',
+      '.mz-glass-fill', '.mz-soft-card', '.mz-shimmer-sweep', '.mz-shimmer-sweep-30',
+      '.mz-input', '.mz-sheet', '.mz-regen-veil', '.mz-regen-veil-disc',
+      '.mz-night-tabbar', '.mz-night-tab-on', '.mz-night-tab-off', '.mz-night-close',
+    ]) expect(MUSIC_APP_BASE_CSS).toContain(cls);
+  });
+
+  it('音乐基础提示词同步讲了新类和变量（旧话术「设置页胶囊按钮…仍是 inline」已删）', () => {
+    const base = getPromptEntries().find((e) => e.label === '美化助手-音乐基础')!;
+    expect(base.defaultValue).toContain('.mz-pill');
+    expect(base.defaultValue).toContain('--mz-on-text');
+    expect(base.defaultValue).not.toContain('设置页胶囊按钮、个人页等）仍是 inline');
+  });
+
   it('悬浮窗类都在（球/暗层/条/把手/封面/按钮）', () => {
     for (const cls of [
       '.mz-globalmini-ball', '.mz-globalmini-ball-overlay', '.mz-globalmini-bar',

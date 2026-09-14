@@ -42,7 +42,7 @@ const TagRow: React.FC<{ label: string; tags: string[]; selected: string[]; onTo
             className="rounded-full px-2.5 py-1 transition-all"
             style={{
               fontSize: 10,
-              color: on ? '#fff' : C.muted,
+              color: on ? 'var(--mz-on-text, #fff)' : C.muted,
               background: on ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : 'transparent',
               border: on ? '1px solid transparent' : '1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.25)',
             }}
@@ -195,7 +195,7 @@ const SongDetailModal: React.FC<Props> = ({ charId, charName, neteaseId, onClose
               type="button"
               onClick={play}
               className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
-              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, color: '#fff', boxShadow: `0 4px 16px rgba(var(--mz-glow-rgb, 205,198,233), 0.25)` }}
+              style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, color: 'var(--mz-on-text, #fff)', boxShadow: `0 4px 16px rgba(var(--mz-glow-rgb, 205,198,233), 0.25)` }}
             >
               <Play size={18} weight="fill" />
             </button>
@@ -234,7 +234,7 @@ const SongDetailModal: React.FC<Props> = ({ charId, charName, neteaseId, onClose
                     onClick={genImpression}
                     disabled={generating}
                     className="rounded-full px-3 py-1 flex items-center gap-1"
-                    style={{ fontSize: 10, color: '#fff', background: `linear-gradient(135deg, ${C.primary}, ${C.accent})` }}
+                    style={{ fontSize: 10, color: 'var(--mz-on-text, #fff)', background: `linear-gradient(135deg, ${C.primary}, ${C.accent})` }}
                   >
                     {generating ? <SpinnerGap size={11} className="animate-spin" /> : <Sparkle size={11} />}
                     生成印象
@@ -245,8 +245,8 @@ const SongDetailModal: React.FC<Props> = ({ charId, charName, neteaseId, onClose
             {editing ? (
               <div className="mt-2">
                 <textarea
-                  className="w-full rounded-xl p-3 outline-none"
-                  style={{ background: 'rgba(255,255,255,0.06)', color: C.text, fontSize: 13, minHeight: 90, resize: 'none', border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.2)` }}
+                  className="w-full rounded-xl p-3 outline-none mz-soft-card"
+                  style={{ color: C.text, fontSize: 13, minHeight: 90, resize: 'none', border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.2)` }}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                 />
@@ -254,7 +254,7 @@ const SongDetailModal: React.FC<Props> = ({ charId, charName, neteaseId, onClose
                   <button type="button" onClick={() => setEditing(false)} className="rounded-full px-3 py-1.5" style={{ fontSize: 11, color: C.muted, background: 'transparent' }}>
                     取消
                   </button>
-                  <button type="button" onClick={saveDraft} className="rounded-full px-4 py-1.5" style={{ fontSize: 11, color: '#fff', background: C.primary }}>
+                  <button type="button" onClick={saveDraft} className="rounded-full px-4 py-1.5" style={{ fontSize: 11, color: 'var(--mz-on-text, #fff)', background: C.primary }}>
                     保存
                   </button>
                 </div>
@@ -296,8 +296,8 @@ const SongDetailModal: React.FC<Props> = ({ charId, charName, neteaseId, onClose
             {editingLyric ? (
               <div>
                 <textarea
-                  className="w-full rounded-xl p-3 outline-none"
-                  style={{ background: 'rgba(255,255,255,0.06)', color: C.text, fontSize: 12, minHeight: 140, resize: 'vertical', border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.25)`, lineHeight: 1.8 }}
+                  className="w-full rounded-xl p-3 outline-none mz-soft-card"
+                  style={{ color: C.text, fontSize: 12, minHeight: 140, resize: 'vertical', border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.25)`, lineHeight: 1.8 }}
                   value={lyricDraft}
                   onChange={(e) => setLyricDraft(e.target.value)}
                   placeholder={'自己写几句，或记和弦走向——纯音乐也能留点东西（带 [mm:ss] 时间戳可以跟唱，不带也能看全文）'}
@@ -311,7 +311,7 @@ const SongDetailModal: React.FC<Props> = ({ charId, charName, neteaseId, onClose
                       addToast('歌词已保存', 'success');
                     }}
                     className="rounded-full px-4 py-1.5"
-                    style={{ fontSize: 11, color: '#fff', background: C.primary }}
+                    style={{ fontSize: 11, color: 'var(--mz-on-text, #fff)', background: C.primary }}
                   >
                     保存
                   </button>

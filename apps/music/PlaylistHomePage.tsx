@@ -67,7 +67,7 @@ const PlaylistHomePage: React.FC<Props> = ({ charId, onBack, onOpenPlayer, onOpe
   };
 
   return (
-    <div className="mz-charhome flex flex-col h-full relative" style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
+    <div className="mz-charhome flex flex-col h-full relative" style={{ background: `linear-gradient(180deg, var(--mz-sheet-top, #ffffff) 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
       <BokehBg />
       <MizuHeader title={char ? `${char.name} 的歌单` : '我的歌单'} onBack={onBack} />
 
@@ -85,7 +85,7 @@ const PlaylistHomePage: React.FC<Props> = ({ charId, onBack, onOpenPlayer, onOpe
               type="button"
               onClick={onOpenSettings}
               className="mt-2 rounded-full px-5 py-2.5"
-              style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 4px 16px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}
+              style={{ fontSize: 12, fontWeight: 600, color: 'var(--mz-on-text, #fff)', background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, boxShadow: `0 4px 16px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)` }}
             >
               去音乐设置页导入
             </button>

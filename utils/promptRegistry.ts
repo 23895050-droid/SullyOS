@@ -293,7 +293,7 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '透明度拼接处用 rgb 三元组变量：--mz-bg-rgb / --mz-primary-rgb / --mz-accent-rgb / --mz-glow-rgb / --mz-sakura-rgb / --mz-lavender-rgb / --mz-muted-rgb / --mz-faint-rgb / --mz-vip-rgb（如 rgba(var(--mz-glow-rgb, 205,198,233), 0.2)）。改颜色时同步改同名 -rgb 变量，否则透明拼接处还是旧色。\n' +
       '玻璃 class（全局可用）：.shizuku-glass（浅玻璃 blur16）/ .shizuku-glass-strong（深玻璃 blur24）——重写这两个类整体改玻璃质感；滚动条 .shizuku-scrollbar。\n' +
       '各页钩子清单（页面级，类名都已挂在 DOM 上）：.mz-app（音乐 App 根）/ .mz-search（搜索页）/ .mz-player（播放页）/ .mz-chat（聊歌页）/ .mz-settings（设置页）/ .mz-songrow（搜索结果行）/ .mz-miniplayer（音乐 App 内迷你条）/ .mz-together（一起听徽章块）/ .mz-together-strip（夜色预设双人状态区）/ .mz-vinyl（黑胶唱片）/ .mz-chat-bubble + .mz-chat-bubble-user + .mz-chat-bubble-ai（聊歌气泡）/ .mz-chat-voice（聊歌语音条）/ .mz-chat-avatar（聊歌头像）/ .mz-music-card（主聊天里的一起听卡钩子；五张卡各有 .mz-music-card-invite / -accept / -summary / -chatsummary / -song 卡类 + 一批零件类，已全部类化——详见「聊天卡片」模式，直接覆盖、无需 !important）。\n' +
-      '注意：写死的白边/玻璃底已基本收进基础层类（播放页 .mz-vinyl-* / .mz-mizu-header / .mz-metachip / .mz-play-ring / .mz-progress-track / .mz-lyric-box；聊歌页 .mz-chat-bubble-user / -ai / .mz-chat-avatar / -input / -send / -voice-text / -header；悬浮窗 .mz-globalmini-*；主聊天卡 .mz-music-card-*），直接写类名覆盖即可；少数地方（设置页胶囊按钮、个人页等）仍是 inline，覆盖不动时优先改 --mz-* 变量（变量优先级最高、最省事），最后才用 !important。\n' +
+      '注意：写死的白边/玻璃底已基本收进基础层类（播放页 .mz-vinyl-* / .mz-mizu-header / .mz-metachip / .mz-play-ring / .mz-progress-track / .mz-lyric-box；聊歌页 .mz-chat-bubble-user / -ai / .mz-chat-avatar / -input / -send / -voice-text / -header；设置页胶囊与 ± 圆钮 .mz-pill、玻璃面 .mz-glass-edge（-35 / -45 后缀=白边透明度）/ .mz-glass-fill（白玻璃底）/ 淡白小卡 .mz-soft-card / 输入框 .mz-input / 底部弹出卡 .mz-sheet / 生成中遮罩 .mz-regen-veil(-disc) / 扫光 .mz-shimmer-sweep(-30)；夜色切换台 .mz-night-tabbar / .mz-night-tab-on / -off / .mz-night-close；悬浮窗 .mz-globalmini-*；主聊天卡 .mz-music-card-*），直接写类名覆盖即可；彩底上的文字色统一走 --mz-on-text（默认 #fff），个人页·登录页顶部渐变的顶端色走 --mz-sheet-top，胶囊选中态底色走主题色（--mz-primary 系），这些都是变量、改了就生效，不需要 !important；剩下零碎（个别按钮阴影、照片上的白字）仍是 inline，覆盖不动时优先改 --mz-* 变量（变量优先级最高、最省事），最后才用 !important。\n' +
       '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS、position:fixed 全局浮层。可以改布局、位置、大小、间距——类名都是真实存在的，但不要假设清单之外还有别的 class；没把握的区块就只动 --mz-* 变量。',
   },
   {
@@ -326,7 +326,7 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '【语音条】.mz-chat-voice：渐变胶囊（喇叭图标 + 波形条 + 「转文字」标签），点开下面展开字幕卡。\n' +
       '【输入行】底部一行：胶囊输入框（.shizuku-glass，placeholder「说点什么…」）+ 纸飞机发送圆钮（只存消息）+ 四角星触发圆钮（渐变 primary→accent，点它 AI 才回复）。\n' +
       '【背景层】页面最底层：用户自设的背景图 + 底色（图 cover 居中铺满）。美化时气泡透明度要压得过背景才看得清。\n' +
-      '【底部切换台】（夜色预设时）胶囊条：「听歌 | 聊歌」两个 .mz-night-tab 圆钮，一起听时右侧有个 × 结束一起听。\n' +
+      '【底部切换台】（夜色预设时）胶囊条 .mz-night-tabbar：「听歌」（.mz-night-tab-on）/「聊歌」（.mz-night-tab-off）两个 .mz-night-tab 圆钮，一起听时右侧有个 × 结束一起听。\n' +
       '【右侧上下文面板】右上音符钮打开：绝对定位在右侧（宽约 72%、毛玻璃强底），含当前歌卡（封面+歌名+状态）、全量歌词（当前行高亮 ▶）、角色歌单 top30、场景规则文案。选择器：.mz-chat 内绝对定位的 panel。\n' +
       '换肤建议：气泡底色走 --mz-surface / --mz-sakura / --mz-lavender；描边类已就位（气泡 .mz-chat-bubble-user / .mz-chat-bubble-ai、头像 .mz-chat-avatar、输入框 .mz-chat-input、发送钮 .mz-chat-send、语音卡 .mz-chat-voice-text、顶栏 .mz-chat-header），直接覆盖，不需要 !important。\n' +
       '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS。可以改布局、位置、大小——但只改用户点名的那块，用上面给的真实选择器；不确定就只动 --mz-* 变量。',

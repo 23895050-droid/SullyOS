@@ -147,7 +147,7 @@ const NeteaseLoginPanel: React.FC<Props> = ({ onBack, onLoggedIn }) => {
 
   return (
     <div className="flex flex-col h-full relative"
-      style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
+      style={{ background: `linear-gradient(180deg, var(--mz-sheet-top, #ffffff) 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
       <BokehBg />
       <MizuHeader title="登录网易云" onBack={onBack} />
 
@@ -162,7 +162,7 @@ const NeteaseLoginPanel: React.FC<Props> = ({ onBack, onLoggedIn }) => {
             className="flex-1 py-1.5 rounded-full text-[11px] tracking-wider transition-all"
             style={{
               background: mode === t.k ? `linear-gradient(135deg, ${C.primary}, ${C.accent})` : 'transparent',
-              color: mode === t.k ? 'white' : C.muted,
+              color: mode === t.k ? 'var(--mz-on-text, #fff)' : C.muted,
             }}>
             {t.label}
           </button>

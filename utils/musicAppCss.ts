@@ -17,6 +17,16 @@
  *   装饰：.mz-bokeh-blob（全部光斑/星芒背景，想清干净就 display:none）+ 编号 -1~-6
  *   聊歌页：.mz-chat-bubble-ai / -user（气泡描边）/ .mz-chat-avatar（头像描边）/
  *          .mz-chat-input（输入框描边）等
+ *   设置页：.mz-pill（胶囊按钮 / ± 小圆钮 / 位置·范围·作用域选择器的默认态白 25% 边；
+ *          选中态的边仍是 inline 的 transparent，底色字色走 --mz-* 变量与主题）/
+ *          .mz-glass-edge(-35/-45)（玻璃面白边，后缀=透明度）/ .mz-glass-fill（白玻璃底 0.5）/
+ *          .mz-soft-card（淡白小卡底 0.06）/ .mz-input（设置页输入框白边 0.2）/
+ *          .mz-sheet（底部弹出卡：白底 0.97 + 上圆角 + 上投影）/
+ *          .mz-shimmer-sweep（-30 后缀=扫光更亮，搜索钮用）/
+ *          .mz-regen-veil（生成中遮罩；-disc = 播放页黑胶上那款）
+ *   夜色切换台：.mz-night-tabbar / .mz-night-tab-on / -off / .mz-night-close
+ *   变量：--mz-on-text（彩底上的文字色，默认 #fff，覆盖全部白字按钮/选中态）/
+ *        --mz-sheet-top（个人页·登录页顶部渐变的顶端色，默认 #ffffff）
  *   悬浮窗：.mz-globalmini-ball / -bar / -expanded 及其零件
  */
 
@@ -52,6 +62,27 @@ export const MUSIC_APP_BASE_CSS = `
 .mz-chat-send{border:1px solid rgba(255,255,255,0.4)}
 .mz-chat-voice-text{border:1px solid rgba(255,255,255,0.4)}
 .mz-chat-header{border-bottom:1px solid rgba(255,255,255,0.3)}
+
+/* ── 设置页胶囊 / 小圆钮（± 圆钮、位置·范围·作用域选择器共用）── */
+.mz-pill{border:1px solid rgba(255,255,255,0.25)}
+
+/* ── 设置页 / 个人页的玻璃面与零星写死值（-35/-45 后缀 = 白边透明度，方便按面挑）── */
+.mz-glass-edge{border:1px solid rgba(255,255,255,0.3)}
+.mz-glass-edge-35{border:1px solid rgba(255,255,255,0.35)}
+.mz-glass-edge-45{border:1px solid rgba(255,255,255,0.45)}
+.mz-glass-fill{background:rgba(255,255,255,0.5)}
+.mz-soft-card{background:rgba(255,255,255,0.06)}
+.mz-shimmer-sweep{background:linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.25) 50%, transparent 70%);background-size:200% 100%;animation:shizuku-shimmer 3s ease-in-out infinite}
+.mz-shimmer-sweep-30{background:linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.3) 50%, transparent 70%);background-size:200% 100%;animation:shizuku-shimmer 3s ease-in-out infinite}
+.mz-input{border:1px solid rgba(255,255,255,0.2)}
+.mz-sheet{background:rgba(255,255,255,0.97);border-radius:28px 28px 0 0;box-shadow:0 -12px 40px rgba(0,0,0,0.18)}
+.mz-regen-veil{background:rgba(0,0,0,0.45);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+.mz-regen-veil-disc{background:radial-gradient(circle, rgba(0,0,0,0.55) 30%, rgba(0,0,0,0.35) 70%);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+/* ── 聊歌页夜色切换台（听歌 | 聊歌 + 结束钮；只在夜色预设下出现）── */
+.mz-night-tabbar{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15)}
+.mz-night-tab-on{background:rgba(255,255,255,0.16);color:#fff}
+.mz-night-tab-off{color:rgba(255,255,255,0.55)}
+.mz-night-close{color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.15)}
 
 /* ── 悬浮窗（GlobalMiniPlayer，全局注入）── */
 `.trim();
