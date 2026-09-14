@@ -118,6 +118,7 @@ import { isIOSStandaloneWebApp, resolveStatusBarMode } from '../utils/iosStandal
 import AppErrorBoundary from './os/AppErrorBoundary';
 import GlobalMiniPlayer from './os/GlobalMiniPlayer';
 import GlobalMusicCssPreset from './os/GlobalMusicCssPreset';
+import GlobalGenStatus from './os/GlobalGenStatus';
 import PersonaSimIndicator from './os/PersonaSimIndicator';
 import DreamSimIndicator from './os/DreamSimIndicator';
 import ErrorDialog from './os/ErrorDialog';
@@ -1081,6 +1082,9 @@ const PhoneShell: React.FC = () => {
 
           {/* Overlays: 人格模拟生成全局指示条 */}
           <PersonaSimIndicator />
+
+          {/* Overlays: 后台生成全局状态条（日记/留言/冰箱/相册/音乐——任何页面都可见） */}
+          <GlobalGenStatus />
 
           {/* Overlays: 梦境生成全局指示条 */}
           <DreamSimIndicator />
