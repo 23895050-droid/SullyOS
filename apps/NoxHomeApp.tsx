@@ -163,10 +163,11 @@ const NoxHomeApp: React.FC = () => {
     return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
   }, [pageKey]);
 
-  // 幕布配色：跟目标页一个色系（家的深色壁纸 / 我们·设置的粉），揭幕时颜色接得上
+  // 幕布配色（抄上游那层「透明幕 + 柔光点」的观感）：跟目标页一个色系、留一点透——
+  // 底下加 14px 模糊，透过来的只是一片朦胧明暗（换页动作看不出来），比糊一层死色好看
   const veilFor = (k: string) => (k.startsWith('home')
-    ? { background: 'rgba(24,28,46,0.86)' }
-    : { background: 'rgba(255,233,242,0.94)' });
+    ? { background: 'rgba(20,24,40,0.72)' }
+    : { background: 'rgba(255,235,243,0.82)' });
 
   // 空闲预热（2026-09-14）：首屏落定后、浏览器空闲时把「我们」「设置」两页先在后台挂上
   // （隐藏）——图片那时就解析好了，第一次切过去幕布揭开就已经是完整页面。
@@ -385,18 +386,26 @@ const NoxHomeApp: React.FC = () => {
         );
       })}
 
-      {/* 转场幕布：盖满 → 后面换页 → 揭开（只动 opacity；盖着的时候不接事件） */}
+      {/* 转场幕布：盖满 → 后面换页 → 揭开（只动 opacity；盖着的时候不接事件）
+          z 阶梯（重要）：画布内容 ≤60（文字层 40 / 热区 50 / 圆钮 60）＜ 幕布 65 ＜ 底部胶囊导航 70。
+          幕布必须压过画布里所有 z-index 的元素，否则会有文字浮在幕布上面（她 2026-09-14 报的）。 */}
       {curtain && (
         <div
-          className={`absolute inset-0 pointer-events-none ${curtain === 'in' ? 'veil-in' : 'veil-out'}`}
+          className={`absolute inset-0 flex items-center justify-center pointer-events-none ${curtain === 'in' ? 'veil-in' : 'veil-out'}`}
           style={{
             // 用目标页的色（不是当前展示页）：整屏先落到目标色，揭开就是同一色系的页面，不跳色
             ...veilFor(pageKey),
-            zIndex: 30,
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
+            zIndex: 65,
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
           }}
-        />
+        >
+          {/* 柔光点（抄上游 AppLoadingFallback）：一次性静态光点，无持续动画 */}
+          <div className="relative" style={{ width: 72, height: 72 }}>
+            <div className="absolute inset-0" style={{ borderRadius: '9999px', filter: 'blur(8px)', background: 'radial-gradient(circle, hsla(var(--primary-hue),75%,72%,0.42) 0%, hsla(var(--primary-hue),70%,60%,0.10) 50%, transparent 70%)' }} />
+            <div className="absolute" style={{ left: '50%', top: '50%', width: 10, height: 10, transform: 'translate(-50%,-50%)', borderRadius: '9999px', background: 'radial-gradient(circle, #fff, hsla(var(--primary-hue),80%,75%,0.6) 60%, transparent)', boxShadow: '0 0 10px hsla(var(--primary-hue),80%,75%,0.6)' }} />
+          </div>
+        </div>
       )}
 
       {/* ── 底部胶囊导航（固定悬浮） ── */}
