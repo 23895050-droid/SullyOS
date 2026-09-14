@@ -30,6 +30,7 @@ const ImageReceiptsApp = lazyApp(() => import('../apps/ImageReceiptsApp'));
 const AlbumApp = lazyApp(() => import('../apps/AlbumApp'));
 const CameraApp = lazyApp(() => import('../apps/Camera'));
 const NoxHomeApp = lazyApp(() => import('../apps/NoxHomeApp'));
+const ReaderApp = lazyApp(() => import('../apps/reader/ReaderApp'));
 const DateApp = lazyApp(() => import('../apps/DateApp'));
 const UserApp = lazyApp(() => import('../apps/UserApp'));
 const JournalApp = lazyApp(() => import('../apps/JournalApp'));
@@ -83,6 +84,7 @@ const APP_BY_ID: Partial<Record<AppID, PreloadableLazy>> = {
   [AppID.Settings]: Settings, [AppID.Character]: Character, [AppID.Chat]: Chat,
   [AppID.GroupChat]: GroupChat, [AppID.ThemeMaker]: ThemeMaker, [AppID.Appearance]: Appearance,
   [AppID.Gallery]: Gallery, [AppID.ImageReceipts]: ImageReceiptsApp, [AppID.Album]: AlbumApp, [AppID.ImageGen]: CameraApp, [AppID.NoxHome]: NoxHomeApp, [AppID.Date]: DateApp, [AppID.User]: UserApp,
+  [AppID.Reading]: ReaderApp,
   [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
   [AppID.CheckPhone]: CheckPhone, [AppID.Social]: SocialApp, [AppID.Study]: StudyApp,
   [AppID.FAQ]: FAQApp, [AppID.Game]: GameApp, [AppID.Worldbook]: WorldbookApp,
@@ -969,6 +971,7 @@ const PhoneShell: React.FC = () => {
       case AppID.Album: return <AlbumApp />;
       case AppID.ImageGen: return <CameraApp />;
       case AppID.NoxHome: return <NoxHomeApp />;
+      case AppID.Reading: return <ReaderApp />;
       case AppID.Date: return <DateApp />;
       case AppID.User: return <UserApp />;
       case AppID.Journal: return <JournalApp />; 

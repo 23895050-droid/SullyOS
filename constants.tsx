@@ -39,6 +39,7 @@ import {
   ImageSquare,
   MoonStars,
   MagicWand,
+  BookOpen,
 } from '@phosphor-icons/react';
 
 // SVG 图标库 - Phosphor Icons
@@ -83,6 +84,7 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   Camera: ({ className }) => <Camera className={className} weight="regular" />,
   Album: ({ className }) => <ImageSquare className={className} weight="regular" />,
   NoxHome: ({ className }) => <MoonStars className={className} weight="regular" />,
+  Reading: ({ className }) => <BookOpen className={className} weight="regular" />,
   Assistant: ({ className }) => <MagicWand className={className} weight="regular" />,
 };
 
@@ -117,6 +119,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.Album, name: '我的相册', icon: 'Album', color: 'pink' },
   { id: AppID.NoxHome, name: 'Nox 的家', icon: 'NoxHome', color: 'indigo' },
   { id: AppID.ImageGen, name: '相机', icon: 'Camera', color: 'amber' },
+  { id: AppID.Reading, name: '书房', icon: 'Reading', color: 'stone' },
   { id: AppID.XhsFreeRoam, name: '自由活动', icon: 'XhsFreeRoam', color: 'rose' },
   { id: AppID.XhsStock, name: '小红书图库', icon: 'XhsStock', color: 'red' },
   { id: AppID.ThemeMaker, name: '气泡工坊', icon: 'ThemeMaker', color: 'purple' },

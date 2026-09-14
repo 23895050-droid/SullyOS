@@ -52,6 +52,8 @@ export const SELF_SAFE_AREA_APPS: ReadonlySet<AppID> = new Set<AppID>([
     AppID.NoxHome,
     // 小助手（2026-08-30）：顶栏 --chrome-top 自理，覆盖状态栏
     AppID.Assistant,
+    // 书房（读书模块，2026-09-14）：全屏铺满，顶栏 --chrome-top / 底部 --safe-bottom 自理
+    AppID.Reading,
 ]);
 
 // 外壳是否需要替这个 App 让出安全区：不在自理名单里的才需要。

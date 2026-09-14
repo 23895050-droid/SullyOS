@@ -43,6 +43,7 @@ export enum AppID {
   Album = 'album', // 我的相册 — 留档卡片 + 原图备份 + 角色相册
   NoxHome = 'nox_home', // Nox 的单间 — 我的家主页（Angelica 设计，底图蒙版 + 玻璃卡片）
   Assistant = 'assistant', // 小助手 — 工作向小 AI（专属 API 槽；当前工作是美化预设，以后可能做别的活）
+  Reading = 'reading', // 书房 — 读书模块（书架/笔记/书库/统计/设置，EPUB+TXT，人机共读）
 }
 
 // ── Image Generation ──
