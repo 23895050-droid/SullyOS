@@ -17,7 +17,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createElement, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { useBlobRefUrl, putImageBlob, dataUrlToBlob, __clearBlobUrlCacheForTest } from './blobRef';
+import { useBlobRefUrl, putImageBlob, dataUrlToBlob } from './blobRef';
+import { __clearBlobUrlCacheForTest } from './ourBlobUrlCache';
 
 // React 18 下 createRoot + act 必须显式声明 act 环境，否则 act 直接告警且不聚合更新。
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;

@@ -138,11 +138,10 @@ const NoxHomeApp: React.FC = () => {
   const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
   const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
 
-  // ── 页面切换过渡（2026-09-14）──────────────────────────────────
-  // 旧写法是 key 变化 → 整棵重挂载 + 淡入【0→1】：旧页当场消失、新页从透明长出来，
-  // 中间那一瞬只剩背景色 —— 看起来就是「闪一下」。现在旧页留在下面 240ms 当底
-  // （带着它自己离开时的滚动位置），新页在上面淡入盖掉它：不闪、也不会有两页
-  // 半透明叠一起的发灰。两层都只动 opacity（口径同 PhoneShell 的 appEnterFade）。
+  // ── 页面切换过渡（2026-09-14，二版：两拍淡出→淡入）─────────────────
+  // 一版是「新页直接盖在旧页上淡入」——两页内容半透明叠着（文字压文字）看着糊，她反馈违和。
+  // 现在拆成两拍：旧页内容先 180ms 淡出（旧页自己的背景留着当过渡色，不露白/露底色），
+  // 新页随后 300ms 淡入——像点进 App 那种柔和劲儿。两层都只动 opacity。
   const pageKey = `${tab}:${inner ?? 'root'}`;
   const [ghost, setGhost] = useState<{ key: string; tab: string; inner: string | null } | null>(null);
   const lastPageRef = useRef({ key: pageKey, tab: tab as string, inner: inner as string | null });
@@ -154,7 +153,7 @@ const NoxHomeApp: React.FC = () => {
     lastPageRef.current = { key: pageKey, tab: tab as string, inner: inner as string | null };
     ghostTopRef.current = liveScrollRef.current;
     setGhost(last);
-    const t = window.setTimeout(() => setGhost(null), 240);
+    const t = window.setTimeout(() => setGhost(null), 480);
     return () => window.clearTimeout(t);
   }, [pageKey, tab, inner]);
 
@@ -357,14 +356,15 @@ const NoxHomeApp: React.FC = () => {
           className="absolute inset-0 overflow-y-auto pointer-events-none"
           style={{ ...bgFor(ghost.tab), zIndex: 5 }}
         >
-          {renderPage(ghost.tab, ghost.inner)}
+          {/* 只淡出内容：这一层的背景继续当过渡色，两拍之间不露白底 */}
+          <div className="app-fade-out">{renderPage(ghost.tab, ghost.inner)}</div>
         </div>
       )}
 
-      {/* 当前页层：自己滚、自带背景，淡入盖掉旧页（key 变 → 重挂载 → app-fade-in） */}
+      {/* 当前页层：自己滚、自带背景；等旧页内容淡出后（140ms 延迟）再柔和淡入 */}
       <div
         key={pageKey}
-        className="app-fade-in absolute inset-0 overflow-y-auto"
+        className="page-enter absolute inset-0 overflow-y-auto"
         style={{ ...bgFor(tab), zIndex: 10 }}
         onScroll={(e) => { liveScrollRef.current = e.currentTarget.scrollTop; }}
       >

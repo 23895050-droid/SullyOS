@@ -22,7 +22,7 @@
 // 的可移植令牌会按当前部署 BASE_URL 解开，避免备份跨域/跨壳恢复后家具路径失效。
 // 惰性迁移由各消费方（壁纸加载、进入小屋）在读到 data: 时顺手 put 成 Blob 完成。
 
-import { useEffect, useState } from 'react';
+import { useCachedBlobUrl } from './ourBlobUrlCache';
 import { dataUrlToBlob, blobToDataUrl, hashBlob } from '@rei-standard/blob-store';
 import { DB } from './db';
 import { blobStore } from './blobStore';
@@ -341,91 +341,14 @@ export async function resolveBlobRefsDeep(root: unknown): Promise<void> {
 // ─── React 渲染 hook ────────────────────────────────────────────
 
 /**
- * objectURL 常驻缓存（2026-09-14）。
- *
- * 之前直接用 SDK 的 useBlobUrl：每次挂载都要异步读一次 IndexedDB 才拿得到 URL，
- * 而且卸载时立刻 revoke。页签/页面切换会把整棵子树重挂载 —— 那棵子树里的所有
- * blobref 图片（整屏背景、头像、照片、封面）都要先空一帧再长出来，看起来就是
- * 「切页面闪一下」（Nox 的家几个页面之间切换尤其明显：整屏背景先露粉色底再跳出图）。
- *
- * 现在 URL 由这里的缓存持有：同一个令牌只建一次 objectURL、卸载不 revoke，
- * 重挂载首帧就能同步命中（渲染期直接读缓存），不再有空窗。上限 LRU 淘汰，
- * 淘汰时才 revoke，内存有界。令牌 id 是内容寻址的（同一 id = 同一份字节），
- * 所以缓存永不过期；blob 被删掉后旧 URL 还活着只是多占一点内存，淘汰即回收。
- */
-const BLOB_URL_CACHE = new Map<string, string>();
-const BLOB_URL_CACHE_MAX = 256;
-const BLOB_URL_INFLIGHT = new Map<string, Promise<string | undefined>>();
-
-const evictBlobUrl = () => {
-    while (BLOB_URL_CACHE.size > BLOB_URL_CACHE_MAX) {
-        const oldest = BLOB_URL_CACHE.keys().next().value as string | undefined;
-        if (!oldest) return;
-        const url = BLOB_URL_CACHE.get(oldest);
-        BLOB_URL_CACHE.delete(oldest);
-        if (url) URL.revokeObjectURL(url);
-    }
-};
-
-/** 取（或建）某个令牌的常驻 objectURL；同一令牌并发请求只读一次 Blob、只建一个 URL */
-const getCachedBlobUrl = (ref: string): Promise<string | undefined> => {
-    const hit = BLOB_URL_CACHE.get(ref);
-    if (hit) return Promise.resolve(hit);
-    const inflight = BLOB_URL_INFLIGHT.get(ref);
-    if (inflight) return inflight;
-    const task = blobStore
-        .get(ref)
-        .then((blob) => {
-            if (!blob) return undefined;
-            const url = URL.createObjectURL(blob);
-            const existing = BLOB_URL_CACHE.get(ref);
-            if (existing) { URL.revokeObjectURL(url); return existing; } // 竞态兜底：留先到的
-            BLOB_URL_CACHE.set(ref, url);
-            evictBlobUrl();
-            return url;
-        })
-        .catch(() => undefined)
-        .finally(() => { BLOB_URL_INFLIGHT.delete(ref); });
-    BLOB_URL_INFLIGHT.set(ref, task);
-    return task;
-};
-
-/** 仅测试用：清空缓存（连带 revoke 自己建过的 URL） */
-export const __clearBlobUrlCacheForTest = () => {
-    for (const url of BLOB_URL_CACHE.values()) URL.revokeObjectURL(url);
-    BLOB_URL_CACHE.clear();
-    BLOB_URL_INFLIGHT.clear();
-};
-
-/** 缓存版 hook：blobref 走上面的常驻缓存，其余值原样透传（渲染期同步，无一帧滞后） */
-function useCachedBlobUrl(resolved: string | undefined | null): string | undefined {
-    const ref = isBlobRef(resolved) ? resolved : null;
-    const [url, setUrl] = useState<string | undefined>(() =>
-        ref ? BLOB_URL_CACHE.get(ref) : (resolved ?? undefined),
-    );
-    useEffect(() => {
-        if (!ref) { setUrl(resolved ?? undefined); return; }
-        const cached = BLOB_URL_CACHE.get(ref);
-        if (cached) { setUrl(cached); return; } // 命中缓存：重挂载首帧就有图
-        let alive = true;
-        setUrl(undefined);
-        void getCachedBlobUrl(ref).then((u) => { if (alive) setUrl(u); });
-        // 不 revoke：URL 交给缓存淘汰（卸载就 revoke 正是「切页面闪」的成因）
-        return () => { alive = false; };
-    }, [ref, resolved]);
-    return ref ? url : (resolved ?? undefined);
-}
-
-/**
  * 把一个图片字段值解析成可直接用于 <img src>/CSS url() 的字符串。
- *   · blobref 令牌 → 走模块级常驻缓存建 objectURL（卸载不 revoke、重挂载首帧命中，
- *     所以切页面不闪）；首次解析完成前返回 undefined，令牌间切换不会把上一个吐给渲染层；
- *   · builtin-room-asset 令牌 / 旧样板房绝对 URL → 当前部署下的内置资源 URL；
- *   · 其它（data: / http(s) / 渐变 / undefined）→ 渲染期直接透传，不等 effect、无一帧滞后。
+ *   · builtin-room-asset 令牌 / 旧样板房绝对 URL → 当前部署下的内置资源 URL（上游逻辑，留在本文件）；
+ *   · 其余（含 blobref 令牌）交给我们的常驻缓存 hook（./ourBlobUrlCache.ts）：
+ *     首次解析完成前返回 undefined，之后同一令牌一直命中缓存、卸载不 revoke——切页面不再空一帧。
  * 语义契约钉在 ./blobRefHook.contract.test.ts。
  */
 export function useBlobRefUrl(value: string | undefined | null): string | undefined {
-    // builtin 分支在 SDK 之前解析；blobref 令牌绕过它直接交给缓存 hook。
+    // builtin 分支先解析；blobref 令牌直接进我们的缓存 hook。
     const resolved = isBlobRef(value) ? value : resolveBuiltinRoomAssetUrl(value);
     return useCachedBlobUrl(resolved);
 }
