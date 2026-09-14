@@ -6,7 +6,13 @@
 
 import { createCoupleStore } from '../couple/coupleStoreBase';
 
-export type ShelfLayout = 'grid' | 'list';
+// grid  = 三列封面网格
+// list   = 纯文字列表（参考图 List View）
+// thumb  = 小封面横向卡片（参考图 Thumb List View）
+// detail = 大封面 + 星级 + 大小/格式/时间的详情行（参考图 Detail List View）
+export type ShelfLayout = 'grid' | 'list' | 'thumb' | 'detail';
+/** 书架排序键（参考图那个 Sort 组） */
+export type ShelfSort = 'lastRead' | 'addTime' | 'fileSize' | 'fileName';
 export type ReadingMode = 'focus' | 'casual';
 
 export interface ReaderTypography {
@@ -30,6 +36,14 @@ export interface ReaderPrefs {
     themeId: string;
     typography: ReaderTypography;
     shelfLayout: ShelfLayout;
+    /** 排序：最近阅读 / 加入时间 / 文件大小 / 文件名 */
+    shelfSort: ShelfSort;
+    /** true = 升序（参考图 Ascending / Descending） */
+    shelfAsc: boolean;
+    /** 书架上按分类分组显示（参考图 Display Categories） */
+    shelfGrouped: boolean;
+    /** 搜索历史（参考图那排 Search History 胶囊） */
+    searchHistory: string[];
     /** 默认共读模式（没单独设过的书用它） */
     readingMode: ReadingMode;
     /** 单书共读模式：bookId → 'focus' | 'casual'（v3 §4.6 的单书设置） */
@@ -60,6 +74,10 @@ export const DEFAULT_PREFS: ReaderPrefs = {
     themeId: 'paper',
     typography: DEFAULT_TYPOGRAPHY,
     shelfLayout: 'grid',
+    shelfSort: 'addTime',
+    shelfAsc: false,
+    shelfGrouped: false,
+    searchHistory: [],
     readingMode: 'focus',
     bookModes: {},
     highlightStyles: { user: 1 },
@@ -92,6 +110,29 @@ export function setTheme(themeId: string): void {
 
 export function setShelfLayout(shelfLayout: ShelfLayout): void {
     store.set((s) => ({ ...s, shelfLayout }));
+}
+
+export function setShelfSort(shelfSort: ShelfSort): void {
+    store.set((s) => ({ ...s, shelfSort }));
+}
+
+export function setShelfAsc(shelfAsc: boolean): void {
+    store.set((s) => ({ ...s, shelfAsc }));
+}
+
+export function setShelfGrouped(shelfGrouped: boolean): void {
+    store.set((s) => ({ ...s, shelfGrouped }));
+}
+
+/** 搜索历史：去重、新的在前、最多留 12 条。 */
+export function pushSearchHistory(word: string): void {
+    const w = word.trim();
+    if (!w) return;
+    store.set((s) => ({ ...s, searchHistory: [w, ...s.searchHistory.filter((x) => x !== w)].slice(0, 12) }));
+}
+
+export function clearSearchHistory(): void {
+    store.set((s) => ({ ...s, searchHistory: [] }));
 }
 
 export function setReadingMode(readingMode: ReadingMode): void {

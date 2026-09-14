@@ -265,7 +265,7 @@ export const READER_SKELETON_CSS = `
 }
 .rd-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* 小封面里的纸样别用正文那号字（44px 的缩略图上会把书名挤成竖排） */
-.rd-note-cover .rd-book-cover-ph, .rd-grid-list .rd-book-cover-ph { font-size: var(--rd-fs-caption); padding: 2px; }
+.rd-note-cover .rd-book-cover-ph, .rd-grid-list .rd-book-cover-ph, .rd-result-cover .rd-book-cover-ph { font-size: var(--rd-fs-caption); padding: 2px; }
 .rd-book-title { font-size: var(--rd-fs-sm); font-weight: 600; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .rd-book-author { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rd-book-prog { display: flex; align-items: center; gap: 6px; margin-top: 1px; }
@@ -467,6 +467,95 @@ export const READER_SKELETON_CSS = `
 /* ── 划线覆盖层（第二批用；容器永远不给背景） ── */
 .rd-hl-layer { position: absolute; inset: 0; pointer-events: none; }
 .rd-hl-rect { position: absolute; border-radius: var(--rd-radius-hl); background: rgba(var(--rd-hl-rgb), 0.32); }
+
+/* ── 书架 · 顶部（分类选择 + 菜单）、搜索胶囊、四种版式 ──
+   参考图 2/3/4/5：顶部一行「All ⌄ …… ···」、大标题、搜索胶囊、四种版式、搜索页、分类页。 */
+.rd-shelf-top { display: flex; align-items: center; gap: var(--rd-space-2); margin-bottom: 2px; }
+.rd-shelf-top-spacer { flex: 1 1 auto; }
+.rd-shelf-cat {
+  display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent;
+  color: var(--rd-ink); font-family: var(--rd-font-body); font-size: var(--rd-fs-lg); font-weight: 600;
+  padding: 2px 8px; border-radius: var(--rd-r-sm);
+}
+.rd-shelf-cat:active { background: var(--rd-bg-2); }
+.rd-search-pill {
+  display: flex; align-items: center; gap: var(--rd-space-2); width: 100%;
+  border: 0; background: var(--rd-card); color: var(--rd-ink-soft);
+  border-radius: var(--rd-r-pill); padding: 10px var(--rd-space-4);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-md); text-align: left;
+  box-shadow: var(--rd-shadow-sm); margin-bottom: var(--rd-space-3);
+}
+/* 分组标题（参考图 SYSTEM CATEGORIES / 结果里的分类名） */
+.rd-group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-3);
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); letter-spacing: 0.06em;
+  margin: var(--rd-space-4) 0 var(--rd-space-1);
+}
+.rd-group-action { color: var(--rd-accent); font-size: var(--rd-fs-sm); letter-spacing: 0; border: 0; background: transparent; font-family: var(--rd-font-body); padding: 0; }
+/* 分类行（文件夹 + 名字 + 计数） */
+.rd-folder { display: flex; align-items: center; gap: var(--rd-space-3); width: 100%; border: 0; background: transparent; color: inherit; font-family: inherit; font-size: var(--rd-fs-md); padding: var(--rd-space-3) 0; text-align: left; }
+.rd-folder + .rd-folder { border-top: 1px solid var(--rd-rule); }
+.rd-folder-icon { color: var(--rd-accent); flex: 0 0 auto; display: inline-flex; }
+.rd-folder-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-folder-count { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
+/* 版式③：纯文字列表（参考图 List View） */
+.rd-grid-plain { display: flex; flex-direction: column; }
+.rd-grid-plain .rd-book { flex-direction: row; align-items: center; gap: var(--rd-space-3); padding: var(--rd-space-3) 0; }
+.rd-grid-plain .rd-book + .rd-book { border-top: 1px solid var(--rd-rule); }
+.rd-grid-plain .rd-book-cover { display: none; }
+.rd-grid-plain .rd-book-meta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+
+/* 版式④：详情行（参考图 Detail List View：书名 + 星级 + 大小·格式·时间 + 右侧封面） */
+.rd-grid-detail { display: flex; flex-direction: column; }
+.rd-grid-detail .rd-book { flex-direction: row-reverse; align-items: flex-start; gap: var(--rd-space-3); padding: var(--rd-space-3) 0; }
+.rd-grid-detail .rd-book + .rd-book { border-top: 1px solid var(--rd-rule); }
+.rd-grid-detail .rd-book-cover { width: 64px; aspect-ratio: 2 / 3; flex: 0 0 auto; box-shadow: var(--rd-shadow-sm); }
+.rd-grid-detail .rd-book-meta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rd-book-facts { display: flex; flex-wrap: wrap; gap: var(--rd-space-3); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-book-stars { display: flex; gap: 2px; font-size: var(--rd-fs-caption); }
+.rd-star-dim { color: var(--rd-rule); }
+
+/* 搜索页（参考图 3/4） */
+.rd-search-bar { display: flex; align-items: center; gap: var(--rd-space-3); margin-bottom: var(--rd-space-3); }
+.rd-search-input {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--rd-space-2);
+  background: var(--rd-bg-2); border-radius: var(--rd-r-sm); padding: 9px var(--rd-space-3); color: var(--rd-ink-soft);
+}
+.rd-search-input input {
+  flex: 1 1 auto; min-width: 0; border: 0; background: transparent; outline: none;
+  color: var(--rd-ink); font-family: var(--rd-font-body); font-size: var(--rd-fs-md);
+}
+.rd-search-cancel { border: 0; background: transparent; color: var(--rd-accent); font-family: var(--rd-font-body); font-size: var(--rd-fs-md); flex: 0 0 auto; padding: 0; }
+.rd-search-found { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); margin: var(--rd-space-3) 0 0; }
+/* 搜索结果行（图 4：左书名+星级+元信息，右封面） */
+.rd-result { display: flex; flex-direction: row-reverse; align-items: flex-start; gap: var(--rd-space-3); width: 100%; border: 0; background: transparent; color: inherit; font-family: inherit; text-align: left; padding: var(--rd-space-3) 0; }
+.rd-result + .rd-result { border-top: 1px solid var(--rd-rule); }
+.rd-result-cover { width: 52px; aspect-ratio: 2 / 3; flex: 0 0 auto; border-radius: var(--rd-r-sm); overflow: hidden; background: var(--rd-card); box-shadow: var(--rd-shadow-sm); position: relative; }
+.rd-result-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+
+/* 菜单 sheet 里的小分组标题 */
+.rd-menu-label { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); padding: 0 var(--rd-space-4) var(--rd-space-1); }
+.rd-menu-gap { height: var(--rd-space-3); }
+
+/* 多选模式的勾选角标 + 底部操作条 */
+.rd-book-pick {
+  position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: var(--rd-r-pill);
+  border: 2px solid var(--rd-on-scrim); background: var(--rd-scrim); color: var(--rd-on-scrim);
+  display: flex; align-items: center; justify-content: center;
+}
+.rd-book-pick-on { background: var(--rd-accent); border-color: var(--rd-accent); }
+.rd-pickbar {
+  position: fixed; left: var(--rd-space-4); right: var(--rd-space-4);
+  bottom: calc(var(--rd-nav-h) + var(--safe-bottom, 0px) + var(--rd-space-3));
+  display: flex; align-items: center; gap: var(--rd-space-3); z-index: 70;
+  background: var(--rd-card); border-radius: var(--rd-r-pill); box-shadow: var(--rd-shadow);
+  padding: var(--rd-space-2) var(--rd-space-2) var(--rd-space-2) var(--rd-space-4);
+  font-size: var(--rd-fs-sm);
+}
+.rd-pickbar .rd-btn { padding: 6px var(--rd-space-3); font-size: var(--rd-fs-sm); }
+.rd-pickbar > span:first-child { flex: 1 1 auto; color: var(--rd-ink-soft); }
+.rd-check { color: var(--rd-accent); flex: 0 0 auto; display: inline-flex; }
 
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }
