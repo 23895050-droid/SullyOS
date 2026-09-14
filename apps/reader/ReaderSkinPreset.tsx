@@ -36,12 +36,18 @@ function varsToCss(selector: string, vars: Record<string, string | number>): str
 export function typographyVars(t: ReaderTypography): Record<string, string> {
     const stack = FONT_STACKS[t.fontFamily] ?? FONT_STACKS.serif;
     const body = Math.max(12, Math.min(30, Math.round(t.fontSize)));
+    /** 界面字号跟着正文字号整体缩放，但有上下限——调到 26px 正文时标题不该涨到 40px */
+    const scale = (k: number, min: number, max: number) => `${Math.round(Math.max(min, Math.min(max, body * k)))}px`;
     return {
         '--rd-font-body': stack.body,
         '--rd-font-heading': stack.heading,
         '--rd-fs-body': `${body}px`,
-        '--rd-fs-title': `${Math.round(body * 1.3)}px`,
-        '--rd-fs-caption': `${Math.max(10, Math.round(body * 0.72))}px`,
+        '--rd-fs-hero': scale(1.75, 26, 34),
+        '--rd-fs-title': scale(1.35, 20, 28),
+        '--rd-fs-lg': scale(1.1, 17, 22),
+        '--rd-fs-md': scale(0.9, 14, 18),
+        '--rd-fs-sm': scale(0.78, 12, 15),
+        '--rd-fs-caption': scale(0.7, 11, 13),
         '--rd-lh-body': String(Math.max(1.2, Math.min(3, t.lineHeight))),
         '--rd-para-gap': `${Math.max(0, Math.round(t.paragraphSpacing))}px`,
         '--rd-para-indent': `${Math.max(0, t.paragraphIndent)}em`,

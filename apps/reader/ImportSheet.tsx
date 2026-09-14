@@ -57,24 +57,26 @@ export default function ImportSheet({ onClose, onImported, presetFile, presetEnc
     return (
         <div className="rd-sheet-mask" onClick={() => { if (!busy) onClose(); }}>
             <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                <div className="rd-row">
-                    <div className="rd-sheet-title">导入书籍</div>
+                <div className="rd-sheet-grip" />
+                <div className="rd-row" style={{ marginBottom: 'var(--rd-space-3)' }}>
+                    <div className="rd-sheet-title" style={{ marginBottom: 0 }}>导入书籍</div>
                     <button className="rd-icon-btn" onClick={onClose} disabled={busy} aria-label="关闭"><X size={18} /></button>
                 </div>
                 <div className="rd-sheet-body">
                     <div className="rd-muted">第一期支持 EPUB 和 TXT。单本建议 5MB 以内，大文件导入会慢一点。</div>
 
-                    <div className="rd-row">
-                        <span className="rd-row-label">TXT 编码（EPUB 不用管）</span>
-                        <select
-                            className="rd-field"
-                            style={{ width: 'auto' }}
-                            value={encoding}
-                            onChange={(e) => setEncoding(e.target.value)}
-                            disabled={busy}
-                        >
-                            {ENCODING_CHOICES.map((e) => <option key={e} value={e}>{e}</option>)}
-                        </select>
+                    <div className="rd-row-label">TXT 编码（EPUB 不用管）</div>
+                    <div className="rd-chips" style={{ marginBottom: 0 }}>
+                        {ENCODING_CHOICES.map((e) => (
+                            <button
+                                key={e}
+                                className={`rd-chip${encoding === e ? ' rd-chip-on' : ''}`}
+                                disabled={busy}
+                                onClick={() => setEncoding(e)}
+                            >
+                                {e}
+                            </button>
+                        ))}
                     </div>
 
                     <input

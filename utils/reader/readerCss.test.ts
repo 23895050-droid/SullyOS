@@ -82,7 +82,9 @@ describe('ReaderSkinPreset · 四层拼装顺序', () => {
             cssPages: { shelf: '.rd-book-card { opacity: 0.9; }' },
         });
         const iSkeleton = css.indexOf('.rd-root {');
-        const iSkin = css.indexOf('--rd-paper: #14151a');
+        // 皮肤层的定位标记：骨架层不声明任何 --rd-* 颜色（只有 var() 引用），
+        // 所以第一处 `--rd-x: ` 声明就落在皮肤那一层——不绑具体色值，改皮肤不会误伤这条。
+        const iSkin = css.indexOf('--rd-paper: ');
         const iUserGlobal = css.indexOf('.rd-root.rd-user {');
         const iUserPage = css.indexOf('[data-rd-page="shelf"]');
         expect(iSkeleton).toBeGreaterThanOrEqual(0);

@@ -1,4 +1,4 @@
-// 读书模块 · 阅读页（2026-09-14）
+// 读书模块 · 阅读页（2026-09-14 立项 / 2026-09-15 UI 轮重写）
 //
 // 一屏一章：整章渲染进 .rd-reader-flow，翻页 = translateY（不是重新挂载文本）。
 // 页表由 utils/reader/paginate 量行矩形算出；锚点只认 (段号, 段内偏移)——
@@ -6,35 +6,67 @@
 //
 // 「当前页正文」这个数据口（V1 要喂给角色的东西）就是切片：point 在 currentSlicesRef，
 // 第二批的划线/讨论与共读上下文都从这里取，不重算第二套。
+//
+// ⚠️ 视觉可以整块换，下面这些**逻辑钩子不许动**（踩过坑，见 1a0fa52c）：
+//   · useLayoutEffect 量页（量完**同步**记 lastAnchorRef）
+//   · ResizeObserver 只建一次（deps []，回调先比尺寸——observe() 会立刻回调一次）
+//   · pendingRef 跨章落页 / flushProgress（防抖 + pagehide/visibilitychange/卸载立刻写）
+//
+// 参考图版式：顶栏（返回 + 章节名 + 功能键）／纸面正文／底栏三行
+//（阅读时长·剩余 → 进度滑轨 → 工具排：目录 / A- / 亮度 / A+ / 主题 / 更多）。
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeft, ListBullets, TextAa } from '@phosphor-icons/react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+    ArrowLeft, CaretLeft, CaretRight, DotsThree, Lightbulb, ListBullets, TextAa, TShirt,
+} from '@phosphor-icons/react';
 import { getBook, getChapter, getProgress, putProgress, type RdBook, type RdChapter, type RdProgress } from '../../utils/reader/readerDb';
 import {
     pageForAnchor, paginateFlow, slicesForPage, type PageSlice, type RdPageBox,
 } from '../../utils/reader/paginate';
-import { setTheme, setTypography, useReaderPrefs } from './readerPrefs';
-import { READER_SKINS } from './readerSkinPresets';
-import { DEFAULT_TYPOGRAPHY } from './readerPrefs';
+import {
+    DEFAULT_TYPOGRAPHY, readingModeFor, setBookMode, setHighlightSlot, setTheme, setTypography, useReaderPrefs,
+} from './readerPrefs';
+import { HIGHLIGHT_SLOTS, READER_SKINS } from './readerSkinPresets';
 
 const SAVE_DEBOUNCE = 900;
+/** 估「还要读多久」用的速度（字/秒）——按每分钟 400 字算 */
+const CHARS_PER_SEC = 400 / 60;
 
 interface Props {
     bookId: string;
+    notify: (msg: string) => void;
+    onOpenDetails: (bookId: string) => void;
+    onOpenStats: () => void;
     onBack: () => void;
 }
 
-export default function ReaderPage({ bookId, onBack }: Props) {
+/** 秒 → 「3 小时 10 分」这种人话 */
+function fmtDuration(sec: number): string {
+    const s = Math.max(0, Math.round(sec));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h > 0) return `${h} 小时 ${m} 分`;
+    if (m > 0) return `${m} 分 ${s % 60} 秒`;
+    return `${s} 秒`;
+}
+
+type Sheet = null | 'toc' | 'style' | 'more' | 'book' | 'hl' | 'bright';
+
+export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats, onBack }: Props) {
     const prefs = useReaderPrefs();
     const [book, setBook] = useState<RdBook | null>(null);
     const [chapter, setChapter] = useState<RdChapter | null>(null);
     const [chapterIdx, setChapterIdx] = useState(0);
     const [pages, setPages] = useState<RdPageBox[]>([]);
     const [pageIdx, setPageIdx] = useState(0);
-    const [tocOpen, setTocOpen] = useState(false);
-    const [styleOpen, setStyleOpen] = useState(false);
+    const [sheet, setSheet] = useState<Sheet>(null);
     const [error, setError] = useState<string | null>(null);
     const [layoutNonce, setLayoutNonce] = useState(0);
+    const [brightness, setBrightness] = useState(0);
+    /** 沉浸：点屏幕中间把上下栏藏起来 */
+    const [chromeOff, setChromeOff] = useState(false);
+    /** 只为了让「阅读时长」每 20 秒自己走一格（值本身不用，读 Date.now 现算） */
+    const [, setTick] = useState(0);
 
     const viewportRef = useRef<HTMLDivElement>(null);
     const flowRef = useRef<HTMLDivElement>(null);
@@ -170,6 +202,12 @@ export default function ReaderPage({ bookId, onBack }: Props) {
         return () => { if (timer) window.clearTimeout(timer); ro.disconnect(); };
     }, []);
 
+    // 阅读时长自己走
+    useEffect(() => {
+        const t = window.setInterval(() => setTick((n) => n + 1), 20000);
+        return () => window.clearInterval(t);
+    }, []);
+
     // ── 翻页 + 进度存 ──
     const goPage = useCallback((delta: number) => {
         if (pages.length === 0) return;
@@ -183,6 +221,13 @@ export default function ReaderPage({ bookId, onBack }: Props) {
         setChapterIdx(nextChapter);
     }, [pages.length, pageIdx, book, chapterIdx]);
 
+    /** 全书进度：章节位置 + 章内页位置（页面上那两个百分比与存档都用它） */
+    const bookPercent = useCallback((chIdx: number, pgIdx: number, pageCount: number, chapterCount: number) => {
+        if (chapterCount <= 0) return 0;
+        const span = 100 / chapterCount;
+        return Math.round((chIdx * span + ((pgIdx + 1) / Math.max(1, pageCount)) * span) * 10) / 10;
+    }, []);
+
     /** 把待落盘的进度写掉（幂等：写完就清空）。 */
     const flushProgress = useCallback(async () => {
         const payload = pendingSaveRef.current;
@@ -195,8 +240,7 @@ export default function ReaderPage({ bookId, onBack }: Props) {
         if (!book || !chapter || pages.length === 0) return;
         const anchor = anchorOfCurrentPage();
         if (anchor) lastAnchorRef.current = anchor;
-        const span = 100 / Math.max(1, book.chapterCount);
-        const percent = Math.round((chapterIdx * span + ((pageIdx + 1) / pages.length) * span) * 10) / 10;
+        const percent = bookPercent(chapterIdx, pageIdx, pages.length, book.chapterCount);
         const elapsed = Math.round((Date.now() - sessionStartRef.current) / 1000);
         pendingSaveRef.current = {
             bookId: book.id,
@@ -212,7 +256,7 @@ export default function ReaderPage({ bookId, onBack }: Props) {
         if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = window.setTimeout(() => { void flushProgress(); }, SAVE_DEBOUNCE);
         return () => { if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current); };
-    }, [pageIdx, chapterIdx, pages.length, book, chapter, anchorOfCurrentPage, flushProgress]);
+    }, [pageIdx, chapterIdx, pages.length, book, chapter, anchorOfCurrentPage, flushProgress, bookPercent]);
 
     // 退出书房 / 切后台 / 组件卸载：立刻落盘（只靠防抖的话，退出去那次就丢了）
     useEffect(() => {
@@ -254,27 +298,67 @@ export default function ReaderPage({ bookId, onBack }: Props) {
 
     const atEnd = book ? chapterIdx >= book.chapterCount - 1 && pageIdx >= pages.length - 1 : false;
     const top = pages[pageIdx]?.top ?? 0;
+    const percent = book ? bookPercent(chapterIdx, pageIdx, pages.length, book.chapterCount) : 0;
+    const elapsedTotal = baseSecondsRef.current + Math.round((Date.now() - sessionStartRef.current) / 1000);
+    const remainSec = book
+        ? Math.max(0, (book.totalChars * (1 - percent / 100)) / CHARS_PER_SEC)
+        : 0;
+    const bookMode = readingModeFor(prefs, bookId);
+    const mySlot = prefs.highlightStyles.user ?? 1;
+
+    const jumpChapter = (idx: number) => {
+        pendingRef.current = { page: 0 };
+        setChapterIdx(idx);
+        setSheet(null);
+    };
+
+    /** 滑轨：按全书比例跳到那一章（章节内从头开始） */
+    const scrubTo = (ratio: number) => {
+        if (!book || book.chapterCount <= 0) return;
+        const idx = Math.max(0, Math.min(book.chapterCount - 1, Math.floor(ratio * book.chapterCount)));
+        if (idx === chapterIdx) return;
+        jumpChapter(idx);
+    };
+
+    const moreItems: Array<{ key: string; label: string; on: boolean; run: () => void }> = useMemo(() => [
+        { key: 'read', label: '听书', on: false, run: () => notify('听书还没做，先欠着') },
+        { key: 'auto', label: '自动翻页', on: false, run: () => notify('自动翻页还没做，先欠着') },
+        { key: 'stat', label: '统计', on: true, run: () => { setSheet(null); onOpenStats(); } },
+        { key: 'share', label: '分享', on: false, run: () => notify('转发卡片在第三批，先欠着') },
+        { key: 'detail', label: '书本详情', on: true, run: () => { setSheet(null); onOpenDetails(bookId); } },
+        { key: 'book', label: '本书设置', on: true, run: () => setSheet('book') },
+        { key: 'hl', label: '划线设置', on: true, run: () => setSheet('hl') },
+        { key: 'more', label: '更多设置', on: true, run: () => setSheet('style') },
+    ], [notify, onOpenDetails, onOpenStats, bookId]);
 
     if (error) {
         return (
             <div className="rd-reader">
-                <div className="rd-top">
+                <div className="rd-reader-bar">
                     <button className="rd-icon-btn" onClick={onBack} aria-label="返回"><ArrowLeft size={18} /></button>
-                    <div className="rd-top-title">读书</div>
+                    <div className="rd-reader-bar-title">{error}</div>
                 </div>
-                <div className="rd-empty">{error}</div>
+                <div className="rd-empty">
+                    <div className="rd-empty-text">{error}</div>
+                    <button className="rd-btn rd-btn-primary" onClick={onBack}>回书架</button>
+                </div>
             </div>
         );
     }
 
     return (
         <div className="rd-reader" data-rd-page="reader">
-            <div className="rd-top">
-                <button className="rd-icon-btn" onClick={onBack} aria-label="返回"><ArrowLeft size={18} /></button>
-                <div className="rd-top-title">{book?.title ?? '…'}</div>
-                <button className="rd-icon-btn" onClick={() => setStyleOpen(true)} aria-label="排版"><TextAa size={18} /></button>
-                <button className="rd-icon-btn" onClick={() => setTocOpen(true)} aria-label="目录"><ListBullets size={18} /></button>
-            </div>
+            {!chromeOff && (
+                <div className="rd-reader-bar">
+                    <button className="rd-icon-btn" onClick={onBack} aria-label="返回"><ArrowLeft size={18} /></button>
+                    <div className="rd-reader-bar-title">
+                        {book ? `${book.title} · 第 ${chapterIdx + 1} / ${book.chapterCount} 章` : '…'}
+                    </div>
+                    <button className="rd-icon-btn" onClick={() => setSheet('style')} aria-label="排版"><TextAa size={18} /></button>
+                    <button className="rd-icon-btn" onClick={() => setSheet('toc')} aria-label="目录"><ListBullets size={18} /></button>
+                    <button className="rd-icon-btn" onClick={() => setSheet('more')} aria-label="更多"><DotsThree size={20} /></button>
+                </div>
+            )}
 
             <div
                 className="rd-reader-viewport"
@@ -284,6 +368,7 @@ export default function ReaderPage({ bookId, onBack }: Props) {
                     const ratio = (e.clientX - rect.left) / rect.width;
                     if (ratio < 0.3) goPage(-1);
                     else if (ratio > 0.7) goPage(1);
+                    else setChromeOff((v) => !v);
                 }}
                 onTouchStart={onTouchStart}
                 onTouchMove={onTouchMove}
@@ -295,114 +380,225 @@ export default function ReaderPage({ bookId, onBack }: Props) {
                         ref={flowRef}
                         style={{ transform: `translateY(${-top}px)`, transition: restoringRef.current ? 'none' : undefined }}
                     >
-                        {chapter && <div className="rd-chapter-title">{chapter.title}</div>}
+                        {chapter && <div className="rd-reader-kicker">第 {chapterIdx + 1} 章</div>}
+                        {chapter && <div className="rd-reader-chapter">{chapter.title}</div>}
                         {chapter?.paras.map((p, i) => (
                             <p className="rd-para" key={i} data-para-idx={i}>{p}</p>
                         ))}
                     </div>
                 </div>
+                <div className="rd-reader-veil" style={{ opacity: brightness }} />
             </div>
 
-            <div className="rd-reader-foot">
-                <button className="rd-icon-btn" onClick={() => goPage(-1)} aria-label="上一页"><ArrowLeft size={16} /></button>
-                <div className="rd-meter">
-                    {chapter?.title ?? ''}
-                    {' · '}
-                    {pages.length ? `${pageIdx + 1} / ${pages.length} 页 · 本章` : '排版中…'}
-                </div>
-                <button
-                    className="rd-icon-btn"
-                    onClick={() => goPage(1)}
-                    aria-label="下一页"
-                    style={{ transform: 'rotate(180deg)' }}
-                >
-                    <ArrowLeft size={16} />
-                </button>
-            </div>
-
-            {atEnd && (
-                <div className="rd-reader-foot" style={{ borderTop: 'none', justifyContent: 'center' }}>
-                    这本书读完了 ·{book?.totalChars ? ` ${Math.round(book.totalChars / 1000)} 千字` : ''}
+            {atEnd && !chromeOff && (
+                <div className="rd-reader-stat" style={{ justifyContent: 'center', padding: '6px 0 0' }}>
+                    这本书读完了{book?.totalChars ? ` · ${Math.round(book.totalChars / 1000)} 千字` : ''}
                 </div>
             )}
 
-            {tocOpen && book && (
-                <div className="rd-sheet-mask" onClick={() => setTocOpen(false)}>
+            {!chromeOff && (
+                <div className="rd-reader-foot">
+                    <div className="rd-reader-stat">
+                        <span>阅读时长 {fmtDuration(elapsedTotal)}</span>
+                        <span>剩余 {fmtDuration(remainSec)}</span>
+                    </div>
+
+                    <div className="rd-reader-slider">
+                        <button className="rd-slider-nav" onClick={() => goPage(-1)} aria-label="上一页"><CaretLeft size={15} /></button>
+                        <div
+                            className="rd-slider-track"
+                            onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                scrubTo((e.clientX - rect.left) / rect.width);
+                            }}
+                        >
+                            <div className="rd-slider-rail"><div className="rd-slider-fill" style={{ width: `${percent}%` }} /></div>
+                        </div>
+                        <button className="rd-slider-nav" onClick={() => goPage(1)} aria-label="下一页"><CaretRight size={15} /></button>
+                    </div>
+
+                    <div className="rd-reader-tools">
+                        <button className="rd-tool" onClick={() => setSheet('toc')}><ListBullets size={19} /></button>
+                        <button className="rd-tool" onClick={() => setTypography({ fontSize: prefs.typography.fontSize - 1 })}>A-</button>
+                        <button className="rd-tool" onClick={() => setSheet('bright')}><Lightbulb size={19} /></button>
+                        <button className="rd-tool" onClick={() => setTypography({ fontSize: prefs.typography.fontSize + 1 })}>A+</button>
+                        <button className="rd-tool" onClick={() => setSheet('style')}><TShirt size={19} /></button>
+                        <button className="rd-tool" onClick={() => setSheet('more')}><DotsThree size={20} /></button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 目录 ── */}
+            {sheet === 'toc' && book && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
                     <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
                         <div className="rd-sheet-title">目录</div>
-                        <div className="rd-sheet-body">
-                            {book.toc.length === 0 && <div className="rd-muted">这本书没有目录</div>}
-                            {book.toc.map((item) => (
-                                <button
-                                    key={`${item.chapterIdx}-${item.title}`}
-                                    className="rd-btn"
-                                    style={{ textAlign: 'left', borderColor: item.chapterIdx === chapterIdx ? 'var(--rd-accent)' : undefined }}
-                                    onClick={() => {
-                                        pendingRef.current = { page: 0 };
-                                        setChapterIdx(item.chapterIdx);
-                                        setTocOpen(false);
-                                    }}
-                                >
-                                    {item.title}
-                                </button>
-                            ))}
+                        {book.toc.length === 0 && <div className="rd-muted">这本书没有目录</div>}
+                        <div className="rd-card rd-card-flush">
+                            <div className="rd-list">
+                                {book.toc.map((item) => (
+                                    <button key={`${item.chapterIdx}-${item.title}`} className="rd-item" onClick={() => jumpChapter(item.chapterIdx)}>
+                                        <span className="rd-item-label" style={{ fontWeight: item.chapterIdx === chapterIdx ? 600 : undefined }}>
+                                            {item.title}
+                                        </span>
+                                        {item.chapterIdx === chapterIdx && <span className="rd-item-value">在读</span>}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>
             )}
 
-            {styleOpen && (
-                <div className="rd-sheet-mask" onClick={() => setStyleOpen(false)}>
+            {/* ── 排版与主题 ── */}
+            {sheet === 'style' && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
                     <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
                         <div className="rd-sheet-title">排版与主题</div>
-                        <div className="rd-sheet-body">
-                            <div className="rd-row">
-                                <span className="rd-row-label">字号</span>
-                                <div className="rd-btn-row">
-                                    <button className="rd-btn" onClick={() => setTypography({ fontSize: prefs.typography.fontSize - 1 })}>A-</button>
-                                    <span className="rd-muted" style={{ alignSelf: 'center' }}>{prefs.typography.fontSize}</span>
-                                    <button className="rd-btn" onClick={() => setTypography({ fontSize: prefs.typography.fontSize + 1 })}>A+</button>
-                                </div>
-                            </div>
-                            <div className="rd-row">
-                                <span className="rd-row-label">行高</span>
-                                <div className="rd-btn-row">
-                                    <button className="rd-btn" onClick={() => setTypography({ lineHeight: Math.round((prefs.typography.lineHeight - 0.1) * 10) / 10 })}>紧</button>
-                                    <span className="rd-muted" style={{ alignSelf: 'center' }}>{prefs.typography.lineHeight.toFixed(1)}</span>
-                                    <button className="rd-btn" onClick={() => setTypography({ lineHeight: Math.round((prefs.typography.lineHeight + 0.1) * 10) / 10 })}>松</button>
-                                </div>
-                            </div>
-                            <div className="rd-row">
-                                <span className="rd-row-label">页边距</span>
-                                <div className="rd-btn-row">
-                                    <button className="rd-btn" onClick={() => setTypography({ margin: prefs.typography.margin - 4 })}>窄</button>
-                                    <button className="rd-btn" onClick={() => setTypography({ margin: prefs.typography.margin + 4 })}>宽</button>
-                                </div>
-                            </div>
-                            <div className="rd-row">
-                                <span className="rd-row-label">主题</span>
-                                <div className="rd-btn-row">
-                                    {READER_SKINS.map((skin) => (
-                                        <button
-                                            key={skin.id}
-                                            className="rd-btn"
-                                            style={{ borderColor: prefs.themeId === skin.id ? 'var(--rd-accent)' : undefined }}
-                                            onClick={() => setTheme(skin.id)}
-                                        >
-                                            {skin.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
+
+                        <div className="rd-row" style={{ marginBottom: 'var(--rd-space-3)' }}>
+                            <span className="rd-row-label">背景</span>
                             <div className="rd-btn-row">
-                                <button className="rd-btn" onClick={() => setTypography(DEFAULT_TYPOGRAPHY)}>
-                                    排版恢复默认
+                                {READER_SKINS.map((skin) => (
+                                    <button
+                                        key={skin.id}
+                                        className={prefs.themeId === skin.id ? 'rd-btn rd-btn-primary' : 'rd-btn'}
+                                        onClick={() => setTheme(skin.id)}
+                                    >
+                                        {skin.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="rd-card">
+                            <div className="rd-list">
+                                <div className="rd-item">
+                                    <span className="rd-item-label">字体</span>
+                                    <div className="rd-btn-row">
+                                        <button className={prefs.typography.fontFamily !== 'sans' ? 'rd-chip rd-chip-on' : 'rd-chip'} onClick={() => setTypography({ fontFamily: 'serif' })}>衬线</button>
+                                        <button className={prefs.typography.fontFamily === 'sans' ? 'rd-chip rd-chip-on' : 'rd-chip'} onClick={() => setTypography({ fontFamily: 'sans' })}>黑体</button>
+                                    </div>
+                                </div>
+                                <div className="rd-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                                    <div className="rd-row"><span className="rd-row-label">字号</span><span className="rd-item-value">{prefs.typography.fontSize}px</span></div>
+                                    <input className="rd-slider" type="range" min={13} max={26} step={1} value={prefs.typography.fontSize}
+                                        onChange={(e) => setTypography({ fontSize: Number(e.target.value) })} />
+                                </div>
+                                <div className="rd-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                                    <div className="rd-row"><span className="rd-row-label">行高</span><span className="rd-item-value">{prefs.typography.lineHeight.toFixed(1)}</span></div>
+                                    <input className="rd-slider" type="range" min={1.3} max={2.6} step={0.1} value={prefs.typography.lineHeight}
+                                        onChange={(e) => setTypography({ lineHeight: Number(e.target.value) })} />
+                                </div>
+                                <div className="rd-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                                    <div className="rd-row"><span className="rd-row-label">段间距</span><span className="rd-item-value">{prefs.typography.paragraphSpacing}px</span></div>
+                                    <input className="rd-slider" type="range" min={0} max={28} step={2} value={prefs.typography.paragraphSpacing}
+                                        onChange={(e) => setTypography({ paragraphSpacing: Number(e.target.value) })} />
+                                </div>
+                                <div className="rd-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                                    <div className="rd-row"><span className="rd-row-label">首行缩进</span><span className="rd-item-value">{prefs.typography.paragraphIndent}em</span></div>
+                                    <input className="rd-slider" type="range" min={0} max={3} step={0.5} value={prefs.typography.paragraphIndent}
+                                        onChange={(e) => setTypography({ paragraphIndent: Number(e.target.value) })} />
+                                </div>
+                                <div className="rd-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                                    <div className="rd-row"><span className="rd-row-label">页边距</span><span className="rd-item-value">{prefs.typography.margin}px</span></div>
+                                    <input className="rd-slider" type="range" min={10} max={44} step={2} value={prefs.typography.margin}
+                                        onChange={(e) => setTypography({ margin: Number(e.target.value) })} />
+                                </div>
+                            </div>
+                        </div>
+
+                        <button className="rd-btn rd-btn-block" style={{ marginTop: 'var(--rd-space-3)' }} onClick={() => setTypography(DEFAULT_TYPOGRAPHY)}>
+                            排版恢复默认
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 亮度（只压一层黑，不动系统亮度） ── */}
+            {sheet === 'bright' && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
+                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
+                        <div className="rd-sheet-title">亮度</div>
+                        <div className="rd-row">
+                            <span className="rd-row-label">调暗</span>
+                            <span className="rd-item-value">{Math.round(brightness * 100)}%</span>
+                        </div>
+                        <input className="rd-slider" type="range" min={0} max={0.6} step={0.05} value={brightness}
+                            onChange={(e) => setBrightness(Number(e.target.value))} />
+                        <div className="rd-muted">夜里把纸面压暗一点，不跟着系统走。</div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 本书设置（单书设置，v3 §4.6：共读模式在这里，不在大设置页） ── */}
+            {sheet === 'book' && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
+                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
+                        <div className="rd-sheet-title">本书设置</div>
+                        <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-3)' }}>{book?.title}</div>
+
+                        <div className="rd-row-label" style={{ marginBottom: 'var(--rd-space-2)' }}>共读模式（只对这本书）</div>
+                        <div className="rd-btn-row" style={{ marginBottom: 'var(--rd-space-2)' }}>
+                            <button className={bookMode === 'focus' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => setBookMode(bookId, 'focus')}>专注</button>
+                            <button className={bookMode === 'casual' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => setBookMode(bookId, 'casual')}>随心</button>
+                        </div>
+                        <div className="rd-muted">
+                            专注：上下文以当前页正文为主，只带这本书最近几条批注；<br />
+                            随心：保留正常聊天上下文，读书只是其中一件事。
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 划线配色（自己一个槽，每个角色各一个） ── */}
+            {sheet === 'hl' && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
+                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
+                        <div className="rd-sheet-title">划线配色</div>
+                        <div className="rd-row" style={{ marginBottom: 'var(--rd-space-3)' }}>
+                            <span className="rd-row-label">我</span>
+                            <div className="rd-btn-row">
+                                {HIGHLIGHT_SLOTS.map((s) => (
+                                    <button
+                                        key={s.slot}
+                                        aria-label={s.label}
+                                        className={`rd-swatch${mySlot === s.slot ? ' rd-swatch-on' : ''}`}
+                                        onClick={() => setHighlightSlot('user', s.slot)}
+                                        style={{ background: `rgb(var(--rd-hl-${s.slot}-rgb))` }}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="rd-muted">角色的槽位跟着书库页的开关走，第二批接上。</div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 更多（参考图里那排胶囊） ── */}
+            {sheet === 'more' && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
+                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
+                        <div className="rd-sheet-title">更多</div>
+                        <div className="rd-pill-grid">
+                            {moreItems.map((it) => (
+                                <button
+                                    key={it.key}
+                                    className={`rd-pill${it.on ? '' : ' rd-pill-off'}`}
+                                    onClick={it.run}
+                                >
+                                    {it.label}{!it.on && <span className="rd-pill-tag">待做</span>}
                                 </button>
-                                <button className="rd-btn" onClick={() => setStyleOpen(false)}>收起</button>
-                            </div>
-                            <div className="rd-muted">
-                                {book ? `${book.format.toUpperCase()} · 第 ${chapterIdx + 1} / ${book.chapterCount} 章` : ''}
-                            </div>
+                            ))}
+                        </div>
+                        <div className="rd-muted" style={{ marginTop: 'var(--rd-space-4)' }}>
+                            当前第 {pageIdx + 1} / {pages.length} 页 · 全书 {percent}%
                         </div>
                     </div>
                 </div>

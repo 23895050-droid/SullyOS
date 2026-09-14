@@ -1,14 +1,18 @@
-// 读书模块 · 外壳（2026-09-14）
+// 读书模块 · 外壳（2026-09-14 立项 / 2026-09-15 UI 轮重写）
 //
-// 一级导航五项：书架 / 笔记 / 书库 / 统计 / 设置（v3 §4.0）。阅读页从书架进，不占 tab。
+// 一级导航五项：书架 / 笔记 / 书库 / 统计 / 设置（v3 §4.0）。阅读页与书详情从书架进，不占 tab。
 // 外面进来的三个入口都走同一条深链（sessionStorage 标记，照音乐 App 的
 // sully_music_open_player 先例）：'shelf' | 'notes' | 'library' | 'stats' | 'settings' | 'book:<id>'。
 // 换句话说，情侣空间那三张卡跳进来用的是**既有路由**，不是另做一套简化视图（v3 §4.7）。
+//
+// 层级：书架/笔记/书库/统计/设置 装在 .rd-body 里，下面挂 .rd-nav；
+// 阅读页与书详情是整屏页（盖住导航，参考图里这两页都没有底部导航）。
 
 import { useEffect, useMemo, useState } from 'react';
 import { BookOpen, ChartBar, Gear, NoteBlank, SquaresFour } from '@phosphor-icons/react';
 import ReaderSkinPreset from './ReaderSkinPreset';
 import ReaderPage from './ReaderPage';
+import BookDetails from './BookDetails';
 import ImportSheet from './ImportSheet';
 import ReaderShelf from './tabs/ReaderShelf';
 import ReaderNotes from './tabs/ReaderNotes';
@@ -38,10 +42,15 @@ interface Props {
 export default function ReaderApp({ onBack }: Props) {
     const prefs = useReaderPrefs();
     const [tab, setTab] = useState<TabKey>('shelf');
+    /** 正在读的书（整屏阅读页） */
     const [reading, setReading] = useState<string | null>(null);
+    /** 正在看的书详情（整屏书信息页） */
+    const [details, setDetails] = useState<string | null>(null);
     const [refreshToken, setRefreshToken] = useState(0);
     const [toast, setToast] = useState<string | null>(null);
     const [importOpen, setImportOpen] = useState(false);
+    /** 书详情里点「删除」后要回落书架 */
+    const [detailNonce, setDetailNonce] = useState(0);
 
     const notify = (msg: string) => setToast(msg);
 
@@ -83,47 +92,82 @@ export default function ReaderApp({ onBack }: Props) {
         setLastBook(bookId);
     };
 
+    const openBookFrom = (bookId: string) => {
+        setDetails(null);
+        openBook(bookId);
+    };
+
+    const refresh = () => setRefreshToken((n) => n + 1);
+
+    const rootClass = `rd-root${prefs.cssGlobal || Object.keys(prefs.cssPages || {}).length ? ' rd-user' : ''}`;
+
+    // ── 整屏页：阅读 ──
+    if (reading) {
+        return (
+            <div className={rootClass}>
+                <ReaderSkinPreset />
+                <ReaderPage
+                    bookId={reading}
+                    notify={notify}
+                    onOpenDetails={(id) => { setReading(null); setDetails(id); }}
+                    onOpenStats={() => { setReading(null); setTab('stats'); }}
+                    onBack={() => { setReading(null); refresh(); if (onBack) onBack(); }}
+                />
+                {toast && <div className="rd-toast">{toast}</div>}
+            </div>
+        );
+    }
+
+    // ── 整屏页：书详情 ──
+    if (details) {
+        return (
+            <div className={rootClass}>
+                <ReaderSkinPreset />
+                <BookDetails
+                    key={`${details}-${detailNonce}`}
+                    bookId={details}
+                    notify={notify}
+                    onRead={openBookFrom}
+                    onDeleted={() => { setDetails(null); refresh(); }}
+                    onBack={() => { setDetails(null); refresh(); }}
+                />
+                {toast && <div className="rd-toast">{toast}</div>}
+            </div>
+        );
+    }
+
     return (
-        <div className={`rd-root${prefs.cssGlobal || Object.keys(prefs.cssPages || {}).length ? ' rd-user' : ''}`}>
+        <div className={rootClass}>
             <ReaderSkinPreset />
 
-            {reading ? (
-                <ReaderPage bookId={reading} onBack={() => {
-                    setReading(null);
-                    setRefreshToken((n) => n + 1);
-                    if (onBack) onBack();
-                }} />
-            ) : (
-                <>
-                    <div className="rd-content">
-                        {tab === 'shelf' && (
-                            <ReaderShelf
-                                onOpenBook={openBook}
-                                notify={notify}
-                                refreshToken={refreshToken}
-                                onChanged={() => setRefreshToken((n) => n + 1)}
-                            />
-                        )}
-                        {tab === 'notes' && <ReaderNotes />}
-                        {tab === 'library' && <ReaderLibrary />}
-                        {tab === 'stats' && <ReaderStats />}
-                        {tab === 'settings' && <ReaderSettings />}
-                    </div>
+            <div className="rd-body">
+                {tab === 'shelf' && (
+                    <ReaderShelf
+                        onOpenBook={openBook}
+                        onOpenDetails={(id) => setDetails(id)}
+                        notify={notify}
+                        refreshToken={refreshToken}
+                        onChanged={refresh}
+                    />
+                )}
+                {tab === 'notes' && <ReaderNotes />}
+                {tab === 'library' && <ReaderLibrary />}
+                {tab === 'stats' && <ReaderStats refreshToken={refreshToken} />}
+                {tab === 'settings' && <ReaderSettings />}
+            </div>
 
-                    <div className="rd-tabbar">
-                        {TABS.map(({ key, label, Icon }) => (
-                            <button
-                                key={key}
-                                className={`rd-tab${tab === key ? ' rd-tab-on' : ''}`}
-                                onClick={() => setTab(key)}
-                            >
-                                <Icon size={20} />
-                                <span>{label}</span>
-                            </button>
-                        ))}
-                    </div>
-                </>
-            )}
+            <nav className="rd-nav">
+                {TABS.map(({ key, label, Icon }) => (
+                    <button
+                        key={key}
+                        className={`rd-nav-btn${tab === key ? ' rd-nav-on' : ''}`}
+                        onClick={() => setTab(key)}
+                    >
+                        <Icon size={21} weight={tab === key ? 'fill' : 'regular'} />
+                        <span>{label}</span>
+                    </button>
+                ))}
+            </nav>
 
             {toast && <div className="rd-toast">{toast}</div>}
             {importOpen && (

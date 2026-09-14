@@ -30,7 +30,10 @@ export interface ReaderPrefs {
     themeId: string;
     typography: ReaderTypography;
     shelfLayout: ShelfLayout;
+    /** 默认共读模式（没单独设过的书用它） */
     readingMode: ReadingMode;
+    /** 单书共读模式：bookId → 'focus' | 'casual'（v3 §4.6 的单书设置） */
+    bookModes: Record<string, ReadingMode>;
     /** ownerId → 划线样式槽（1..6）。用户与每个角色各自独立配色 */
     highlightStyles: Record<string, number>;
     /** 允许读书的角色（书库页只列开了开关的；V9 的多游标也按这个名单） */
@@ -58,6 +61,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
     typography: DEFAULT_TYPOGRAPHY,
     shelfLayout: 'grid',
     readingMode: 'focus',
+    bookModes: {},
     highlightStyles: { user: 1 },
     readingChars: [],
     cssGlobal: '',
@@ -70,6 +74,7 @@ const store = createCoupleStore<ReaderPrefs>('reader_prefs_v1', 1, DEFAULT_PREFS
     typography: { ...DEFAULT_TYPOGRAPHY, ...(parsed.typography || {}) },
     highlightStyles: { ...DEFAULT_PREFS.highlightStyles, ...(parsed.highlightStyles || {}) },
     cssPages: { ...(parsed.cssPages || {}) },
+    bookModes: { ...(parsed.bookModes || {}) },
 }));
 
 export const readerPrefsStore = store;
@@ -91,6 +96,16 @@ export function setShelfLayout(shelfLayout: ShelfLayout): void {
 
 export function setReadingMode(readingMode: ReadingMode): void {
     store.set((s) => ({ ...s, readingMode }));
+}
+
+/** 单书共读模式（书详情的「本书设置」里改，v3 §4.6）。 */
+export function setBookMode(bookId: string, mode: ReadingMode): void {
+    store.set((s) => ({ ...s, bookModes: { ...s.bookModes, [bookId]: mode } }));
+}
+
+/** 这本书的共读模式：没单独设过就落回默认值。 */
+export function readingModeFor(prefs: ReaderPrefs, bookId: string): ReadingMode {
+    return prefs.bookModes?.[bookId] ?? prefs.readingMode;
 }
 
 export function setLastBook(bookId: string | undefined): void {
