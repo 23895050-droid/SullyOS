@@ -329,10 +329,6 @@ const GlobalMiniPlayer: React.FC = () => {
           onPointerCancel={endDrag}
           onContextMenu={(e) => e.preventDefault()}
           className="mz-globalmini-ball pointer-events-auto relative w-10 h-10 rounded-full overflow-hidden active:scale-95 transition-transform touch-none select-none"
-          style={{
-            boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
-            border: '1px solid rgba(255,255,255,0.25)',
-          }}
           aria-label="音乐播放器（点击展开，拖动移位，长按隐藏）"
           title="点击展开 · 拖动移位 · 长按隐藏"
         >
@@ -344,8 +340,7 @@ const GlobalMiniPlayer: React.FC = () => {
           />
           {/* 播放/暂停小指示 */}
           <div
-            className="absolute inset-0 flex items-center justify-center pointer-events-none"
-            style={{ background: 'rgba(0,0,0,0.25)' }}
+            className="absolute inset-0 flex items-center justify-center pointer-events-none mz-globalmini-ball-overlay"
           >
             {playing
               ? <Pause size={14} weight="fill" color="#fff" />
@@ -374,13 +369,6 @@ const GlobalMiniPlayer: React.FC = () => {
     >
       <div
         className="mz-globalmini-bar pointer-events-auto flex items-center gap-2.5 rounded-2xl pl-1.5 pr-2.5 py-2 relative overflow-hidden animate-fade-in"
-        style={{
-          background: 'rgba(20, 24, 35, 0.65)',
-          backdropFilter: 'blur(24px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(24px) saturate(1.6)',
-          border: '1px solid rgba(255,255,255,0.15)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-        }}
       >
         {/* 拖动把手 — 垂直拖动整个条；点击则收起 */}
         <div
@@ -393,14 +381,13 @@ const GlobalMiniPlayer: React.FC = () => {
           aria-label="拖动调整位置（点击收起）"
           title="上下拖动 · 点击收起"
         >
-          <div className="w-1 h-7 rounded-full" style={{ background: 'rgba(255,255,255,0.25)' }} />
+          <div className="w-1 h-7 rounded-full mz-globalmini-handle" />
         </div>
         {/* 封面 */}
         <TokenImg
           value={current.albumPic}
           alt=""
-          className="w-9 h-9 rounded-lg object-cover shrink-0"
-          style={{ border: '1px solid rgba(255,255,255,0.2)' }}
+          className="w-9 h-9 rounded-lg object-cover shrink-0 mz-globalmini-cover"
         />
 
         {/* 文字 */}
@@ -419,8 +406,7 @@ const GlobalMiniPlayer: React.FC = () => {
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); togglePlay(); }}
-            className="p-1.5 rounded-full text-white active:scale-95 transition-transform"
-            style={{ background: 'rgba(255,255,255,0.15)' }}
+            className="p-1.5 rounded-full text-white active:scale-95 transition-transform mz-globalmini-btn"
           >
             {playing ? <Pause size={14} weight="fill" /> : <Play size={14} weight="fill" />}
           </button>

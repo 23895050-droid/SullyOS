@@ -10,13 +10,16 @@ import React, { useEffect } from 'react';
 import { useMusicStore } from '../../apps/couple/musicStore';
 import { MUSIC_NIGHT_GLOBAL_CSS } from '../../utils/musicNightPreset';
 import { MUSIC_CARD_BASE_CSS } from '../../utils/musicCardCss';
+import { MUSIC_APP_BASE_CSS, MUSIC_MINI_BASE_CSS } from '../../utils/musicAppCss';
 
 const GlobalMusicCssPreset: React.FC = () => {
   const musicStore = useMusicStore();
   const css = [
     // 内置基础层：一起听卡片的背景/边框/文字色（2026-09-13 从 inline 搬来）。
     // 必须排最前——用户层在其后，同权重时后者胜，自定义 CSS 无需 !important。
+    MUSIC_APP_BASE_CSS,    // 播放页/聊歌页内置基础层（写死字面值收编，2026-09-13）——放全局：写歌 App 等复用同一批组件
     MUSIC_CARD_BASE_CSS,
+    MUSIC_MINI_BASE_CSS,   // 悬浮窗内置基础层
     musicStore.cssPreset === 'night' ? MUSIC_NIGHT_GLOBAL_CSS : '',
     musicStore.cssGlobal,
     musicStore.cssPages.miniplayer ?? '',

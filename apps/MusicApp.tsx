@@ -229,6 +229,8 @@ const MusicApp: React.FC = () => {
   const paletteCss = buildPaletteCss(musicStore.palette);
   useEffect(() => {
     const layers = [
+      // 内置基础层（MUSIC_APP_BASE_CSS）在 GlobalMusicCssPreset 全局注入——
+      // 描边/玻璃等类被写歌 App 等复用同一批组件的地方也要在（见该文件注释）
       nightPreset ? MUSIC_NIGHT_PRESET_CSS : '',
       paletteCss,
       musicStore.cssGlobal,
@@ -537,8 +539,8 @@ const MusicApp: React.FC = () => {
               <button
                 onClick={() => { setChatCharId(companions[0]?.id ?? playlistCharId); setView('chat'); trackEvent('打开聊歌框'); }}
                 aria-label="聊歌"
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
-                style={{ color: C.primary, border: '1px solid rgba(255,255,255,0.45)', background: C.glass }}
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90 mz-header-btn"
+                style={{ color: C.primary, background: C.glass }}
               >
                 <ChatCircleText size={15} weight="duotone" />
               </button>
@@ -630,11 +632,7 @@ const MusicApp: React.FC = () => {
 
           <div
             ref={lyricBoxRef}
-            className="flex-1 w-full my-3 min-h-0 overflow-y-auto text-center scroll-smooth shizuku-scrollbar px-2"
-            style={{
-              maskImage: 'linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)',
-              WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)',
-            }}
+            className="flex-1 w-full my-3 min-h-0 overflow-y-auto text-center scroll-smooth shizuku-scrollbar px-2 mz-lyric-box"
           >
             {lyric.length === 0 ? (
               <div className="pt-6 flex flex-col items-center gap-2" style={{ color: C.faint }}>
@@ -756,8 +754,8 @@ const MusicApp: React.FC = () => {
                 </button>
                 <button
                   onClick={() => requestEndTogether(null)}
-                  className="rounded-full px-3 py-1 text-[10px] font-medium transition-all active:scale-95"
-                  style={{ color: C.muted, border: '1px solid rgba(255,255,255,0.25)', background: C.glass }}
+                  className="rounded-full px-3 py-1 text-[10px] font-medium transition-all active:scale-95 mz-together-btn"
+                  style={{ color: C.muted, background: C.glass }}
                 >
                   结束一起听
                 </button>

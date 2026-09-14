@@ -245,7 +245,7 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '透明度拼接处用 rgb 三元组变量：--mz-bg-rgb / --mz-primary-rgb / --mz-accent-rgb / --mz-glow-rgb / --mz-sakura-rgb / --mz-lavender-rgb / --mz-muted-rgb / --mz-faint-rgb / --mz-vip-rgb（如 rgba(var(--mz-glow-rgb, 205,198,233), 0.2)）。改颜色时同步改同名 -rgb 变量，否则透明拼接处还是旧色。\n' +
       '玻璃 class（全局可用）：.shizuku-glass（浅玻璃 blur16）/ .shizuku-glass-strong（深玻璃 blur24）——重写这两个类整体改玻璃质感；滚动条 .shizuku-scrollbar。\n' +
       '各页钩子清单（页面级，类名都已挂在 DOM 上）：.mz-app（音乐 App 根）/ .mz-search（搜索页）/ .mz-player（播放页）/ .mz-chat（聊歌页）/ .mz-settings（设置页）/ .mz-songrow（搜索结果行）/ .mz-miniplayer（音乐 App 内迷你条）/ .mz-together（一起听徽章块）/ .mz-together-strip（夜色预设双人状态区）/ .mz-vinyl（黑胶唱片）/ .mz-chat-bubble + .mz-chat-bubble-user + .mz-chat-bubble-ai（聊歌气泡）/ .mz-chat-voice（聊歌语音条）/ .mz-chat-avatar（聊歌头像）/ .mz-music-card（主聊天里的一起听卡钩子；五张卡各有 .mz-music-card-invite / -accept / -summary / -chatsummary / -song 卡类 + 一批零件类，已全部类化——详见「聊天卡片」模式，直接覆盖、无需 !important）。\n' +
-      '注意：音乐 App 内组件仍有不少颜色/边框是 inline style，class 规则覆盖不掉时用 !important，或优先改 --mz-* 变量（变量优先级最高、最省事）；但主聊天的一起听卡已全部类化（见「聊天卡片」模式），直接写类名覆盖即可，不需要 !important。\n' +
+      '注意：写死的白边/玻璃底已基本收进基础层类（播放页 .mz-vinyl-* / .mz-mizu-header / .mz-metachip / .mz-play-ring / .mz-progress-track / .mz-lyric-box；聊歌页 .mz-chat-bubble-user / -ai / .mz-chat-avatar / -input / -send / -voice-text / -header；悬浮窗 .mz-globalmini-*；主聊天卡 .mz-music-card-*），直接写类名覆盖即可；少数地方（设置页胶囊按钮、个人页等）仍是 inline，覆盖不动时优先改 --mz-* 变量（变量优先级最高、最省事），最后才用 !important。\n' +
       '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS、position:fixed 全局浮层。可以改布局、位置、大小、间距——类名都是真实存在的，但不要假设清单之外还有别的 class；没把握的区块就只动 --mz-* 变量。',
   },
   {
@@ -256,14 +256,14 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '这是 SullyOS 音乐 App 的播放页（页面根 .mz-player）。页内分块（用户挑哪块就只改哪块，其余别动）：\n\n' +
       '【顶部导航】毛玻璃条 .shizuku-glass-strong：左侧返回圆钮、中间标题（衬线字，两侧水滴/星芒装饰）、右侧 1-2 个圆形图标按钮（聊歌入口只在有人一起听时出现；耳机钮=邀请一起听/点亮=进行中）。选择器：.mz-player 头部条本身和其中的 button。\n' +
       '【双人状态区】（一起听 + 夜色预设时显示）.mz-together-strip：两个重叠 36px 圆头像 + 顶部细弧线 + 状态文本「{用户} ♥ {角色}」。\n' +
-      '【黑胶唱片】.mz-vinyl（正方形外容器）：内层旋转圆盘是第一个子 div（播放时 animation: shizuku-vinyl 18s 旋转，圆角 50%）；盘中央是中心标签圆（radial-gradient 白→--mz-soft 的小圆，里面一个深色轴心点）；右下角是比特率小徽章（shizuku-glass-strong chip）。唱片描边/阴影都是 inline 写死的，改它们用 .mz-vinyl > div + !important。\n' +
+      '【黑胶唱片】.mz-vinyl（正方形外容器）：内层旋转圆盘是第一个子 div（播放时 animation: shizuku-vinyl 18s 旋转，圆角 50%），描边是 .mz-vinyl-disc 类（2026-09-13 已收编，直接覆盖，不需要 !important）；盘中央是中心标签圆 .mz-vinyl-label（内层深色轴心点 .mz-vinyl-pivot）；表面反光 .mz-vinyl-sheen；右下角是比特率小徽章（shizuku-glass-strong chip）。\n' +
       '【歌名区】h2（22px 衬线 Noto Serif）+ p（歌手名，10px 大写、letter-spacing 0.2em）。选择器：.mz-player h2 / .mz-player p。\n' +
-      '【歌词区】居中滚动容器（上下 mask 渐隐）：每一行是带 data-lyric-idx 属性的 div；当前行两侧有十字星芒装饰、文字是渐变夹光（primary→accent→deep 的 text-clip 渐变，deep 是 --mz-deep 变量），非当前行 opacity 0.45。翻译行在每行下面的 12px 小字。选择器：.mz-player [data-lyric-idx]。\n' +
+      '【歌词区】居中滚动容器（上下 mask 渐隐，容器类 .mz-lyric-box——渐隐 mask 在类里可直接改）：每一行是带 data-lyric-idx 属性的 div；当前行两侧有十字星芒装饰、文字是渐变夹光（primary→accent→deep 的 text-clip 渐变，deep 是 --mz-deep 变量），非当前行 opacity 0.45。翻译行在每行下面的 12px 小字。选择器：.mz-player [data-lyric-idx]。\n' +
       '【进度条】GlassProgress：轨道 = 高 6px 的 .shizuku-glass 圆条，已播部分 = 渐变（primary→glow），右侧水滴指示点 = 12px 圆（radial 白→glow）；上下各一个 monospace 时间小字。\n' +
       '【播控区】PlayControls：中间 56px 大圆钮（渐变 primary→accent + 发光阴影，内白色播放/暂停图标 + 外圈细描边），两侧上一首/下一首图标钮（color: muted）。\n' +
       '【一起听状态条】（默认浅色主题且有人一起听时）.mz-together：渐变底徽章，双头像+心形+「Listening Together」+ 双人名，右上角小 × 结束；下面一排「💬 聊这首歌」「结束一起听」胶囊按钮。\n' +
       '【子操作行】Like/Sync/Loop/Save 一排小图标按钮，图标下英文小标签。\n' +
-      '换肤建议：优先改 --mz-* 变量（写 .mz-player 作用域只影响本页）；inline 写死处用对应类 + !important。\n' +
+      '换肤建议：优先改 --mz-* 变量（写 .mz-player 作用域只影响本页）；写死值（描边/毛玻璃边/光斑等）已收进类（.mz-vinyl-* / .mz-mizu-header / .mz-metachip / .mz-play-ring / .mz-progress-track / .mz-header-btn / .mz-together-btn / 背景光斑 .mz-bokeh-blob + 编号 -1~-6，想清干净就 .mz-bokeh-blob{display:none}），直接覆盖，不需要 !important。\n' +
       '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS。可以改布局、位置、大小——但只改用户点名的那块，用上面给的真实选择器；不确定就只动 --mz-* 变量。',
   },
   {
@@ -280,7 +280,7 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '【背景层】页面最底层：用户自设的背景图 + 底色（图 cover 居中铺满）。美化时气泡透明度要压得过背景才看得清。\n' +
       '【底部切换台】（夜色预设时）胶囊条：「听歌 | 聊歌」两个 .mz-night-tab 圆钮，一起听时右侧有个 × 结束一起听。\n' +
       '【右侧上下文面板】右上音符钮打开：绝对定位在右侧（宽约 72%、毛玻璃强底），含当前歌卡（封面+歌名+状态）、全量歌词（当前行高亮 ▶）、角色歌单 top30、场景规则文案。选择器：.mz-chat 内绝对定位的 panel。\n' +
-      '换肤建议：气泡底色走 --mz-surface / --mz-sakura / --mz-lavender；输入框边框是 inline，用 .mz-chat input + !important。\n' +
+      '换肤建议：气泡底色走 --mz-surface / --mz-sakura / --mz-lavender；描边类已就位（气泡 .mz-chat-bubble-user / .mz-chat-bubble-ai、头像 .mz-chat-avatar、输入框 .mz-chat-input、发送钮 .mz-chat-send、语音卡 .mz-chat-voice-text、顶栏 .mz-chat-header），直接覆盖，不需要 !important。\n' +
       '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS。可以改布局、位置、大小——但只改用户点名的那块，用上面给的真实选择器；不确定就只动 --mz-* 变量。',
   },
   {
@@ -296,7 +296,7 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '【聊歌小结卡】.mz-music-card-chatsummary——💬 抬头 + 段落范围 + 小结文字。\n' +
       '【收歌单卡】.mz-music-card-song——分享歌卡（他收歌/加歌单时出现）。\n\n' +
       '常用零件类（共享，个别卡做了颜色适配）：.mz-music-card-label（小标签）/ -title（主文字）/ -sub（副文字）/ -text（正文）/ -names（你×Ta 行）/ -glow（粉紫光晕背景，不要就 display:none）/ -cover（封面兜底块）/ -chip-accepted / -chip-declined / -chip-cancelled / -chip-pending（状态 chip）/ -btn-accept / -btn-decline（接受/婉拒按钮）/ -badge / -tag / -foot。\n' +
-      '注意：这些卡渲染在主聊天 App 里，不是音乐 App——CSS 经全局注入（卡片基础层 → 预设 → 用户三层），--mz-* 变量在这里无效，颜色要直接写死值。用户写的卡片 CSS 排在内置基础层之后，同权重时用户的胜。\n' +
+      '注意：这些卡渲染在主聊天 App 里，不是音乐 App——CSS 经全局注入（卡片基础层 → 预设 → 用户层，你写的 CSS 排在最外层），--mz-* 变量在这里无效，颜色要直接写死值。你写的规则排在内置基础层之后，同权重时你的胜出——直接覆盖即可，不需要 !important。\n' +
       '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS。可以改布局、位置、大小；按钮只改外观别动行为（点播/接受/拒绝）。',
   },
   {
@@ -307,7 +307,7 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '这是 SullyOS 的全局悬浮听歌窗口（GlobalMiniPlayer——在音乐 App 之外的任何 App 里都能出现，挂在手机壳层）。分两块（用户挑哪块就只改哪块）：\n\n' +
       '【小球】.mz-globalmini-ball：折叠态 40px 圆形（封面 + 中央播放/暂停小指示 + 底部 2px 进度条），默认右上角。\n' +
       '【展开条】.mz-globalmini-bar：横向玻璃条（拖动把手 + 封面 36px + 歌名/歌手 + 上一首/播放/下一首 + 收起 + 隐藏按钮 + 底部进度条）；外层容器 .mz-globalmini-expanded。\n\n' +
-      '它自带深色玻璃（rgba(20,24,35,0.65) 底 + 白 0.15 边框 + blur(24px)），文字全是白色系——改色用 .mz-globalmini-ball / .mz-globalmini-bar 的 class 规则，inline 样式处加 !important。\n' +
+      '它自带深色玻璃（深底 + 白边 + blur），文字全是白色系——玻璃底/边框/按钮底已全部收进类规则（小球 .mz-globalmini-ball、球面暗层 .mz-globalmini-ball-overlay、展开条 .mz-globalmini-bar、把手 .mz-globalmini-handle、封面 .mz-globalmini-cover、播放钮 .mz-globalmini-btn），直接覆盖即可，不需要 !important。\n' +
       '它接收两层预设注入：音乐基础（全局）+ 悬浮窗页（本页）。--mz-* 变量对它不生效（它不在音乐 App 作用域里），颜色直接写死。\n' +
       '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS。可以改布局、位置、大小；不要改小球拖动/长按隐藏逻辑（那是 JS 行为）。',
   },

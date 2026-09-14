@@ -54,8 +54,8 @@ describe('美化助手提示词与类名同步', () => {
     expect(entry!.defaultValue).not.toContain('.mz-music-card + !important');
   });
 
-  it('音乐基础模式提到卡片已类化', () => {
+  it('音乐基础模式把卡片类列进钩子清单', () => {
     const entry = getPromptEntries().find((e) => e.label === '美化助手-音乐基础');
-    expect(entry!.defaultValue).toContain('一起听卡已全部类化');
+    expect(entry!.defaultValue).toContain('.mz-music-card-*');
   });
 });

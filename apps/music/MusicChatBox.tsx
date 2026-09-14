@@ -64,8 +64,8 @@ const VoiceBar: React.FC<{ text: string; subtitle?: string }> = ({ text, subtitl
         </span>
       </button>
       {open && (
-        <div className="mt-1 px-3 py-2 rounded-2xl text-[11px] leading-relaxed whitespace-pre-wrap"
-          style={{ background: C.surface, color: C.text, borderTopLeftRadius: 6, border: '1px solid rgba(255,255,255,0.4)' }}>
+        <div className="mt-1 px-3 py-2 rounded-2xl text-[11px] leading-relaxed whitespace-pre-wrap mz-chat-voice-text"
+          style={{ background: C.surface, color: C.text, borderTopLeftRadius: 6 }}>
           {text || subtitle}
           {subtitle && text && (
             <div className="mt-1 pt-1 text-[10px]" style={{ color: C.muted, borderTop: '1px dashed rgba(var(--mz-muted-rgb, 124,119,154), 0.3)' }}>
@@ -82,11 +82,11 @@ const VoiceBar: React.FC<{ text: string; subtitle?: string }> = ({ text, subtitl
 const ChatAvatar: React.FC<{ avatar?: string; name: string }> = ({ avatar, name }) => {
   const url = useBlobRefUrl(avatar);
   if (url) {
-    return <img src={url} alt="" className="mz-chat-avatar w-7 h-7 rounded-full object-cover shrink-0" style={{ border: '1.5px solid rgba(255,255,255,0.6)' }} />;
+    return <img src={url} alt="" className="mz-chat-avatar w-7 h-7 rounded-full object-cover shrink-0" />;
   }
   return (
     <div className="mz-chat-avatar w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-white font-semibold"
-      style={{ background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`, fontSize: 11, border: '1.5px solid rgba(255,255,255,0.6)' }}>
+      style={{ background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`, fontSize: 11 }}>
       {name.slice(0, 1)}
     </div>
   );
@@ -113,11 +113,11 @@ const ChatBubbleRow: React.FC<{
 
   const bubbleStyle = (user: boolean): React.CSSProperties =>
     user
-      ? { background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`, color: '#fff', borderTopRightRadius: 6, boxShadow: `0 2px 10px rgba(var(--mz-sakura-rgb, 244,194,207), 0.28)` }
-      : { background: C.surface, color: C.text, borderTopLeftRadius: 6, border: '1px solid rgba(255,255,255,0.4)' };
+      ? { background: `linear-gradient(135deg, ${C.sakura}, ${C.lavender})`, borderTopRightRadius: 6, boxShadow: `0 2px 10px rgba(var(--mz-sakura-rgb, 244,194,207), 0.28)` }
+      : { background: C.surface, color: C.text, borderTopLeftRadius: 6 };
 
   const textBubble = (content: string, key: string) => (
-    <div key={key} className="mz-chat-bubble max-w-[76%] rounded-2xl px-3 py-2 whitespace-pre-wrap text-[12px] leading-relaxed"
+    <div key={key} className={`mz-chat-bubble ${isUser ? 'mz-chat-bubble-user' : 'mz-chat-bubble-ai'} max-w-[76%] rounded-2xl px-3 py-2 whitespace-pre-wrap text-[12px] leading-relaxed`}
       style={bubbleStyle(isUser)}
       {...lp}
     >
@@ -248,8 +248,8 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
       )}
 
       {/* Header */}
-      <div className="shizuku-glass-strong relative z-20 shrink-0"
-        style={{ borderBottom: `1px solid rgba(255,255,255,0.3)`, paddingTop: 'var(--safe-top)' }}>
+      <div className="shizuku-glass-strong relative z-20 shrink-0 mz-chat-header"
+        style={{ paddingTop: 'var(--safe-top)' }}>
         <div className="flex items-center gap-2 h-12 px-3">
           <button onClick={onBack} className="w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90" style={{ color: C.primary }}>
             <ArrowLeft size={16} weight="bold" />
@@ -313,7 +313,7 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
         {chat.streaming && ChatParser.chunkText(chat.streaming).map((chunk, i, arr) => (
           <div key={`stream-${i}`} className="flex justify-start">
             <div className="mz-chat-bubble mz-chat-bubble-ai max-w-[76%] rounded-2xl px-3 py-2 whitespace-pre-wrap text-[12px] leading-relaxed"
-              style={{ background: C.surface, color: C.text, borderTopLeftRadius: 6, border: '1px solid rgba(255,255,255,0.4)' }}>
+              style={{ background: C.surface, color: C.text, borderTopLeftRadius: 6 }}>
               {chunk}
               {i === arr.length - 1 && (
                 <span className="inline-block w-1.5 h-3 ml-0.5 align-middle animate-pulse" style={{ background: C.primary }} />
@@ -332,14 +332,14 @@ const MusicChatBox: React.FC<{ charId: string; onBack: () => void }> = ({ charId
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(); }}
             placeholder="说点什么…"
-            className="flex-1 rounded-full px-4 py-2.5 outline-none text-[12px] shizuku-glass"
-            style={{ color: C.text, border: '1px solid rgba(255,255,255,0.35)' }}
+            className="flex-1 rounded-full px-4 py-2.5 outline-none text-[12px] shizuku-glass mz-chat-input"
+            style={{ color: C.text }}
           />
           <button
             onClick={send}
             disabled={chat.busy}
-            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50"
-            style={{ background: C.soft, color: C.primary, border: '1px solid rgba(255,255,255,0.4)' }}
+            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 mz-chat-send"
+            style={{ background: C.soft, color: C.primary }}
             aria-label="发送（只存进会话）"
             title="只存进会话，回复要点 ▶"
           >

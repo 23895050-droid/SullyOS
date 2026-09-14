@@ -96,8 +96,8 @@ export const MizuHeader: React.FC<{
   onClose?: () => void;
   right?: React.ReactNode;
 }> = ({ title, onBack, onClose, right }) => (
-  <div className="flex items-center justify-between px-4 h-12 shrink-0 shizuku-glass-strong relative z-20"
-    style={{ borderBottom: `1px solid rgba(255,255,255,0.3)`, paddingTop: 'var(--safe-top)', boxSizing: 'content-box' }}>
+  <div className="flex items-center justify-between px-4 h-12 shrink-0 shizuku-glass-strong relative z-20 mz-mizu-header"
+    style={{ paddingTop: 'var(--safe-top)', boxSizing: 'content-box' }}>
     <button
       className="w-8 h-8 flex items-center justify-center rounded-full transition-all"
       style={{ color: C.primary }}
@@ -524,10 +524,9 @@ export const VinylDisc: React.FC<{
       }} />
 
     {/* 唱片本体 — 旋转 */}
-    <div className="relative w-full h-full rounded-full overflow-hidden"
+    <div className="relative w-full h-full rounded-full overflow-hidden mz-vinyl-disc"
       style={{
         animation: playing ? 'shizuku-vinyl 18s linear infinite' : 'none',
-        border: `1.5px solid rgba(255,255,255,0.6)`,
         boxShadow: `0 8px 32px rgba(var(--mz-primary-rgb, 128,124,157), 0.13), 0 0 0 1px rgba(var(--mz-glow-rgb, 205,198,233), 0.19)`,
       }}>
       {/* 单张封面 — 完全不透明，干净清晰 */}
@@ -536,28 +535,23 @@ export const VinylDisc: React.FC<{
 
       {/* 中心标签 — 不旋转跟随，保持唱片标识 */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="rounded-full flex items-center justify-center"
+        <div className="rounded-full flex items-center justify-center mz-vinyl-label"
           style={{
             width: size * 0.34,
             height: size * 0.34,
-            background: `radial-gradient(circle at 35% 35%, rgba(255,255,255,0.95), ${C.soft})`,
-            border: `1px solid rgba(255,255,255,0.85)`,
-            boxShadow: `inset 0 2px 6px rgba(255,255,255,0.6), 0 2px 8px rgba(var(--mz-primary-rgb, 128,124,157), 0.13)`,
           }}>
           {/* 中心轴心 */}
-          <div className="rounded-full"
+          <div className="rounded-full mz-vinyl-pivot"
             style={{
               width: size * 0.04,
               height: size * 0.04,
               background: C.muted,
-              boxShadow: `inset 0 1px 2px rgba(0,0,0,0.2)`,
             }} />
         </div>
       </div>
 
       {/* 极轻表面反光 — 一道高光，不抢戏 */}
-      <div className="absolute inset-0 pointer-events-none rounded-full"
-        style={{ background: 'linear-gradient(135deg, transparent 35%, rgba(255,255,255,0.12) 50%, transparent 65%)' }} />
+      <div className="absolute inset-0 pointer-events-none rounded-full mz-vinyl-sheen" />
     </div>
 
     {/* 比特率徽章 (chip) */}
@@ -586,10 +580,9 @@ export const VinylDisc: React.FC<{
 
 /* ══════════ 时间 / 元数据 chip ══════════ */
 export const MetaChip: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
-  <span className={`px-2 py-0.5 text-[9px] tracking-[0.15em] ${className}`}
+  <span className={`px-2 py-0.5 text-[9px] tracking-[0.15em] mz-metachip ${className}`}
     style={{
       color: C.primary,
-      background: 'rgba(255,255,255,0.55)',
       border: `1px solid rgba(var(--mz-faint-rgb, 188,184,204), 0.25)`,
       fontFamily: `'Space Grotesk', 'SF Mono', monospace`,
     }}>
@@ -691,8 +684,7 @@ export const GlassProgress: React.FC<{
   const pct = duration ? (progress / duration) * 100 : 0;
   return (
     <div className="w-full">
-      <div className="relative h-[6px] rounded-full cursor-pointer shizuku-glass"
-        style={{ boxShadow: `inset 0 1px 3px rgba(0,0,0,0.06)` }}
+      <div className="relative h-[6px] rounded-full cursor-pointer shizuku-glass mz-progress-track"
         onClick={(e) => {
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           onSeek((e.clientX - rect.left) / rect.width);
@@ -752,8 +744,7 @@ export const PlayControls: React.FC<{
         <Play size={22} weight="fill" color="white" />
       )}
       {/* 外圈装饰 */}
-      <div className="absolute inset-[-3px] rounded-full pointer-events-none"
-        style={{ border: `1px solid rgba(255,255,255,0.2)` }} />
+      <div className="absolute inset-[-3px] rounded-full pointer-events-none mz-play-ring" />
     </button>
     <button onClick={onNext} className="p-2 rounded-full transition-all"
       style={{ color: C.muted }}>
@@ -768,19 +759,13 @@ export const BokehBg: React.FC = () => {
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
       {/* 白色柔光 bokeh (主力)——2026-08-30 调暗：纯白大球晃眼睛，换成淡紫灰且透明度压低 */}
-      <div className="absolute top-[8%] right-[5%] w-32 h-32 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(203,201,218,0.38) 0%, rgba(203,201,218,0) 70%)`, animation: 'shizuku-float 8s ease-in-out infinite' }} />
-      <div className="absolute bottom-[25%] left-[0%] w-48 h-48 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(203,201,218,0.3) 0%, rgba(203,201,218,0) 70%)`, animation: 'shizuku-float 10s ease-in-out 2s infinite' }} />
-      <div className="absolute top-[45%] left-[25%] w-16 h-16 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(203,201,218,0.34) 0%, rgba(203,201,218,0) 70%)`, animation: 'shizuku-float 7s ease-in-out 1s infinite' }} />
-      <div className="absolute top-[25%] right-[32%] w-24 h-24 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(203,201,218,0.24) 0%, rgba(203,201,218,0) 70%)`, animation: 'shizuku-drift 12s ease-in-out infinite' }} />
+      <div className="absolute top-[8%] right-[5%] w-32 h-32 rounded-full mz-bokeh-blob mz-bokeh-1" />
+      <div className="absolute bottom-[25%] left-[0%] w-48 h-48 rounded-full mz-bokeh-blob mz-bokeh-2" />
+      <div className="absolute top-[45%] left-[25%] w-16 h-16 rounded-full mz-bokeh-blob mz-bokeh-3" />
+      <div className="absolute top-[25%] right-[32%] w-24 h-24 rounded-full mz-bokeh-blob mz-bokeh-4" />
       {/* 轻微彩色点缀 (极低饱和) */}
-      <div className="absolute top-[65%] right-[10%] w-20 h-20 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(var(--mz-sakura-rgb, 244,194,207), 0.09) 0%, transparent 70%)`, filter: 'blur(8px)' }} />
-      <div className="absolute top-[15%] left-[20%] w-16 h-16 rounded-full"
-        style={{ background: `radial-gradient(circle, rgba(var(--mz-lavender-rgb, 207,195,232), 0.08) 0%, transparent 70%)`, filter: 'blur(8px)' }} />
+      <div className="absolute top-[65%] right-[10%] w-20 h-20 rounded-full mz-bokeh-blob mz-bokeh-5" />
+      <div className="absolute top-[15%] left-[20%] w-16 h-16 rounded-full mz-bokeh-blob mz-bokeh-6" />
       {/* 浮游星芒 */}
       <Sparkle size={10} className="absolute top-[12%] left-[15%]" color={C.glow} delay={0} />
       <Sparkle size={7} className="absolute top-[30%] right-[20%]" color={C.sakura} delay={1} />
