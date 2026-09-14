@@ -2,7 +2,7 @@
 // 图层：渐变底 → 玻璃卡片(置底) → 照片/月亮/专辑/头像(占位) → 底图蒙版 → 文字 → 热区 → 胶囊导航
 // 坐标全部按 hotspots_2026-08-17-17-05-15.json（1280×2774）换算；字体/圆角用 cqw 随屏等比缩放。
 // TODO: 猫爪 / 圆1 头像圈的组件 PNG 到位后替换占位件；美化设置接入后文案改可编辑。
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useOS } from '../context/OSContext';
 import { AppID } from '../types';
 import CoupleSpace from './couple/CoupleSpace';
@@ -138,6 +138,30 @@ const NoxHomeApp: React.FC = () => {
   const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
   const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
 
+  // ── 页面切换过渡（2026-09-14）──────────────────────────────────
+  // 旧写法是 key 变化 → 整棵重挂载 + 淡入【0→1】：旧页当场消失、新页从透明长出来，
+  // 中间那一瞬只剩背景色 —— 看起来就是「闪一下」。现在旧页留在下面 240ms 当底
+  // （带着它自己离开时的滚动位置），新页在上面淡入盖掉它：不闪、也不会有两页
+  // 半透明叠一起的发灰。两层都只动 opacity（口径同 PhoneShell 的 appEnterFade）。
+  const pageKey = `${tab}:${inner ?? 'root'}`;
+  const [ghost, setGhost] = useState<{ key: string; tab: string; inner: string | null } | null>(null);
+  const lastPageRef = useRef({ key: pageKey, tab: tab as string, inner: inner as string | null });
+  const liveScrollRef = useRef(0);   // 当前页的滚动位置（旧页拿它还原，别跳回顶部）
+  const ghostTopRef = useRef(0);
+  useEffect(() => {
+    const last = lastPageRef.current;
+    if (last.key === pageKey) return;
+    lastPageRef.current = { key: pageKey, tab: tab as string, inner: inner as string | null };
+    ghostTopRef.current = liveScrollRef.current;
+    setGhost(last);
+    const t = window.setTimeout(() => setGhost(null), 240);
+    return () => window.clearTimeout(t);
+  }, [pageKey, tab, inner]);
+
+  const setGhostNode = (el: HTMLDivElement | null) => {
+    if (el) el.scrollTop = ghostTopRef.current;   // 提交期设好，首帧就在原位置（不闪顶部）
+  };
+
   const navTap = (key: string) => {
     if (key === 'home') { setTab('home'); return; }
     if (key === 'couple') { setTab('couple'); return; }
@@ -145,24 +169,15 @@ const NoxHomeApp: React.FC = () => {
     addToast('「动态页」建设中 🏗️', 'info');
   };
 
-  return (
-    <div
-      className="h-full w-full overflow-y-auto relative select-none"
-      style={tab === 'home'
-        ? (homeBgUrl
-          ? { backgroundImage: `url(${homeBgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-          : { background: 'linear-gradient(180deg, #2F3C5C 0%, #6E7588 100%)' })
-        : { background: '#ffe3ef' }}
-    >
-      {/* 页签内容：key 变化触发重挂载 + 淡入过渡（旧 animate-in 类来自未装的插件，从未生效） */}
-      <div key={`${tab}:${inner ?? 'root'}`} className="noxhome-tab-in">
-      {tab === 'couple' ? (
+  // 页面渲染（2026-09-14）：抽成函数——切页时旧页也要照着它再渲染一份（过渡期间当底）
+  const renderPage = (pgTab: string, pgInner: string | null) => (
+    pgTab === 'couple' ? (
         <CoupleSpace />
-      ) : tab === 'settings' ? (
+      ) : pgTab === 'settings' ? (
         <CoupleBeauty />
-      ) : inner === 'diary' ? (
+      ) : pgInner === 'diary' ? (
         <CoupleDiary initialOwner="me" onBack={() => setInner(null)} />
-      ) : inner === 'activity' ? (
+      ) : pgInner === 'activity' ? (
         <CoupleCalendar initialMode="feed" onBack={() => setInner(null)} />
       ) : (
         <>
@@ -318,9 +333,43 @@ const NoxHomeApp: React.FC = () => {
         </button>
       </div>
         </>
-      )}
-      </div>
+    )
+  );
 
+  // 每层自带背景（2026-09-14）：以前背景挂在外层容器上，切页瞬间就换色，
+  // 旧页还盖着的时候底下已经变色 = 一闪；现在背景跟着图层走，旧页带走它的天色。
+  const bgFor = (t: string) => (t === 'home'
+    ? (homeBgUrl
+      ? { backgroundImage: `url(${homeBgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+      : { background: 'linear-gradient(180deg, #2F3C5C 0%, #6E7588 100%)' })
+    : { background: '#ffe3ef' });
+
+  return (
+    <div
+      className="h-full w-full relative overflow-hidden select-none"
+      style={bgFor(tab)}
+    >
+      {/* 旧页层：过渡期间当底，不接事件；滚动位置在 setGhostNode 里还原 */}
+      {ghost && (
+        <div
+          key={`ghost:${ghost.key}`}
+          ref={setGhostNode}
+          className="absolute inset-0 overflow-y-auto pointer-events-none"
+          style={{ ...bgFor(ghost.tab), zIndex: 5 }}
+        >
+          {renderPage(ghost.tab, ghost.inner)}
+        </div>
+      )}
+
+      {/* 当前页层：自己滚、自带背景，淡入盖掉旧页（key 变 → 重挂载 → app-fade-in） */}
+      <div
+        key={pageKey}
+        className="app-fade-in absolute inset-0 overflow-y-auto"
+        style={{ ...bgFor(tab), zIndex: 10 }}
+        onScroll={(e) => { liveScrollRef.current = e.currentTarget.scrollTop; }}
+      >
+        {renderPage(tab, inner)}
+      </div>
       {/* ── 底部胶囊导航（固定悬浮） ── */}
       <div
         className="fixed left-1/2 -translate-x-1/2 flex items-center z-[70]"
