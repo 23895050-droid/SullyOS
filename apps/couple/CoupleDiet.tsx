@@ -5,7 +5,7 @@ import React, { useMemo, useState } from 'react';
 import { ArrowLeft, BookOpen, Camera, CaretRight, PaperPlaneTilt, PencilSimple, Sparkle, UserCircle } from '@phosphor-icons/react';
 import DateStrip from './DateStrip';
 import CoupleFoodLibrary from './CoupleFoodLibrary';
-import { DietRecordModal, MealDetailModal, ProfileModal, RecommendModal, TargetsModal } from './DietModals';
+import { DietRecordModal, ExerciseModal, MealDetailModal, ProfileModal, RecommendModal, TargetsModal } from './DietModals';
 import { getDietStore, useDietStore } from './dietStore';
 import { dayTotals, MEAL_LABELS, MEAL_ORDER, mealSuggestRange, remainingKcal, type MealKey } from '../../utils/dietMath';
 import { getLocalDateKey } from '../../utils/localDate';
@@ -45,6 +45,7 @@ const CoupleDiet: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [recommendOpen, setRecommendOpen] = useState(false);
   const [targetsOpen, setTargetsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [exerciseOpen, setExerciseOpen] = useState(false);
   const [forwardOpen, setForwardOpen] = useState(false);
   const p = store.profile;
   const profileSummary = [p.height, p.weight, p.preferences && p.preferences.slice(0, 14)].filter(Boolean).join(' · ');
@@ -239,7 +240,7 @@ const CoupleDiet: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             <button
               key={m}
               type="button"
-              onClick={() => setDetailMeal(m)}
+              onClick={() => (m === 'exercise' ? setExerciseOpen(true) : setDetailMeal(m))}
               className="rounded-3xl p-4 flex flex-col border-0 cursor-pointer"
               style={{ gap: 10, background: '#fff', boxShadow: '0 8px 24px rgba(90,160,120,0.10)', textAlign: 'left' }}
             >
@@ -281,6 +282,7 @@ const CoupleDiet: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       {/* 弹层 */}
       {record.open && <DietRecordModal meal={record.meal} onClose={() => setRecord({ open: false })} />}
       {detailMeal && <MealDetailModal date={selected} meal={detailMeal} onClose={() => setDetailMeal(null)} />}
+      {exerciseOpen && <ExerciseModal date={selected} onClose={() => setExerciseOpen(false)} />}
       {recommendOpen && <RecommendModal onClose={() => setRecommendOpen(false)} />}
       {targetsOpen && <TargetsModal onClose={() => setTargetsOpen(false)} />}
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}

@@ -263,6 +263,7 @@ export function addDietRecord(input: { date?: string; meal: MealKey; items: NewD
   store.set((s) => {
     let foods = s.foods;
     for (const it of items) {
+      if (input.meal === 'exercise') break; // 运动不是食物：不进食物库建档
       if (!it.foodId) {
         const per100 = toPer100(it, it.grams);
         const newFood: FoodLibItem = {

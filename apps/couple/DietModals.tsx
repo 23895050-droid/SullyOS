@@ -116,8 +116,8 @@ export const StarRow: React.FC<{ value: number; onChange: (v: number) => void; s
   </span>
 );
 
-/** AI 识图（记饮食拍照 / 食物库建卡共用）：返回结构化结果；解析不出 JSON 时 review 放原始文本、name 为空 */
-export interface RecognizedFood {
+/** AI 识图（记饮食拍照 / 食物库建卡共用）：返回多食物列表；解析不出 JSON 时返回空数组 */
+export interface RecognizedFoodItem {
   name: string;
   grams: number;
   kcal: number;
@@ -125,11 +125,33 @@ export interface RecognizedFood {
   carbs: number;
   fat: number;
   review: string;
+  glycemicLevel: string; // 升糖预判：高 / 中 / 低
+  glycemicWhy: string;   // 预判依据（改数值时供参考）
 }
+
+/** 升糖预判级别 → 建议数值（mmol/L，表单预填，可再改） */
+export const glycemicLevelToValue = (level: string): string => {
+  if (level.includes('高')) return '7.5';
+  if (level.includes('中')) return '5.5';
+  if (level.includes('低')) return '3.5';
+  return '';
+};
+
+const mapRecognized = (x: Record<string, unknown>): RecognizedFoodItem => ({
+  name: str(x.name, '食物'),
+  grams: num(x.grams, 100),
+  kcal: num(x.kcal),
+  protein: num(x.protein),
+  carbs: num(x.carbs),
+  fat: num(x.fat),
+  review: str(x.review),
+  glycemicLevel: str(x.glycemicLevel),
+  glycemicWhy: str(x.glycemicWhy),
+});
 export const recognizeFoodImage = async (
   dataUrl: string,
   api: { baseUrl: string; apiKey: string; model: string },
-): Promise<RecognizedFood> => {
+): Promise<RecognizedFoodItem[]> => {
   // 提示词走注册表（设置页「提示词管理」可视化编辑）；小模型推理 token 要给足，防截断
   const res = await fetch(`${api.baseUrl}/chat/completions`, {
     method: 'POST',
@@ -145,22 +167,125 @@ export const recognizeFoodImage = async (
   const text = str(json?.choices?.[0]?.message?.content);
   const parsed = extractJson(text);
   if (parsed) {
-    return {
-      name: str(parsed.name, '食物'), grams: num(parsed.grams, 100), kcal: num(parsed.kcal),
-      protein: num(parsed.protein), carbs: num(parsed.carbs), fat: num(parsed.fat), review: str(parsed.review),
-    };
+    if (Array.isArray(parsed.items)) {
+      const list = (parsed.items as Record<string, unknown>[]).map(mapRecognized);
+      if (list.length) return list;
+    }
+    if (str(parsed.name)) return [mapRecognized(parsed)]; // 旧单条格式兜底
   }
-  return { name: '', grams: 100, kcal: 0, protein: 0, carbs: 0, fat: 0, review: text.slice(0, 200) };
+  return [];
+};
+
+/** 运动截图识别：解析不出返回 null */
+export interface RecognizedExercise {
+  name: string;
+  minutes: number;
+  kcal: number;
+}
+
+export const recognizeExerciseImage = async (
+  dataUrl: string,
+  api: { baseUrl: string; apiKey: string; model: string },
+): Promise<RecognizedExercise | null> => {
+  const res = await fetch(`${api.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey}` },
+    body: JSON.stringify({
+      model: api.model,
+      messages: [{ role: 'user', content: [{ type: 'text', text: getPrompt('运动识图') }, { type: 'image_url', image_url: { url: dataUrl } }] }],
+      max_tokens: 4096,
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  const parsed = extractJson(str(json?.choices?.[0]?.message?.content));
+  if (!parsed) return null;
+  const src = Array.isArray(parsed.items) && parsed.items.length ? (parsed.items as Record<string, unknown>[])[0] : parsed;
+  const name = str(src.name);
+  const minutes = num(src.minutes);
+  const kcal = num(src.kcal);
+  if (!name && !minutes && !kcal) return null;
+  return { name, minutes, kcal };
+};
+
+/** 识别结果编辑态：多一个 glycemicValue（级别 → 建议数值，可改） */
+interface RecognizedDraft extends RecognizedFoodItem {
+  glycemicValue: string;
+}
+
+/** 识别结果逐项编辑行（默认改分量/热量，展开能改宏量/升糖/点评） */
+const RecognizedRow: React.FC<{
+  item: RecognizedDraft;
+  onChange: (patch: Partial<RecognizedDraft>) => void;
+  onRemove: () => void;
+}> = ({ item, onChange, onRemove }) => {
+  const [open, setOpen] = useState(false);
+  const numInput: React.CSSProperties = { ...inputCss, padding: '5px 8px' };
+  return (
+    <div className="flex flex-col" style={{ gap: 8, padding: 10, background: '#f7fcf9', border: '1px solid #e4f0e9', borderRadius: 16 }}>
+      <div className="flex items-center" style={{ gap: 8 }}>
+        <input value={item.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="食物名" style={{ ...inputCss, flex: 1 }} />
+        <button type="button" onClick={onRemove} aria-label="删掉这项" className="border-0 cursor-pointer shrink-0 p-1" style={{ background: 'transparent' }}>
+          <Trash style={{ width: 13, height: 13, color: '#c9b4c0' }} />
+        </button>
+      </div>
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <div style={labelCss}>克数（g）</div>
+          <input type="number" value={item.grams} onChange={(e) => onChange({ grams: Math.max(0, Number(e.target.value) || 0) })} style={numInput} />
+        </div>
+        <div>
+          <div style={labelCss}>热量（千卡）</div>
+          <input type="number" value={item.kcal} onChange={(e) => onChange({ kcal: Math.max(0, Number(e.target.value) || 0) })} style={numInput} />
+        </div>
+      </div>
+      <div className="flex items-center justify-between" style={{ gap: 8 }}>
+        <span style={{ fontSize: 10, color: '#8aa397', lineHeight: 1.5 }}>
+          {item.glycemicLevel ? `升糖预判：${item.glycemicLevel}${item.glycemicWhy ? `（${item.glycemicWhy}）` : ''}` : '没有升糖预判'}
+        </span>
+        <button type="button" onClick={() => setOpen((v) => !v)} className="border-0 cursor-pointer shrink-0" style={{ background: 'transparent', fontSize: 10, color: GREEN_DEEP }}>
+          {open ? '收起 ▴' : '更多 ▾'}
+        </button>
+      </div>
+      {open && (
+        <>
+          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div>
+              <div style={labelCss}>蛋白质（g）</div>
+              <input type="number" value={item.protein} onChange={(e) => onChange({ protein: Math.max(0, Number(e.target.value) || 0) })} style={numInput} />
+            </div>
+            <div>
+              <div style={labelCss}>碳水（g）</div>
+              <input type="number" value={item.carbs} onChange={(e) => onChange({ carbs: Math.max(0, Number(e.target.value) || 0) })} style={numInput} />
+            </div>
+            <div>
+              <div style={labelCss}>脂肪（g）</div>
+              <input type="number" value={item.fat} onChange={(e) => onChange({ fat: Math.max(0, Number(e.target.value) || 0) })} style={numInput} />
+            </div>
+            <div>
+              <div style={labelCss}>升糖值 mmol/L</div>
+              <input type="number" step="0.1" value={item.glycemicValue} onChange={(e) => onChange({ glycemicValue: e.target.value })} placeholder="可留空" style={numInput} />
+            </div>
+          </div>
+          <div>
+            <div style={labelCss}>点评（会记进这条）</div>
+            <input value={item.review} onChange={(e) => onChange({ review: e.target.value })} style={{ ...inputCss, padding: '5px 8px' }} />
+          </div>
+        </>
+      )}
+    </div>
+  );
 };
 
 export const DietRecordModal: React.FC<{ meal?: MealKey; onClose: () => void }> = ({ meal, onClose }) => {
   const { addToast } = useOS();
   const hour = new Date().getHours();
-  const [selMeal, setSelMeal] = useState<MealKey>(meal ?? (hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : hour < 21 ? 'dinner' : 'snack'));
+  const [selMeal, setSelMeal] = useState<MealKey>(meal && meal !== 'exercise' ? meal : (hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : hour < 21 ? 'dinner' : 'snack'));
   const [tab, setTab] = useState<'photo' | 'lib' | 'manual'>('photo');
   const [form, setForm] = useState({ name: '', grams: 100, kcal: 0, protein: 0, carbs: 0, fat: 0, review: '', rating: 0, glycemic: '', foodId: undefined as string | undefined, photoRef: undefined as string | undefined });
   const [busy, setBusy] = useState(false);
   const [libPick, setLibPick] = useState<FoodLibItem | null>(null);
+  const [recognized, setRecognized] = useState<RecognizedDraft[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const albumRef = useRef<HTMLInputElement>(null);
   const photoUrl = useBlobRefUrl(form.photoRef);
@@ -178,17 +303,13 @@ export const DietRecordModal: React.FC<{ meal?: MealKey; onClose: () => void }> 
     try {
       const blob = await getBlobForRef(form.photoRef);
       if (!blob) throw new Error('图片读取失败');
-      const r = await recognizeFoodImage(await blobToDataUrl(blob), api);
-      set({
-        name: r.name,
-        grams: r.grams,
-        kcal: r.kcal,
-        protein: r.protein,
-        carbs: r.carbs,
-        fat: r.fat,
-        review: r.review,
-      });
-      addToast(r.name ? '识别完成，确认无误后保存' : '没解析出 JSON，已粘贴原始文本，请手动核对', r.name ? 'success' : 'info');
+      const list = await recognizeFoodImage(await blobToDataUrl(blob), api);
+      if (list.length) {
+        setRecognized(list.map((x) => ({ ...x, glycemicValue: glycemicLevelToValue(x.glycemicLevel) })));
+        addToast(`识别到 ${list.length} 样，核对后可记下`, 'success');
+      } else {
+        addToast('没解析出内容，请手动填写', 'info');
+      }
     } catch (e) {
       addToast(`识别失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
     } finally {
@@ -202,6 +323,7 @@ export const DietRecordModal: React.FC<{ meal?: MealKey; onClose: () => void }> 
       const ref = await putImageBlob(blob);
       addTempPhoto(ref);
       set({ photoRef: ref });
+      setRecognized(null); // 换了照片，旧识别结果作废
     } catch {
       addToast('图片保存失败', 'error');
     }
@@ -211,6 +333,25 @@ export const DietRecordModal: React.FC<{ meal?: MealKey; onClose: () => void }> 
   const glycemic = form.glycemic.trim() ? Number(form.glycemic) : undefined;
 
   const save = () => {
+    if (tab === 'photo' && recognized && recognized.length) {
+      addDietRecord({
+        meal: selMeal,
+        items: recognized.map((r) => ({
+          name: r.name.trim() || '食物',
+          grams: Math.max(1, Math.round(r.grams) || 1),
+          kcal: Math.max(0, Math.round(r.kcal) || 0),
+          protein: Math.max(0, r.protein),
+          carbs: Math.max(0, r.carbs),
+          fat: Math.max(0, r.fat),
+          review: r.review || undefined,
+          glycemic: r.glycemicValue.trim() ? Number(r.glycemicValue) : undefined,
+          photoRef: form.photoRef,
+        })),
+      });
+      addToast(`已记入${MEAL_LABELS[selMeal]}：${recognized.length} 样`, 'success');
+      onClose();
+      return;
+    }
     let item: { foodId?: string; name: string; grams: number; kcal: number; protein: number; carbs: number; fat: number; review?: string; rating?: number; glycemic?: number; photoRef?: string };
     if (tab === 'lib' && libPick) {
       const sc = scaleMacros(libPick, libPick.defaultGrams);
@@ -235,9 +376,9 @@ export const DietRecordModal: React.FC<{ meal?: MealKey; onClose: () => void }> 
     <Backdrop onClose={onClose}>
       <div className="flex flex-col" style={SHEET}>
         <SheetHeader title="记饮食" onClose={onClose} />
-        {/* 餐次选择 */}
+        {/* 餐次选择（运动有独立弹层，这里只列吃饭四餐） */}
         <div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}>
-          {MEAL_ORDER.map((m) => (
+          {MEAL_ORDER.filter((m) => m !== 'exercise').map((m) => (
             <button
               key={m}
               type="button"
@@ -348,8 +489,41 @@ export const DietRecordModal: React.FC<{ meal?: MealKey; onClose: () => void }> 
         {tab === 'manual' && (
           <div style={{ fontSize: 11, color: '#8aa397' }}>手动记的食物会自动按每 100g 换算存进食物库，下次直接选。</div>
         )}
+        {/* 识别结果（拍照识别成功：多食物逐项可改，一次记成一笔） */}
+        {tab === 'photo' && recognized && (
+          <div className="flex flex-col" style={{ gap: 8 }}>
+            <div style={{ fontSize: 11, color: '#8aa397', lineHeight: 1.6 }}>
+              识别到 {recognized.length} 样，分量和热量可以逐项改；保存会按「{MEAL_LABELS[selMeal]}」记成一笔。
+            </div>
+            {recognized.map((r, idx) => (
+              <RecognizedRow
+                key={idx}
+                item={r}
+                onChange={(patch) => setRecognized((list) => (list ? list.map((x, i) => (i === idx ? { ...x, ...patch } : x)) : list))}
+                onRemove={() => setRecognized((list) => (list ? list.filter((_, i) => i !== idx) : list))}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={() => setRecognized((list) => [...(list ?? []), { name: '', grams: 100, kcal: 0, protein: 0, carbs: 0, fat: 0, review: '', glycemicLevel: '', glycemicWhy: '', glycemicValue: '' }])}
+              className="border-0 cursor-pointer rounded-full"
+              style={{ padding: '7px 0', fontSize: 12, fontWeight: 600, color: GREEN_DEEP, background: GREEN_SOFT }}
+            >
+              ＋ 加一项
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={recognized.length === 0}
+              className="border-0 cursor-pointer rounded-full"
+              style={{ padding: '11px 0', fontSize: 14, fontWeight: 700, color: '#fff', background: recognized.length ? GREEN : '#d5e8dc' }}
+            >
+              记下这几笔（{recognized.length}）
+            </button>
+          </div>
+        )}
         {/* 确认表单（拍照后即出现：识别失败也能手动填；食物库选中后显示换算摘要；每个数值都有标签和单位） */}
-        {((tab === 'photo' && form.photoRef) || tab === 'manual' || (tab === 'lib' && libPick)) && (
+        {!(tab === 'photo' && recognized) && ((tab === 'photo' && form.photoRef) || tab === 'manual' || (tab === 'lib' && libPick)) && (
           <div className="flex flex-col" style={{ gap: 8 }}>
             {tab === 'lib' && libPick ? (
               <div className="flex flex-col rounded-xl p-2.5" style={{ gap: 6, background: '#eef7f1', border: '1px solid #d7eee2' }}>
@@ -430,6 +604,7 @@ export const MealDetailModal: React.FC<{ date: string; meal: MealKey; onClose: (
               key={it.id}
               item={it}
               foods={foods}
+              exercise={meal === 'exercise'}
               onDelete={() => {
                 const rec = records.find((r) => r.items.some((i) => i.id === it.id));
                 if (rec) removeDietItem(rec.id, it.id);
@@ -451,7 +626,7 @@ export const MealDetailModal: React.FC<{ date: string; meal: MealKey; onClose: (
   );
 };
 
-const FoodItemRow: React.FC<{ item: DietFoodItem; foods: FoodLibItem[]; onDelete: () => void }> = ({ item, foods, onDelete }) => {
+const FoodItemRow: React.FC<{ item: DietFoodItem; foods: FoodLibItem[]; onDelete: () => void; exercise?: boolean }> = ({ item, foods, onDelete, exercise }) => {
   const food = item.foodId ? foods.find((f) => f.id === item.foodId) : undefined;
   const thumb = useBlobRefUrl(food?.thumbRef);
   const photo = useBlobRefUrl(item.photoRef);
@@ -459,14 +634,16 @@ const FoodItemRow: React.FC<{ item: DietFoodItem; foods: FoodLibItem[]; onDelete
   return (
     <div className="flex" style={{ gap: 10, padding: 10, background: '#fdfefe', border: '1px solid #e4f0e9', borderRadius: 16 }}>
       <span className="flex items-center justify-center shrink-0 overflow-hidden" style={{ width: 48, height: 48, borderRadius: 12, background: '#eef5f1' }}>
-        {url ? <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 20 }}>🍽</span>}
+        {url ? <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 20 }}>{exercise ? '🏃' : '🍽'}</span>}
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
           <span style={{ fontSize: 13, fontWeight: 700, color: '#3a2a33' }}>{item.name}</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: '#3a2a33' }}>{item.kcal} 千卡</span>
         </div>
-        <div style={{ fontSize: 11, color: '#8aa397', marginTop: 2 }}>{item.grams}g · 蛋白 {item.protein}g · 碳水 {item.carbs}g · 脂肪 {item.fat}g</div>
+        <div style={{ fontSize: 11, color: '#8aa397', marginTop: 2 }}>
+          {exercise ? `${item.grams} 分钟` : `${item.grams}g · 蛋白 ${item.protein}g · 碳水 ${item.carbs}g · 脂肪 ${item.fat}g`}
+        </div>
         {item.review && (
           <div className="rounded-lg" style={{ fontSize: 10, color: '#5c846e', background: '#eef7f1', padding: '6px 8px', marginTop: 6, lineHeight: 1.5 }}>
             ✦ {item.review}
@@ -477,6 +654,187 @@ const FoodItemRow: React.FC<{ item: DietFoodItem; foods: FoodLibItem[]; onDelete
         <Trash style={{ width: 13, height: 13, color: '#c9b4c0' }} />
       </button>
     </div>
+  );
+};
+
+// ── 运动记录弹层（类型 + 时长 → 按体重估算消耗，可手改；识图预填走 initial） ──
+
+const EX_TYPES: { name: string; met: number }[] = [
+  { name: '走路', met: 3.5 },
+  { name: '跑步', met: 8 },
+  { name: '骑行', met: 6 },
+  { name: '游泳', met: 7 },
+  { name: '瑜伽', met: 2.5 },
+  { name: '力量训练', met: 5 },
+  { name: '跳绳', met: 10 },
+  { name: '拉伸', met: 2.5 },
+  { name: '其他', met: 4 },
+];
+
+export const ExerciseModal: React.FC<{
+  date: string;
+  onClose: () => void;
+  initial?: { name?: string; minutes?: number; kcal?: number };
+}> = ({ date, onClose, initial }) => {
+  const { addToast } = useOS();
+  const records = recordsOn(date, 'exercise');
+  const items = records.flatMap((r) => r.items);
+  const [name, setName] = useState(initial?.name ?? '走路');
+  const [minutes, setMinutes] = useState(String(initial?.minutes ?? 30));
+  const [kcalManual, setKcalManual] = useState<string | null>(
+    initial?.kcal ? String(initial.kcal) : null,
+  );
+  const fileRef = useRef<HTMLInputElement>(null);
+  const albumRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const api = getDietStore().api;
+  const hasApi = !!(api.baseUrl && api.apiKey && api.model);
+
+  const onFile = async (f: File) => {
+    if (!hasApi) { addToast('先在「推荐下一餐」卡片里配置饮食 API（识别和推荐共用）', 'info'); return; }
+    setBusy(true);
+    try {
+      const blob = await shrinkTo(f, 900);
+      const r = await recognizeExerciseImage(await blobToDataUrl(blob), api);
+      if (r) {
+        if (r.name) setName(r.name);
+        if (r.minutes) setMinutes(String(Math.round(r.minutes)));
+        setKcalManual(r.kcal ? String(Math.round(r.kcal)) : null);
+        addToast('识别完成，核对后可记下', 'success');
+      } else {
+        addToast('没解析出内容，请手动填', 'info');
+      }
+    } catch (e) {
+      addToast(`识别失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const weight = parseFloat(String(getDietStore().profile.weight || '')) || 55;
+  const met = EX_TYPES.find((t) => t.name === name)?.met ?? 4;
+  const mins = Math.max(0, Math.round(Number(minutes) || 0));
+  const est = Math.round(met * weight * (mins / 60));
+  const kcalShown = kcalManual ?? String(est);
+
+  const submit = () => {
+    if (mins <= 0) { addToast('先填运动时长', 'info'); return; }
+    const kcal = Math.max(0, Math.round(Number(kcalShown) || 0));
+    addDietRecord({ date, meal: 'exercise', items: [{ name, grams: mins, kcal, protein: 0, carbs: 0, fat: 0 }] });
+    addToast(`已记入运动：${name} ${mins} 分钟`, 'success');
+    onClose();
+  };
+
+  return (
+    <Backdrop onClose={onClose}>
+      <div className="flex flex-col" style={SHEET}>
+        <SheetHeader title="运动记录" onClose={onClose} />
+        {items.length > 0 && (
+          <div className="flex flex-col" style={{ gap: 8, maxHeight: 180, overflowY: 'auto' }}>
+            {items.map((it) => {
+              const rec = records.find((r) => r.items.some((i) => i.id === it.id));
+              return (
+                <div key={it.id} className="flex items-center" style={{ gap: 10, padding: 10, background: '#fdfefe', border: '1px solid #e4f0e9', borderRadius: 16 }}>
+                  <span style={{ fontSize: 20 }}>🏃</span>
+                  <div className="flex-1 min-w-0">
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#3a2a33' }}>{it.name}</div>
+                    <div style={{ fontSize: 11, color: '#8aa397', marginTop: 2 }}>{it.grams} 分钟 · {it.kcal} 千卡</div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="删除这项"
+                    className="border-0 cursor-pointer shrink-0 p-1"
+                    style={{ background: 'transparent' }}
+                    onClick={() => { if (rec) removeDietItem(rec.id, it.id); }}
+                  >
+                    <Trash style={{ width: 13, height: 13, color: '#c9b4c0' }} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {/* 拍照/相册识别（健康 App 截图 → 预填类型/时长/消耗） */}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f); }} />
+        <input ref={albumRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f); }} />
+        <div className="flex" style={{ gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            className="flex-1 border-0 cursor-pointer rounded-full flex items-center justify-center"
+            style={{ padding: '8px 0', fontSize: 12, fontWeight: 600, color: GREEN_DEEP, background: GREEN_SOFT, gap: 6 }}
+          >
+            {busy ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Camera style={{ width: 13, height: 13 }} />}
+            {busy ? '识别中…' : '拍照识别'}
+          </button>
+          <button
+            type="button"
+            onClick={() => albumRef.current?.click()}
+            disabled={busy}
+            className="flex-1 border-0 cursor-pointer rounded-full"
+            style={{ padding: '8px 0', fontSize: 12, fontWeight: 600, color: GREEN_DEEP, background: GREEN_SOFT }}
+          >
+            🖼 从相册选
+          </button>
+        </div>
+        {/* 运动类型 */}
+        <div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}>
+          {EX_TYPES.map((t) => (
+            <button
+              key={t.name}
+              type="button"
+              onClick={() => setName(t.name)}
+              className="border-0 cursor-pointer rounded-full"
+              style={{
+                padding: '6px 12px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: name === t.name ? '#fff' : GREEN_DEEP,
+                background: name === t.name ? GREEN : GREEN_SOFT,
+              }}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+        {!EX_TYPES.some((t) => t.name === name) && name && (
+          <div style={{ fontSize: 10, color: '#5c846e', lineHeight: 1.5 }}>识别到「{name}」，点上面胶囊可换成相近的运动</div>
+        )}
+        {/* 时长 + 消耗 */}
+        <div className="flex" style={{ gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={labelCss}>时长（分钟）</div>
+            <input style={inputCss} inputMode="numeric" value={minutes} onChange={(e) => setMinutes(e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={labelCss}>消耗（千卡）</div>
+            <input style={inputCss} inputMode="numeric" value={kcalShown} onChange={(e) => setKcalManual(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex items-center" style={{ gap: 6, fontSize: 10, color: '#a3b8ac', lineHeight: 1.5 }}>
+          <span>按体重 {weight}kg 自动估算{kcalManual !== null ? '（当前为手填值）' : ''}</span>
+          {kcalManual !== null && (
+            <button
+              type="button"
+              onClick={() => setKcalManual(null)}
+              className="border-0 cursor-pointer rounded-full"
+              style={{ padding: '2px 8px', fontSize: 10, color: GREEN_DEEP, background: GREEN_SOFT }}
+            >
+              恢复估算
+            </button>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={submit}
+          className="border-0 cursor-pointer rounded-full flex items-center justify-center"
+          style={{ padding: '10px 0', fontSize: 13, fontWeight: 700, color: GREEN_DEEP, background: GREEN_SOFT }}
+        >
+          记一笔
+        </button>
+      </div>
+    </Backdrop>
   );
 };
 

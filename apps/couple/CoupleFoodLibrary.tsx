@@ -101,11 +101,12 @@ const FoodFormModal: React.FC<{ food?: FoodLibItem; onClose: () => void }> = ({ 
       }
       setBusy(true);
       try {
-        const r = await recognizeFoodImage(await blobToDataUrl(blob), api);
-        if (r.name) {
+        const list = await recognizeFoodImage(await blobToDataUrl(blob), api);
+        const r = list[0];
+        if (r?.name) {
           const per100 = toPer100(r, r.grams);
           setF((prev) => ({ ...prev, name: r.name, kcal: per100.kcal, protein: per100.protein, carbs: per100.carbs, fat: per100.fat, defaultGrams: r.grams }));
-          addToast('识别完成，确认后保存', 'success');
+          addToast(list.length > 1 ? `识别到 ${list.length} 样，已用第一个「${r.name}」建卡` : '识别完成，确认后保存', 'success');
         } else {
           addToast('没解析出数值，请手动填写', 'info');
         }

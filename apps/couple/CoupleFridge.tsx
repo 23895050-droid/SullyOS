@@ -13,6 +13,8 @@ import {
 } from './dietStore';
 import { ForwardPicker } from './CouplePeriod';
 import { forwardCoupleCard } from './coupleForward';
+import { dietBgStore, dietBgStoreApi, setFridgeSummary } from './dietBgStore';
+import { isBgTaskStale, startBgTaskForResult } from '../../utils/bgTask';
 
 const GREEN = '#7ac79c';
 const GREEN_DEEP = '#3e8f68';
@@ -167,15 +169,19 @@ const FridgeDetailModal: React.FC<{ item: FridgeItem; onClose: () => void }> = (
 
 const FridgeSummaryModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { addToast } = useOS();
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState('');
+  const bg = dietBgStore.use();
   const api = getDietStore().api;
   const hasApi = !!(api.baseUrl && api.apiKey && api.model);
 
-  const generate = async () => {
+  const pending = bg.pendingFridgeSummary;
+  const running = !!pending && pending.status === 'running' && !isBgTaskStale(pending);
+  const interrupted = !!pending && (pending.status === 'failed' || isBgTaskStale(pending));
+  const result = bg.fridgeSummary?.text ?? '';
+
+  // 后台跑：生成中可离页，回来照常显示「生成中」；完成落 store，页面重载过则判中断给重试
+  const generate = () => {
     if (!hasApi) { addToast('先在「推荐下一餐」卡片里配置饮食 API', 'info'); return; }
-    setBusy(true);
-    try {
+    void startBgTaskForResult(dietBgStoreApi, 'pendingFridgeSummary', 'fridge', async () => {
       const res = await fetch(`${api.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey}` },
@@ -184,12 +190,9 @@ const FridgeSummaryModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       const text = typeof json?.choices?.[0]?.message?.content === 'string' ? json.choices[0].message.content : '';
-      setResult(text || '没有收到回复');
-    } catch (e) {
-      addToast(`总结失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
-    } finally {
-      setBusy(false);
-    }
+      setFridgeSummary(text || '没有收到回复');
+      return text;
+    }).then(({ started }) => { if (!started) addToast('上一次总结还在生成中', 'info'); });
   };
 
   return (
@@ -207,15 +210,20 @@ const FridgeSummaryModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <X style={{ width: 15, height: 15, color: GREEN_DEEP }} />
           </button>
         </div>
-        <div style={{ fontSize: 11, color: '#8aa397', lineHeight: 1.6 }}>AI 会把所有购买记录读一遍：哪些涨价降价、哪家品质好、什么时候买什么划算。</div>
+        <div style={{ fontSize: 11, color: '#8aa397', lineHeight: 1.6 }}>AI 会把所有购买记录读一遍：哪些涨价降价、哪家品质好、什么时候买什么划算。生成中可以离开这页，回来接着看。</div>
+        {interrupted && (
+          <div className="rounded-xl" style={{ background: '#fdf6f0', border: '1px solid #f0ddc9', padding: '8px 10px', fontSize: 11, color: '#a07850', lineHeight: 1.6 }}>
+            {pending?.status === 'failed' ? `上次总结失败：${pending.error ?? '未知原因'}` : '上次总结中断了（页面刷新过）'}，点下面重新开始。
+          </div>
+        )}
         {!result && (
           <button
-            type="button" onClick={generate} disabled={busy}
+            type="button" onClick={generate} disabled={running}
             className="border-0 cursor-pointer rounded-full flex items-center justify-center"
-            style={{ padding: '10px 0', fontSize: 13, fontWeight: 700, color: '#fff', background: busy ? '#b9d8c6' : GREEN, gap: 6 }}
+            style={{ padding: '10px 0', fontSize: 13, fontWeight: 700, color: '#fff', background: running ? '#b9d8c6' : GREEN, gap: 6 }}
           >
-            {busy ? <SpinnerGap className="animate-spin" style={{ width: 14, height: 14 }} /> : null}
-            {busy ? '总结中…' : '开始总结'}
+            {running ? <SpinnerGap className="animate-spin" style={{ width: 14, height: 14 }} /> : null}
+            {running ? '总结中…（可离开此页）' : interrupted ? '重新总结' : '开始总结'}
           </button>
         )}
         {result && (
@@ -224,11 +232,11 @@ const FridgeSummaryModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               {result}
             </div>
             <button
-              type="button" onClick={generate} disabled={busy}
+              type="button" onClick={generate} disabled={running}
               className="border-0 cursor-pointer rounded-full"
               style={{ padding: '9px 0', fontSize: 12, fontWeight: 600, color: GREEN_DEEP, background: GREEN_SOFT }}
             >
-              再总结一次
+              {running ? '总结中…（可离开此页）' : '再总结一次'}
             </button>
           </>
         )}

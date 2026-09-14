@@ -32,10 +32,20 @@ const PROMPT_ENTRIES: PromptEntry[] = [
   {
     category: '饮食',
     label: '识图识别',
-    description: '拍照识别食物营养（记饮食 / 食物库建卡共用）',
+    description: '拍照识别食物营养（记饮食 / 食物库建卡共用，支持一餐多食物）',
     defaultValue:
-      '你是饮食识别助手。看这张食物照片，估算营养并只返回 JSON（不要多余文字）：\n' +
-      '{"name":"食物名","grams":克数估算,"kcal":热量千卡,"protein":蛋白质克,"carbs":碳水克,"fat":脂肪克,"review":"一句话营养点评，30字内"}',
+      '你是饮食识别助手。看这张照片，把里面每一种食物分别估出来，只输出 JSON 本身：\n' +
+      '{"items":[{"name":"食物名","grams":克数,"kcal":热量千卡,"protein":蛋白质克,"carbs":碳水克,"fat":脂肪克,"glycemicLevel":"高或中或低","glycemicWhy":"升糖预判依据，20字内","review":"一句话营养点评，30字内"}]}\n' +
+      '照片里有几种就列几种（饮品和调料也算）；每项分量按照片里的实际份量估，升糖预判看食物种类和做法。',
+  },
+  {
+    category: '饮食',
+    label: '运动识图',
+    description: '拍照/截图识别运动记录（类型/时长/消耗 → 预填运动弹层）',
+    defaultValue:
+      '你是运动记录助手。看这张截图（运动 App 或健康 App 的记录），提取运动信息，只输出 JSON 本身：\n' +
+      '{"name":"运动类型","minutes":时长分钟,"kcal":消耗千卡}\n' +
+      '一张图里有多次运动时，取最主要的那次；数值按照片里的实际数字。',
   },
   {
     category: '饮食',

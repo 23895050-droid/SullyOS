@@ -50,7 +50,7 @@ export const OUR_FEATURE_SCOPES: OurFeatureScope[] = [
     id: 'noxhome', label: 'NoxHome（含情侣空间）',
     localStorageKeys: [
       'couple_beauty_v1', 'couple_palette_v1', 'couple_todos_v3', 'couple_anniv_v1',
-      'couple_period_v1', 'couple_activity_v1', 'couple_diet_v1', 'couple_diary_v1',
+      'couple_period_v1', 'couple_activity_v1', 'couple_diet_v1', 'couple_diet_bg_v1', 'couple_diary_v1',
       'couple_board_v1', 'couple_together_v1', 'couple_music_v1',
       'noxhome_mount_v1', 'noxhome_prompts_v1',
     ],
