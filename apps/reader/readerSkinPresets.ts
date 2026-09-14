@@ -14,6 +14,8 @@ export interface ReaderSkin {
     label: string;
     /** 暗色皮肤要同步告诉系统：滚动条/原生控件跟着走 */
     dark?: boolean;
+    /** 主题面板的分组：纸纹（带织物纹理）／纯色。缺省 = 纯色 */
+    group?: 'color' | 'texture';
     vars: Record<string, string>;
 }
 
@@ -45,10 +47,11 @@ const LINEN = [
     'repeating-linear-gradient(90deg, rgba(126, 100, 64, 0.018) 0 1px, transparent 1px 3px)',
 ].join(', ');
 
-export const READER_SKINS: ReaderSkin[] = [
+const BASE_SKINS: ReaderSkin[] = [
     {
         id: 'paper',
         label: '纸白',
+        group: 'texture',
         vars: {
             '--rd-bg': '#f4f1ec',
             '--rd-bg-2': '#e9e5de',
@@ -128,6 +131,7 @@ export const READER_SKINS: ReaderSkin[] = [
     {
         id: 'sepia',
         label: '羊皮纸',
+        group: 'texture',
         vars: {
             '--rd-bg': '#eadfc8',
             '--rd-bg-2': '#dfd2b8',
@@ -204,6 +208,97 @@ export const READER_SKINS: ReaderSkin[] = [
         },
     },
 ];
+
+// ── 派生皮肤 ──────────────────────────────────────────────────────────────
+// 上面四张（纸白/夜色/羊皮纸/素白）是手调过的，保持原样。下面这一批是「给几个
+// 种子色、其余推出来」——以后想加一套皮肤就是加一个 seed 的事。
+const chan = (hex: string): number[] => {
+    const h = hex.replace('#', '');
+    const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+    return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+};
+const h2 = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+/** 两个色按 t（0~1）混 */
+const mix = (a: string, b: string, t: number): string => {
+    const A = chan(a);
+    const B = chan(b);
+    return `#${A.map((v, i) => h2(v + (B[i] - v) * t)).join('')}`;
+};
+const trip = (hex: string) => chan(hex).join(', ');
+const alpha = (hex: string, a: number) => `rgba(${trip(hex)}, ${a})`;
+
+interface SkinSeed {
+    paper: string;
+    paper2: string;
+    card: string;
+    bg: string;
+    ink: string;
+    inkSoft: string;
+    accent: string;
+    onAccent?: string;
+    tex?: boolean;
+}
+
+function derived(id: string, label: string, seed: SkinSeed, dark = false): ReaderSkin {
+    const { paper, paper2, card, bg, ink, inkSoft, accent, tex } = seed;
+    const onAccent = seed.onAccent ?? (dark ? '#0e1116' : '#ffffff');
+    const onScrim = dark ? '#efebe4' : '#fbf9f6';
+    return {
+        id,
+        label,
+        dark,
+        group: tex ? 'texture' : 'color',
+        vars: {
+            '--rd-bg': bg,
+            '--rd-bg-2': mix(bg, ink, 0.06),
+            '--rd-card': card,
+            '--rd-nav-bg': mix(card, bg, 0.45),
+            '--rd-sheet-bg': mix(card, bg, 0.25),
+            '--rd-paper': paper,
+            '--rd-paper-2': paper2,
+            '--rd-paper-tex': tex ? LINEN : 'none',
+            '--rd-ink': ink,
+            '--rd-ink-soft': inkSoft,
+            '--rd-ink-rgb': trip(ink),
+            '--rd-rule': alpha(ink, 0.12),
+            '--rd-rule-soft': alpha(ink, 0.07),
+            '--rd-accent': accent,
+            '--rd-accent-rgb': trip(accent),
+            '--rd-accent-soft': mix(card, accent, dark ? 0.22 : 0.14),
+            '--rd-on-accent': onAccent,
+            '--rd-track': mix(card, ink, 0.10),
+            '--rd-bar-fill': accent,
+            '--rd-chart-bar': mix(card, accent, 0.30),
+            '--rd-knob': dark ? ink : '#ffffff',
+            '--rd-chip-bg': card,
+            '--rd-chip-on-bg': ink,
+            '--rd-chip-on-ink': paper,
+            '--rd-cover-a': mix(card, ink, 0.04),
+            '--rd-cover-b': mix(card, ink, 0.13),
+            '--rd-cover-ink': inkSoft,
+            '--rd-scrim': alpha(dark ? '#000000' : ink, dark ? 0.55 : 0.38),
+            '--rd-on-scrim': onScrim,
+            '--rd-veil': '#000000',
+            '--rd-danger': dark ? '#d97a72' : '#c1544f',
+            '--rd-shadow': `0 10px 30px ${alpha(ink, dark ? 0.45 : 0.10)}`,
+            '--rd-shadow-sm': `0 2px 10px ${alpha(ink, dark ? 0.35 : 0.06)}`,
+        },
+    };
+}
+
+const MORE_SKINS: ReaderSkin[] = [
+    derived('sand', '沙', { paper: '#f0e6d5', paper2: '#e9ddc9', card: '#fbf5ea', bg: '#e6dac6', ink: '#3a3126', inkSoft: '#7d7060', accent: '#a1785a', tex: true }),
+    derived('stone', '石灰', { paper: '#e9e9e7', paper2: '#e2e2e0', card: '#fdfdfc', bg: '#dedede', ink: '#33343a', inkSoft: '#7c7d83', accent: '#6b7280' }),
+    derived('sea', '海蓝', { paper: '#eaf1f6', paper2: '#e1eaf1', card: '#fbfdff', bg: '#dde7ef', ink: '#22333f', inkSoft: '#6a7d8b', accent: '#3f88c5' }),
+    derived('mung', '豆绿', { paper: '#eaf1e7', paper2: '#e2ebdf', card: '#fbfdfa', bg: '#dfe9dc', ink: '#2a3830', inkSoft: '#6d7d72', accent: '#5f9e6e' }),
+    derived('raspberry', '莓粉', { paper: '#f7eaee', paper2: '#f1e1e7', card: '#fefbfc', bg: '#eedde3', ink: '#3a2a30', inkSoft: '#866f77', accent: '#c96b86' }),
+    derived('bamboo', '竹青', { paper: '#e4ece3', paper2: '#dbe5da', card: '#fafcf9', bg: '#d6e2d5', ink: '#28352c', inkSoft: '#67786c', accent: '#3f6b4d' }),
+    derived('orange', '橘', { paper: '#fbeee0', paper2: '#f5e5d3', card: '#fffaf4', bg: '#f2e2cd', ink: '#3d2f22', inkSoft: '#8a7460', accent: '#d9822b' }),
+    derived('night2', '墨黑', { paper: '#0a0a0c', paper2: '#101013', card: '#141419', bg: '#070708', ink: '#e8e6e2', inkSoft: '#9d9a95', accent: '#8fb0d8', onAccent: '#0b0d11' }, true),
+];
+
+/** 皮肤总表：手调的四张 + 派生的那批（主题面板整张网格就是它） */
+export const READER_SKINS: ReaderSkin[] = [...BASE_SKINS, ...MORE_SKINS];
 
 export function skinById(id: string): ReaderSkin {
     return READER_SKINS.find((s) => s.id === id) ?? READER_SKINS[0];

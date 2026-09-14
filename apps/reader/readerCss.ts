@@ -280,16 +280,22 @@ export const READER_SKELETON_CSS = `
 .rd-grid-list .rd-book-meta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 
 /* ── 阅读页 ── */
+/* 安全区归**这一层**管：顶栏和底栏都是能藏掉的（沉浸态），安全区不能挂在它们身上
+   ——挂上去的结果就是藏栏的时候正文顺势钻到状态栏底下（实机「第 11 章」被时间压住）。
+   max() 兜住两种来源：上游给 SELF_SAFE_AREA_APPS 算的 --chrome-top/--safe-bottom，
+   以及 iOS 自己的 env()（手机上上游那两个值可能是 0）。取大值，不会双算。 */
 .rd-reader {
   position: absolute; inset: 0; display: flex; flex-direction: column;
+  padding-top: max(var(--chrome-top, 0px), env(safe-area-inset-top, 0px));
+  padding-bottom: max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
   background: var(--rd-paper); background-image: var(--rd-paper-tex);
   color: var(--rd-ink);
 }
 .rd-reader-bar {
   flex: 0 0 auto; display: flex; align-items: center; gap: 2px;
-  padding: calc(var(--chrome-top, 0px) + 4px) var(--rd-space-2) 2px;
-  background: var(--rd-paper-2); border-bottom: 1px solid var(--rd-rule-soft);
+  padding: 5px var(--rd-space-2) 2px;
 }
+.rd-reader-bar-tools { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .rd-reader-bar-title { flex: 1 1 auto; min-width: 0; text-align: center; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rd-reader-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 /* 按「这一页的内容高度」裁切：视口通常比一页的内容高一点，不裁的话下一页的第一行
@@ -310,17 +316,23 @@ export const READER_SKELETON_CSS = `
 }
 .rd-reader-veil { position: absolute; inset: 0; background: var(--rd-veil); pointer-events: none; }
 
-.rd-reader-foot { flex: 0 0 auto; background: var(--rd-paper-2); border-top: 1px solid var(--rd-rule-soft); padding-bottom: var(--safe-bottom, 0px); }
+.rd-reader-foot { flex: 0 0 auto; background: var(--rd-paper-2); border-top: 1px solid var(--rd-rule-soft); }
 .rd-reader-stat { display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-3); padding: var(--rd-space-2) var(--rd-space-4) 0; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
 .rd-reader-slider { display: flex; align-items: center; gap: var(--rd-space-2); padding: var(--rd-space-2) var(--rd-space-4); }
 .rd-slider-nav {
-  width: 30px; height: 30px; flex: 0 0 auto; border-radius: var(--rd-r-pill);
+  width: 32px; height: 32px; flex: 0 0 auto; border-radius: var(--rd-r-pill);
   border: 1px solid var(--rd-rule); background: var(--rd-card); color: var(--rd-ink-soft);
   display: inline-flex; align-items: center; justify-content: center;
 }
-.rd-slider-track { position: relative; flex: 1 1 auto; height: 26px; display: flex; align-items: center; }
-.rd-slider-rail { position: absolute; left: 0; right: 0; height: 5px; border-radius: var(--rd-r-pill); background: var(--rd-track); overflow: hidden; }
+.rd-slider-track { position: relative; flex: 1 1 auto; height: 32px; display: flex; align-items: center; }
+.rd-slider-rail { position: absolute; left: 0; right: 0; height: 6px; border-radius: var(--rd-r-pill); background: var(--rd-track); }
 .rd-slider-fill { height: 100%; background: var(--rd-bar-fill); border-radius: var(--rd-r-pill); }
+/* 轨道末端的圆把手（参考图上那条进度条末端的手感） */
+.rd-slider-knob {
+  position: absolute; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px;
+  border-radius: var(--rd-r-pill); background: var(--rd-bar-fill);
+  box-shadow: var(--rd-shadow-sm); pointer-events: none;
+}
 .rd-reader-tools { display: flex; align-items: center; justify-content: space-between; padding: var(--rd-space-1) var(--rd-space-3) var(--rd-space-2); }
 .rd-tool {
   border: 0; background: transparent; color: var(--rd-ink-soft);
@@ -330,6 +342,46 @@ export const READER_SKELETON_CSS = `
 }
 .rd-tool:active { background: var(--rd-bg-2); }
 .rd-tool-on { color: var(--rd-accent); }
+
+/* ── 阅读页的底部面板（排版 / 主题）：从工具排上面升起，顶替进度那两行 ── */
+.rd-reader-panel { padding: var(--rd-space-4) var(--rd-space-4) var(--rd-space-1); animation: rd-rise 200ms ease-out; }
+/* 「标签在左、控件在右」的行（参考图那条 Font / Font Size / H Margin / Line Spacing） */
+.rd-opt { display: flex; align-items: center; gap: var(--rd-space-3); margin-bottom: var(--rd-space-3); }
+.rd-opt-label { width: 84px; flex: 0 0 auto; font-size: var(--rd-fs-md); }
+.rd-opt-value {
+  flex: 1 1 auto; min-width: 0; height: 36px; display: flex; align-items: center; justify-content: center; gap: 6px;
+  border: 0; border-radius: var(--rd-r-sm); background: var(--rd-card); color: var(--rd-ink);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-md); box-shadow: var(--rd-shadow-sm);
+}
+/* 自绘滑杆：圆角轨 + 已读段 + 写着数值的圆把手（原生 range 做不出参考图那个把手） */
+.rd-range { position: relative; flex: 1 1 auto; height: 36px; touch-action: none; }
+.rd-range-track { position: absolute; left: 0; right: 0; top: 50%; height: 36px; margin-top: -18px; border-radius: var(--rd-r-pill); background: var(--rd-card); box-shadow: var(--rd-shadow-sm); }
+.rd-range-fill { position: absolute; left: 0; top: 50%; height: 36px; margin-top: -18px; border-radius: var(--rd-r-pill); background: var(--rd-accent-soft); }
+.rd-range-knob {
+  position: absolute; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px;
+  border-radius: var(--rd-r-pill); background: var(--rd-accent); color: var(--rd-on-accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums;
+}
+/* 面板里的分段控件（翻页模式 / 主题分组）：浅灰轨道 + 白底选中块 */
+.rd-opt-seg { display: flex; gap: 2px; background: var(--rd-track); border-radius: var(--rd-r-sm); padding: 2px; }
+.rd-opt-seg-btn {
+  flex: 1 1 0; min-width: 0; border: 0; background: transparent; color: var(--rd-ink-soft);
+  border-radius: calc(var(--rd-r-sm) - 2px); padding: 7px 4px;
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rd-opt-seg-on { background: var(--rd-card); color: var(--rd-ink); font-weight: 600; box-shadow: var(--rd-shadow-sm); }
+
+/* 主题面板的色卡网格（参考图 3 列，每张卡就是那套皮肤的纸色） */
+.rd-theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--rd-space-2); }
+.rd-theme-card {
+  position: relative; height: 42px; border: 0; border-radius: var(--rd-r-sm);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm);
+  display: flex; align-items: center; justify-content: center;
+}
+.rd-theme-card-on { box-shadow: 0 0 0 2px var(--rd-accent); }
+.rd-theme-check { position: absolute; right: 4px; bottom: 4px; font-size: var(--rd-fs-caption); }
 
 /* ── 书详情 ── */
 .rd-detail { padding-bottom: calc(var(--safe-bottom, 0px) + 88px); }
