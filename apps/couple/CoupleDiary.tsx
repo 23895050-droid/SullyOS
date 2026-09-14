@@ -31,6 +31,7 @@ import { generateImage } from '../../utils/imageGenService';
 import { loadImageGenSettings } from '../../utils/imageGenStorage';
 import { getPrompt } from '../../utils/promptRegistry';
 import { diaryBgStore, diaryBgStoreApi } from './diaryBgStore';
+import GenStatusPill from './GenStatusPill';
 import { isBgTaskStale, startBgTaskForResult } from '../../utils/bgTask';
 
 // ── 纸张设计常量 ──
@@ -598,10 +599,25 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
     return true;
   };
 
-  /** 生成他的日记并落库（不带 busy/toast，供「喊他写」与「交换日记」共用） */
+  /** 生成他的日记并落库（不带 busy/toast，供「喊他写」与「交换日记」共用）；配图模型自己决定（像留言板） */
   const runGenerateCore = async (useLangs: string[]) => {
-    const { text, summary, mood: m, anchors } = await generateNoxDiary({ char: mountChar!, user: userProfile!, mainApi: apiConfig, langs: useLangs });
+    const { text, summary, mood: m, anchors, image } = await generateNoxDiary({ char: mountChar!, user: userProfile!, mainApi: apiConfig, langs: useLangs });
     saveDiaryEntry({ owner: 'me', content: text, summary: summary || undefined, generated: true, mood: m, anchors });
+    // 模型带了配图意图就画（共享「生图·随手拍风格」）；图永远与当前这篇对应：没画成就清掉旧图
+    let newPhoto: { blobRef: string } | null = null;
+    if (image && mountChar) {
+      const ig = loadImageGenSettings();
+      if (ig.enabled && ig.apiKey.trim() && ig.baseUrl.trim() && ig.model.trim()) {
+        try {
+          const style = getPrompt('生图·随手拍风格').replace(/\{\{char\}\}/g, mountChar.name);
+          const r = await generateImage(`${style}\n${image.prompt}`, { settings: ig });
+          newPhoto = { blobRef: r.blobRef };
+        } catch {
+          addToast('配图没画出来，日记先写好了', 'info');
+        }
+      }
+    }
+    setDiaryPhoto(today, 'me', newPhoto);
   };
 
   /** 生成他对她日记的批注并落库（同上） */
@@ -655,28 +671,6 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
       setExchangeOpen(true);
     } catch (e) {
       addToast(`交换失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  /** 给他的日记配一张图（AI 生图；共享「生图·随手拍风格」，再点覆盖旧图） */
-  const handlePhoto = async () => {
-    const hisEntry = diaryOn(store.entries, today, 'me');
-    if (!mountChar || !hisEntry?.content.trim()) return;
-    const ig = loadImageGenSettings();
-    if (!(ig.enabled && ig.apiKey.trim() && ig.baseUrl.trim() && ig.model.trim())) {
-      addToast('先在系统设置里配置生图 API（相机用的那个）', 'info');
-      return;
-    }
-    setBusy('photo');
-    try {
-      const style = getPrompt('生图·随手拍风格').replace(/\{\{char\}\}/g, mountChar.name);
-      const r = await generateImage(`${style}\n画面取材自他今天的日记：${hisEntry.content.slice(0, 180)}`, { settings: ig });
-      setDiaryPhoto(today, 'me', { blobRef: r.blobRef });
-      addToast('配好图了', 'success');
-    } catch (e) {
-      addToast(`配图失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
     } finally {
       setBusy(null);
     }
@@ -810,6 +804,9 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
           )}
         </PaperSheet>
 
+        {(diaryRunning || annotateRunning || busy === 'exchange') && (
+          <GenStatusPill text={busy === 'exchange' ? 'Nox 正在写日记、批注，这一趟要一会儿…' : diaryRunning ? 'Nox 正在写今天的日记…' : 'Nox 正在批注…'} />
+        )}
         {bgStuck && (
           <p style={{ margin: '8px 0 0', fontSize: 11, color: '#b08a8a', textAlign: 'center' }}>上次生成中断或失败过，再点一次按钮就能重试。</p>
         )}
@@ -822,12 +819,6 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
               <Pill onClick={() => setRerollConfirm(true)} ink={ink} disabled={diaryRunning}>
                 {diaryRunning ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
                 重roll
-              </Pill>
-            )}
-            {owner === 'me' && entry && (
-              <Pill onClick={() => void handlePhoto()} ink={ink} ghost disabled={busy === 'photo'}>
-                {busy === 'photo' ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
-                {entry.photo ? '换配图' : '配一张图'}
               </Pill>
             )}
             {owner === 'me' && entry && (

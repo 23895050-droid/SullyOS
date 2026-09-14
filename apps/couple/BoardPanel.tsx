@@ -16,6 +16,7 @@ import { getLocalDateKey } from '../../utils/localDate';
 import { fmtDiaryDateStamp } from '../../utils/diaryMath';
 import { useDiaryHandFont } from './CoupleDiary';
 import { diaryBgStore, diaryBgStoreApi } from './diaryBgStore';
+import GenStatusPill from './GenStatusPill';
 import { isBgTaskStale, startBgTaskForResult } from '../../utils/bgTask';
 import { generateImage } from '../../utils/imageGenService';
 import { loadImageGenSettings } from '../../utils/imageGenStorage';
@@ -228,9 +229,7 @@ const BoardPanel: React.FC = () => {
           </div>
         </div>
 
-        {boardRunning && todayMe && (
-          <p style={{ ...NOTE, marginTop: 2 }}>正在重写今天的留言……</p>
-        )}
+        {boardRunning && <GenStatusPill text="Nox 正在给你写留言…" />}
         {boardPending?.status === 'failed' && (
           <p style={{ ...NOTE, marginTop: 2, color: '#b08a8a' }}>上次生成失败过，再点一次就能重试。</p>
         )}

@@ -128,7 +128,7 @@ export async function generateNoxDiary(opts: {
   mainApi?: Partial<DiaryApiConfig>;
   date?: string;
   langs?: string[];
-}): Promise<{ text: string; summary: string; mood: string; anchors: SentenceAnchor[] }> {
+}): Promise<{ text: string; summary: string; mood: string; anchors: SentenceAnchor[]; image?: { prompt: string; why: string } }> {
   const api = resolveDiaryApi(getDiaryStore().api, opts.mainApi);
   if (!api) throw new Error('未配置日记 API');
   const { system, recent } = await buildDiaryContext(opts.char, opts.user);
@@ -156,11 +156,15 @@ export async function generateNoxDiary(opts: {
   if (parsed && typeof parsed.text === 'string') {
     const body = splitDiaryHead(parsed.text.trim()).body;
     const validIds = new Set(diarySentences(body).map((s) => s.id));
+    // 配图意图（模型自己决定带不带；像留言板——生成后由调用方画）
+    const img = parsed.image && typeof parsed.image === 'object' ? (parsed.image as Record<string, unknown>) : null;
+    const imgPrompt = str(img?.prompt).trim();
     return {
       text: parsed.text.trim(),
       summary: str(parsed.summary),
       mood: normalizeDiaryMood(parsed.mood),
       anchors: cleanAnchors(parsed.selfAnchors, validIds),
+      image: imgPrompt ? { prompt: imgPrompt, why: str(img?.why) } : undefined,
     };
   }
   return { text: salvageText(text), summary: '', mood: 'calm', anchors: [] };

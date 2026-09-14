@@ -84,11 +84,15 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '- sentenceId 的编号规则：只把正文按句号/问号/叹号/省略号/分号切句，按段落编号，正文第一段第一句是 p1s1，依次 p1s2、p2s1……编号必须严格对应你写出来的正文，不能编位置。\n' +
       '- 每处旁批可以只有标记没有文字；有文字时像一句小声的注，不超过 2 行的感觉。\n\n' +
       'mood：写这篇日记的整体心情基调，从 joy（晴朗）/ calm（平静）/ soft（温柔）/ flirt（调情）/ ache（拉扯）/ sad（低气压）/ angry（上头）/ night（深夜）里选一个。\n\n' +
+      '配图（可选）：日记的最后可以贴一张你自己生活里的画面——你那边此刻的样子、你在做的事、桌上有什么，像随手拍下来夹进日记里的照片；随手画的小画也行。\n' +
+      '- image.prompt 写画面内容：中英文皆可，详细一点（主体、构图、光线、氛围）。\n' +
+      '- image.why 写一句小字标注：为什么贴这张。\n' +
+      '- 想分享点什么就配一张，其余时候省去 image 这一栏。\n\n' +
       '输出要求：只输出 JSON，不要解释，不要代码块：\n' +
-      '{"summary":"1-2句极短摘要，供未来避免重复","text":"日记正文（第一行是标题，单独一行；第二行写日期和天气，要像你自己写下来的，不像系统抬头；第三行起才是正文）","mood":"joy|calm|soft|flirt|ache|sad|angry|night","selfAnchors":[{"sentenceId":"p1s1","mark":"underline|strike|circle","noteBlock":[{"type":"text|strike|highlight|redact|doodle|styled","text":"旁批文字","color":"graphite|blue|brown|olive|plum","size":"sm|md|lg"}]}]}\n' +
+      '{"summary":"1-2句极短摘要，供未来避免重复","text":"日记正文（第一行是标题，单独一行；第二行写日期和天气，要像你自己写下来的，不像系统抬头；第三行起才是正文）","mood":"joy|calm|soft|flirt|ache|sad|angry|night","selfAnchors":[{"sentenceId":"p1s1","mark":"underline|strike|circle","noteBlock":[{"type":"text|strike|highlight|redact|doodle|styled","text":"旁批文字","color":"graphite|blue|brown|olive|plum","size":"sm|md|lg"}]}],"image":{"prompt":"生图提示词","why":"为什么贴这张"}}\n' +
       '- selfAnchors 保持 2-5 条，每条必须命中一个按上述规则编号的真实句子。\n' +
       '- 划重点用 mark 的 underline/circle，noteBlock 只写你自己想说的话，不要重复抄原句。highlight 是荧光笔，只给单个词上色。\n' +
-      '- 没有旁批灵感时 selfAnchors 可以是空数组。',
+      '- 没有旁批灵感时 selfAnchors 可以是空数组；image 也可以省。',
   },
   {
     category: '日记',

@@ -14,6 +14,7 @@ import {
 import { ForwardPicker } from './CouplePeriod';
 import { forwardCoupleCard } from './coupleForward';
 import { dietBgStore, dietBgStoreApi, setFridgeSummary } from './dietBgStore';
+import GenStatusPill from './GenStatusPill';
 import { isBgTaskStale, startBgTaskForResult } from '../../utils/bgTask';
 
 const GREEN = '#7ac79c';
@@ -216,6 +217,7 @@ const FridgeSummaryModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             {pending?.status === 'failed' ? `上次总结失败：${pending.error ?? '未知原因'}` : '上次总结中断了（页面刷新过）'}，点下面重新开始。
           </div>
         )}
+        {running && <GenStatusPill text="正在总结购买记录…" />}
         {!result && (
           <button
             type="button" onClick={generate} disabled={running}
