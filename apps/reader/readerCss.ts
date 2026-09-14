@@ -41,13 +41,18 @@ export const READER_SKELETON_CSS = `
   /* 颜色不在这里给默认值——那是皮肤表的活（readerSkinPresets）。
      骨架层只管层级/间距/几何/排版的默认值。 */
 
-  /* ── 排版（字号阶梯，随用户设的正文字号整体缩放，映射见 ReaderSkinPreset）── */
+  /* ── 排版 ──
+     字号分两族，**别混**（她 2026-09-15 报的「改里面的字体外面也跟着变」）：
+       · 界面字号（hero…caption）= 固定的，正文调多大都不动它们——那是在调书，不是在调 App
+       · 书的内容（--rd-fs-body / --rd-fs-chapter）= 只有这俩跟着用户设的字号走
+     映射见 ReaderSkinPreset.typographyVars。 */
   --rd-font-heading: Georgia, "Songti SC", "Noto Serif SC", serif;
   --rd-font-body: -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
   --rd-fs-hero: 30px;
   --rd-fs-title: 24px;
   --rd-fs-lg: 20px;
   --rd-fs-body: 17px;
+  --rd-fs-chapter: 22px;
   --rd-fs-md: 15px;
   --rd-fs-sm: 13px;
   --rd-fs-caption: 12px;
@@ -234,6 +239,8 @@ export const READER_SKELETON_CSS = `
   animation: rd-rise 220ms cubic-bezier(0.32, 0.72, 0.28, 1);
 }
 .rd-sheet::-webkit-scrollbar { width: 0; }
+/* 目录/搜索那两张高面板：自己不开滚动条，让里面的列表滚（头和三页签钉在上头） */
+.rd-sheet-tall { display: flex; flex-direction: column; overflow: hidden; }
 .rd-sheet-grip { width: 38px; height: 4px; border-radius: var(--rd-r-pill); background: var(--rd-rule); margin: 0 auto var(--rd-space-4); }
 .rd-sheet-title { font-family: var(--rd-font-heading); font-size: var(--rd-fs-title); margin-bottom: var(--rd-space-3); }
 .rd-sheet-body { display: flex; flex-direction: column; gap: var(--rd-space-3); }
@@ -325,7 +332,8 @@ export const READER_SKELETON_CSS = `
   transition: transform 260ms cubic-bezier(0.33, 0.7, 0.4, 1);
 }
 .rd-reader-kicker { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); letter-spacing: 0.08em; margin-bottom: var(--rd-space-3); }
-.rd-reader-chapter { font-family: var(--rd-font-heading); font-size: var(--rd-fs-title); line-height: 1.4; margin: 0 0 var(--rd-space-5); font-weight: 600; }
+/* 章标题是「书里的东西」，跟着正文字号走（界面那些字号是固定的，见 .rd-root 那段注释） */
+.rd-reader-chapter { font-family: var(--rd-font-heading); font-size: var(--rd-fs-chapter); line-height: 1.4; margin: 0 0 var(--rd-space-5); font-weight: 600; }
 .rd-para {
   font-size: var(--rd-fs-body); line-height: var(--rd-lh-body);
   margin: 0 0 var(--rd-para-gap);
@@ -646,6 +654,95 @@ export const READER_SKELETON_CSS = `
 .rd-achv + .rd-achv { border-top: 1px solid var(--rd-rule); }
 .rd-achv-cap { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
 .rd-achv-val { color: var(--rd-accent); flex: 0 0 auto; font-size: var(--rd-fs-sm); }
+
+/* ── 书签丝带（参考图 1/3：加了书签，纸的右上角挂一条红丝带，垂过状态栏那一段） ── */
+.rd-ribbon {
+  position: absolute; top: 0; right: 8px; width: 20px; height: 36px; z-index: 40;
+  background: var(--rd-ribbon); pointer-events: none;
+  animation: rd-drop 220ms ease-out;
+}
+.rd-ribbon::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 9px;
+  background: var(--rd-ribbon);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 50%, 0 100%);
+}
+@keyframes rd-drop { from { transform: translateY(-100%) } to { transform: translateY(0) } }
+
+/* ── 底栏左二：进度条本体（参考图那个 —◯— ，点或拖都在调进度） ── */
+.rd-seek { position: relative; width: 58px; flex: 0 0 auto; height: 32px; touch-action: none; display: flex; align-items: center; }
+.rd-seek-rail { position: absolute; left: 0; right: 0; height: 5px; border-radius: var(--rd-r-pill); background: var(--rd-track); }
+.rd-seek-fill { position: absolute; left: 0; height: 5px; border-radius: var(--rd-r-pill); background: var(--rd-bar-fill); }
+.rd-seek-knob {
+  position: absolute; width: 14px; height: 14px; margin-left: -7px; border-radius: var(--rd-r-pill);
+  background: var(--rd-knob); box-shadow: var(--rd-shadow-sm);
+}
+.rd-tool-on .rd-seek-rail { background: transparent; }
+
+/* ── 目录 / 搜索那张面板（参考图「左下一展开」+「右上二搜索」）── */
+.rd-toc-head { display: flex; align-items: center; gap: var(--rd-space-3); padding: var(--rd-space-2) 0 var(--rd-space-3); }
+.rd-toc-cover { width: 44px; aspect-ratio: 2 / 3; flex: 0 0 auto; border-radius: var(--rd-r-sm); overflow: hidden; background: var(--rd-card); box-shadow: var(--rd-shadow-sm); position: relative; }
+.rd-toc-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rd-toc-name { font-size: var(--rd-fs-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-toc-meta { display: flex; flex-wrap: wrap; gap: var(--rd-space-3); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-toc-group { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); padding: var(--rd-space-3) 0 2px; }
+.rd-toc-row { width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left; border: 0; background: transparent; color: inherit; font-family: inherit; padding: var(--rd-space-3) 0; }
+.rd-toc-row + .rd-toc-row { border-top: 1px solid var(--rd-rule); }
+.rd-toc-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--rd-space-3); font-size: var(--rd-fs-sm); }
+.rd-toc-pct { color: var(--rd-ink-soft); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.rd-toc-quote { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.6; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.rd-toc-time { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums; }
+.rd-toc-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-bottom: var(--rd-space-3); }
+.rd-toc-scroll::-webkit-scrollbar { width: 0; }
+
+/* 搜索命中处的高亮（参考图 4：命中的字蓝底） */
+.rd-hunt-hit { background: var(--rd-accent-soft); color: var(--rd-accent); border-radius: var(--rd-radius-hl); padding: 0 1px; }
+.rd-hunt-empty { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); padding: var(--rd-space-5) 0; text-align: center; }
+
+/* ── 日报（参考图「每日阅读数据」长图）── */
+.rd-daily-hero { background: var(--rd-accent-soft); border-radius: var(--rd-r-lg); padding: var(--rd-space-5) var(--rd-space-4) var(--rd-space-4); text-align: center; margin-bottom: var(--rd-space-3); }
+.rd-daily-date { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); }
+.rd-daily-big { font-family: var(--rd-font-heading); font-size: var(--rd-fs-hero); line-height: 1.2; font-weight: 600; margin-top: 2px; }
+.rd-daily-cap { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); margin-top: 2px; }
+.rd-daily-cells { display: flex; justify-content: space-between; gap: var(--rd-space-2); margin-top: var(--rd-space-4); }
+.rd-daily-cell { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rd-daily-cell-num { font-size: var(--rd-fs-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.rd-daily-cell-cap { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-daily-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--rd-space-3); }
+.rd-daily-mcell { background: var(--rd-bg-2); border-radius: var(--rd-r-md); padding: var(--rd-space-3); display: flex; flex-direction: column; gap: 2px; }
+.rd-daily-mnum { color: var(--rd-accent); font-size: var(--rd-fs-lg); font-weight: 600; }
+.rd-dist { display: flex; flex-direction: column; gap: 2px; padding: var(--rd-space-2) 0; }
+.rd-dist-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--rd-space-3); font-size: var(--rd-fs-sm); }
+.rd-dist-sub { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-dist-bar { height: 6px; border-radius: var(--rd-r-pill); background: var(--rd-track); overflow: hidden; margin-top: 4px; }
+.rd-dist-fill { height: 100%; border-radius: var(--rd-r-pill); background: var(--rd-accent); }
+.rd-dist-2 { filter: hue-rotate(118deg); }
+.rd-dist-3 { filter: hue-rotate(-118deg); }
+.rd-dist-4 { filter: hue-rotate(58deg); }
+.rd-hour-block { padding: var(--rd-space-3) 0; }
+.rd-hour-block + .rd-hour-block { border-top: 1px solid var(--rd-rule); }
+.rd-hour-range { display: flex; align-items: center; gap: var(--rd-space-2); font-size: var(--rd-fs-md); font-variant-numeric: tabular-nums; }
+.rd-hour-total { background: var(--rd-bg-2); border-radius: var(--rd-r-pill); padding: 1px 9px; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-hour-seg { display: flex; gap: var(--rd-space-3); overflow-x: auto; margin-top: var(--rd-space-3); }
+.rd-hour-seg::-webkit-scrollbar { height: 0; }
+.rd-hour-seg-item { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 62px; flex: 0 0 auto; }
+.rd-hour-seg-cover { width: 52px; aspect-ratio: 2 / 3; border-radius: var(--rd-r-sm); overflow: hidden; background: var(--rd-card); box-shadow: var(--rd-shadow-sm); position: relative; }
+.rd-hour-seg-name { font-size: var(--rd-fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.rd-hour-seg-sec { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums; }
+.rd-best { display: flex; align-items: center; gap: var(--rd-space-3); padding: var(--rd-space-3) 0; }
+.rd-best + .rd-best { border-top: 1px solid var(--rd-rule); }
+.rd-best-ico { width: 26px; height: 26px; flex: 0 0 auto; border-radius: var(--rd-r-pill); background: var(--rd-accent-soft); color: var(--rd-accent); display: flex; align-items: center; justify-content: center; }
+.rd-best-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.rd-best-cap { font-size: var(--rd-fs-sm); color: var(--rd-ink-soft); }
+.rd-best-chip { background: var(--rd-accent-soft); color: var(--rd-accent); border-radius: var(--rd-r-pill); padding: 1px 9px; font-size: var(--rd-fs-caption); }
+.rd-best-cover { width: 32px; aspect-ratio: 2 / 3; flex: 0 0 auto; border-radius: var(--rd-r-sm); overflow: hidden; background: var(--rd-card); box-shadow: var(--rd-shadow-sm); position: relative; }
+.rd-rank { display: flex; align-items: center; gap: var(--rd-space-3); width: 100%; text-align: left; border: 0; background: transparent; color: inherit; font-family: inherit; padding: var(--rd-space-3) 0; }
+.rd-rank + .rd-rank { border-top: 1px solid var(--rd-rule); }
+.rd-rank-no { width: 20px; flex: 0 0 auto; text-align: center; color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); font-variant-numeric: tabular-nums; }
+.rd-rank-cover { width: 32px; aspect-ratio: 2 / 3; flex: 0 0 auto; border-radius: var(--rd-r-sm); overflow: hidden; background: var(--rd-card); position: relative; }
+.rd-rank-name { flex: 1 1 auto; min-width: 0; font-size: var(--rd-fs-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-rank-val { flex: 0 0 auto; color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); font-variant-numeric: tabular-nums; }
+/* 统计页顶栏那颗「日报」入口（右上角），跟标题同一行 */
+.rd-head-link { border: 0; background: transparent; color: var(--rd-accent); font-family: inherit; font-size: var(--rd-fs-sm); flex: 0 0 auto; padding: 4px 0; }
 
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }

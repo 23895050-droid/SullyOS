@@ -243,7 +243,7 @@ function SheetHost({ sheet, setSheet, t, prefs, cssDraft, setCssDraft }: {
         </div>
     );
 
-    if (sheet === 'size') return sliderSheet('正文字号', '字号', `${t.fontSize}px`, 13, 26, 1, t.fontSize, (v) => setTypography({ fontSize: v }), '界面上的字会跟着一起缩放。');
+    if (sheet === 'size') return sliderSheet('正文字号', '字号', `${t.fontSize}px`, 13, 26, 1, t.fontSize, (v) => setTypography({ fontSize: v }), '只改书里的字，界面上的字号不动。');
     if (sheet === 'lineHeight') return sliderSheet('行距', '行距', t.lineHeight.toFixed(1), 1.3, 2.6, 0.1, t.lineHeight, (v) => setTypography({ lineHeight: v }));
     if (sheet === 'paraGap') return sliderSheet('段间距', '段间距', `${t.paragraphSpacing}px`, 0, 28, 2, t.paragraphSpacing, (v) => setTypography({ paragraphSpacing: v }));
     if (sheet === 'indent') return sliderSheet('首行缩进', '缩进', `${t.paragraphIndent} 字`, 0, 3, 0.5, t.paragraphIndent, (v) => setTypography({ paragraphIndent: v }));

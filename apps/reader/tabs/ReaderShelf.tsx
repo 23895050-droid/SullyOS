@@ -411,7 +411,6 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
     const [importOpen, setImportOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
-    const [catMenuOpen, setCatMenuOpen] = useState(false);
     const [selecting, setSelecting] = useState(false);
     const [picked, setPicked] = useState<Set<string>>(new Set());
     const [menuBook, setMenuBook] = useState<RdBook | null>(null);
@@ -442,13 +441,6 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
     const endPress = () => {
         if (pressRef.current.timer) window.clearTimeout(pressRef.current.timer);
     };
-
-    /** 分类清单（= 书上那个自由文本字段的去重） */
-    const cats = useMemo(() => {
-        const m = new Map<string, number>();
-        books.forEach((b) => { const c = catOf(b); m.set(c, (m.get(c) ?? 0) + 1); });
-        return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
-    }, [books]);
 
     const doDelete = async (list: RdBook[]) => {
         setConfirmDelete(null);
@@ -642,49 +634,22 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
 
     return (
         <div className="rd-screen" data-rd-page="shelf">
-            {/* 顶部一行：中间分类选择（参考图的 All ⌄）+ 右上 ··· */}
+            {/* 顶部一行：中间分类（参考图的 All ⌄）+ 右上 ···
+                点中间那颗直接进分类页（参考图 9 那张「文件夹式」的），不再弹小菜单 */}
             <div className="rd-shelf-top" style={{ position: 'relative' }}>
                 <span className="rd-shelf-top-spacer" />
-                <button className="rd-shelf-cat" onClick={() => setCatMenuOpen((v) => !v)}>
+                <button className="rd-shelf-cat" onClick={() => setView('categories')}>
                     {catFilter === '__all__' ? '全部' : catFilter}
                     <CaretDown size={13} weight="bold" />
                 </button>
                 <span className="rd-shelf-top-spacer" />
                 <button className="rd-icon-btn" onClick={() => setMenuOpen(true)} aria-label="书架菜单"><DotsThree size={22} /></button>
-
-                {catMenuOpen && (
-                    <div className="rd-sheet-mask" style={{ zIndex: 90 }} onClick={() => setCatMenuOpen(false)}>
-                        <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                            <div className="rd-sheet-grip" />
-                            <div className="rd-sheet-title">按分类看</div>
-                            <div className="rd-card rd-card-flush">
-                                <div className="rd-list">
-                                    <button className="rd-item" onClick={() => { setCatFilter('__all__'); setCatMenuOpen(false); }}>
-                                        <span className="rd-item-label">全部</span>
-                                        {catFilter === '__all__' && <span className="rd-check">✓</span>}
-                                        <span className="rd-item-value">{books.length}</span>
-                                    </button>
-                                    {cats.map(([c, n]) => (
-                                        <button key={c} className="rd-item" onClick={() => { setCatFilter(c); setCatMenuOpen(false); }}>
-                                            <span className="rd-item-label">{c}</span>
-                                            {catFilter === c && <span className="rd-check">✓</span>}
-                                            <span className="rd-item-value">{n}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
 
             <div className="rd-head">
                 <div className="rd-head-main">
                     <div className="rd-head-title">书架</div>
                     <div className="rd-head-sub">{books.length} 本 · 在读 {readingCount} 本</div>
-                </div>
-                <div className="rd-head-actions">
-                    <button className="rd-icon-btn" onClick={() => setImportOpen(true)} aria-label="导入书籍"><Plus size={20} /></button>
                 </div>
             </div>
 
@@ -748,6 +713,11 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
 
                         <div className="rd-card rd-card-flush">
                             <div className="rd-list">
+                                {/* 导入原来在页头那颗「+」上，她让收进这里 */}
+                                <button className="rd-item" onClick={() => { setMenuOpen(false); setImportOpen(true); }}>
+                                    <span className="rd-item-label">导入书籍</span>
+                                    <span className="rd-item-chev"><Plus size={16} /></span>
+                                </button>
                                 <button className="rd-item" onClick={() => { setSelecting(true); setPicked(new Set()); setMenuOpen(false); }}>
                                     <span className="rd-item-label">选择</span>
                                     <span className="rd-item-chev"><Check size={16} /></span>

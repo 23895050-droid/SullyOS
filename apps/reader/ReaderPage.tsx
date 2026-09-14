@@ -17,9 +17,14 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-    ArrowLeft, CaretLeft, CaretRight, DotsThree, Lightbulb, ListBullets, TShirt,
+    ArrowLeft, BookmarkSimple, CaretLeft, CaretRight, DotsThree, Lightbulb, ListBullets,
+    MagnifyingGlass, TShirt, X,
 } from '@phosphor-icons/react';
-import { getBook, getChapter, getProgress, putProgress, type RdBook, type RdChapter, type RdProgress } from '../../utils/reader/readerDb';
+import {
+    deleteAnnotation, getBook, getChapter, getProgress, listAnnotations, listChapters, putAnnotation,
+    putProgress, type RdAnnotation, type RdBook, type RdChapter, type RdProgress,
+} from '../../utils/reader/readerDb';
+import ReaderCover from './ReaderCover';
 import {
     pageForAnchor, paginateFlow, slicesForPage, type PageSlice, type RdPageBox,
 } from '../../utils/reader/paginate';
@@ -51,7 +56,27 @@ function fmtDuration(sec: number): string {
     return `${s} 秒`;
 }
 
-type Sheet = null | 'toc' | 'more' | 'book' | 'hl' | 'bright';
+type Sheet = null | 'toc' | 'more' | 'book' | 'hl' | 'bright' | 'hunt';
+/** 目录面板里的三个页签（参考图「左下一展开」：Chapters / Notes / Bookmarks） */
+type TocTab = 'chapters' | 'notes' | 'bookmarks';
+
+/** 书内搜索的一条命中 */
+interface HuntHit {
+    /** 第几章 */
+    ci: number;
+    /** 章里第几段 */
+    pi: number;
+    /** 段内第几个字 */
+    off: number;
+    text: string;
+    /** 全书百分比（面板上显示的那个） */
+    pct: number;
+}
+
+/** 本模块的 id 生成：不用 crypto.randomUUID（手机走 http 时它是 undefined，踩过） */
+const uid = (): string => `an_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+const fmtWords = (chars: number) => (chars >= 10000 ? `${(chars / 10000).toFixed(1)} 万字` : `${chars} 字`);
 /** 底栏里那两个「从工具排上面升起来」的面板（参考图：排版面板 / 主题面板） */
 type Panel = null | 'style' | 'theme';
 
@@ -107,6 +132,19 @@ function OptSlider({ label, min, max, step, value, onChange, fmt }: {
     );
 }
 
+/** 搜索结果里那条摘录：命中处前后各截一段，命中的字上底色（参考图 4） */
+function Excerpt({ text, at, len }: { text: string; at: number; len: number }) {
+    const from = Math.max(0, at - 20);
+    const to = Math.min(text.length, at + len + 44);
+    return (
+        <div className="rd-toc-quote">
+            {from > 0 ? '…' : ''}{text.slice(from, at)}
+            <span className="rd-hunt-hit">{text.slice(at, at + len)}</span>
+            {text.slice(at + len, to)}{to < text.length ? '…' : ''}
+        </div>
+    );
+}
+
 export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats, onBack }: Props) {
     const prefs = useReaderPrefs();
     const [book, setBook] = useState<RdBook | null>(null);
@@ -120,6 +158,17 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const [themeGroup, setThemeGroup] = useState<'color' | 'texture' | 'custom'>('color');
     const [error, setError] = useState<string | null>(null);
     const [layoutNonce, setLayoutNonce] = useState(0);
+    /** 目录面板的页签（章节 / 笔记 / 书签） */
+    const [tocTab, setTocTab] = useState<TocTab>('chapters');
+    /** 这本书的批注（书签也在里头——它是 kind='bookmark' 的一条） */
+    const [anns, setAnns] = useState<RdAnnotation[]>([]);
+    /** 当前这一页占的段号区间：书签「在不在这一页」按它判 */
+    const [pageRange, setPageRange] = useState<{ from: number; to: number } | null>(null);
+    /** 书内搜索：输入词 + 结果（null = 还没搜） */
+    const [huntWord, setHuntWord] = useState('');
+    const [hunt, setHunt] = useState<{ list: HuntHit[]; cut: boolean } | null>(null);
+    /** 全书章节缓存（搜索时要扫全文，扫一次记着） */
+    const chaptersRef = useRef<RdChapter[] | null>(null);
     const [brightness, setBrightness] = useState(0);
     /** 沉浸：点屏幕中间把上下栏藏起来 */
     const [chromeOff, setChromeOff] = useState(false);
@@ -128,8 +177,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
 
     const viewportRef = useRef<HTMLDivElement>(null);
     const flowRef = useRef<HTMLDivElement>(null);
-    /** 章节切换后要落在哪一页（页码或锚点） */
-    const pendingRef = useRef<{ page?: number; anchor?: { paraIdx: number; charOffset: number } } | null>(null);
+    /** 章节切换后要落在哪一页（页码 / 锚点 / 章的百分之几——拖进度条跨章时用最后那个） */
+    const pendingRef = useRef<{ page?: number; anchor?: { paraIdx: number; charOffset: number }; ratio?: number } | null>(null);
     /** 当前页覆盖的文本切片（V1 的数据口） */
     const currentSlicesRef = useRef<PageSlice[]>([]);
     /** 上一页的锚点：重排（字体就绪/转屏）时用它回位，别跳回第一页 */
@@ -142,6 +191,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const saveTimerRef = useRef<number | null>(null);
     const touchRef = useRef<{ x: number; y: number; t: number; locked: boolean } | null>(null);
     const restoringRef = useRef(true);
+    /** 流水要记「读的是哪本书」，而 20 秒那跳的 effect deps 是空的——用 ref 取当前值 */
+    const bookIdRef = useRef(bookId);
+    bookIdRef.current = bookId;
 
     // ── 打开书：读书目 + 恢复进度 ──
     useEffect(() => {
@@ -154,6 +206,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             const prog = await getProgress(bookId, 'user');
             // 本次阅读时长从打开这一页开始算（别拿「上次的秒数 + 固定值」糊弄）
             sessionStartRef.current = Date.now();
+            // 打开一次（日报的「打开次数 / 使用频率」靠它）
+            if (prog || b) recordReading({ open: true, bookId });
             baseSecondsRef.current = prog?.readingSeconds ?? 0;
             sessionCountRef.current = (prog?.sessionCount ?? 0) + 1;
             const startChapter = prog?.chapterIdx ?? 0;
@@ -163,6 +217,12 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         })();
         return () => { alive = false; };
     }, [bookId]);
+
+    // ── 批注（书签是其中 kind==='bookmark' 的那几条）：进页面读一次，加/删完再读一次 ──
+    const reloadAnns = useCallback(async () => {
+        try { setAnns(await listAnnotations(bookId)); } catch { /* 读不到就当没有，别挡住阅读 */ }
+    }, [bookId]);
+    useEffect(() => { void reloadAnns(); }, [reloadAnns]);
 
     // ── 章节加载 ──
     useEffect(() => {
@@ -190,6 +250,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         let idx = 0;
         if (pending?.anchor) idx = pageForAnchor(flow, next, pending.anchor.paraIdx, pending.anchor.charOffset);
         else if (typeof pending?.page === 'number') idx = Math.max(0, Math.min(pending.page, next.length - 1));
+        // 拖进度条跨章：那一章的页数得量完才知道，所以记的是「章的百分之几」
+        else if (typeof pending?.ratio === 'number') idx = Math.round(pending.ratio * Math.max(0, next.length - 1));
         else if (lastAnchorRef.current) {
             // 没有明确目标（比如字体就绪后补量）：回到「刚才读的那一页」，不是第一页
             idx = pageForAnchor(flow, next, lastAnchorRef.current.paraIdx, lastAnchorRef.current.charOffset);
@@ -266,7 +328,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const flushTick = () => {
             const now = Date.now();
             const sec = Math.round((now - last) / 1000);
-            if (sec > 0) recordReading({ sec });
+            if (sec > 0) recordReading({ sec, bookId: bookIdRef.current });
             last = now;
         };
         const t = window.setInterval(() => { flushTick(); setTick((n) => n + 1); }, 20000);
@@ -287,7 +349,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
 
     const goPage = useCallback((delta: number) => {
         if (pages.length === 0) return;
-        recordReading({ pages: 1, chars: pageChars() });   // 翻过去 = 刚把这一页读完
+        recordReading({ pages: 1, chars: pageChars(), bookId });   // 翻过去 = 刚把这一页读完
         const next = pageIdx + delta;
         if (next >= 0 && next < pages.length) { setPageIdx(next); return; }
         // 跨章
@@ -317,6 +379,11 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         if (!book || !chapter || pages.length === 0) return;
         const anchor = anchorOfCurrentPage();
         if (anchor) lastAnchorRef.current = anchor;
+        // 这一页压着哪些段（书签判定用）：切片是当下的，放在这里取就不会滞后
+        const slices = currentSlicesRef.current;
+        const from = slices[0]?.paraIdx;
+        const to = slices[slices.length - 1]?.paraIdx;
+        setPageRange((prev) => (prev && prev.from === from && prev.to === to ? prev : (from === undefined || to === undefined ? null : { from, to })));
         const percent = bookPercent(chapterIdx, pageIdx, pages.length, book.chapterCount);
         const elapsed = Math.round((Date.now() - sessionStartRef.current) / 1000);
         pendingSaveRef.current = {
@@ -384,19 +451,128 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const mySlot = prefs.highlightStyles.user ?? 1;
 
     const jumpChapter = (idx: number) => {
-        if (idx !== chapterIdx) recordReading({ pages: 1, chars: pageChars() });
+        if (idx !== chapterIdx) recordReading({ pages: 1, chars: pageChars(), bookId });
         pendingRef.current = { page: 0 };
         setChapterIdx(idx);
         setSheet(null);
     };
 
-    /** 滑轨：按全书比例跳到那一章（章节内从头开始） */
-    const scrubTo = (ratio: number) => {
+    /**
+     * 按全书比例落到某一页（底栏那条滑轨 + 工具排里那个小进度条都走它）。
+     * 同一章内直接换页；跨章时那一章还没量过，记下「章的百分之几」，量完自己落位。
+     */
+    const seekRatio = (ratio: number) => {
         if (!book || book.chapterCount <= 0) return;
-        const idx = Math.max(0, Math.min(book.chapterCount - 1, Math.floor(ratio * book.chapterCount)));
-        if (idx === chapterIdx) return;
-        jumpChapter(idx);
+        const r = Math.max(0, Math.min(0.999999, ratio));
+        const pos = r * book.chapterCount;
+        const ci = Math.min(book.chapterCount - 1, Math.floor(pos));
+        const within = pos - ci;
+        setPanel(null);
+        if (ci === chapterIdx && pages.length > 0) {
+            const target = Math.min(pages.length - 1, Math.max(0, Math.round(within * (pages.length - 1))));
+            if (target !== pageIdx) setPageIdx(target);
+            return;
+        }
+        pendingRef.current = { ratio: within };
+        setChapterIdx(ci);
     };
+
+    /** 从一条命中/书签回到它落的那一页 */
+    const jumpToAnchor = (ci: number, paraIdx: number, charOffset: number) => {
+        setSheet(null);
+        pendingRef.current = { anchor: { paraIdx, charOffset } };
+        if (ci === chapterIdx) setLayoutNonce((n) => n + 1);   // 同一章：再量一次就是落位
+        else setChapterIdx(ci);
+    };
+
+    /** 段号 → 第几章（老批注没记章节号，用书目里的段起点倒推） */
+    const chapterOfPara = useCallback((para: number) => {
+        const starts = book?.chapterStartPara ?? [];
+        let ci = 0;
+        for (let i = 0; i < starts.length; i++) if (starts[i] <= para) ci = i;
+        return ci;
+    }, [book]);
+
+    const chapterTitleOf = useCallback((ci: number) => (
+        book?.toc.find((t) => t.chapterIdx === ci)?.title ?? `第 ${ci + 1} 章`
+    ), [book]);
+
+    /** 章内位置 → 全书百分比（批注/书签列表上那个数） */
+    const percentOf = useCallback((ci: number, within: number) => {
+        if (!book || book.chapterCount <= 0) return 0;
+        const span = 100 / book.chapterCount;
+        const t = Math.max(0, Math.min(1, within));
+        return Math.round((ci * span + t * span) * 10) / 10;
+    }, [book]);
+
+    // ── 书签：夹在当前这一页上，再点一次拿掉（参考图：夹上了右上角挂条红丝带） ──
+    const markHere = useMemo(() => {
+        if (!pageRange) return null;
+        return anns.find((a) => a.kind === 'bookmark'
+            && a.anchor.startPara >= pageRange.from && a.anchor.startPara <= pageRange.to) ?? null;
+    }, [anns, pageRange]);
+    const bookmarked = !!markHere;
+
+    const toggleBookmark = async () => {
+        if (!book) return;
+        if (markHere) {
+            await deleteAnnotation(markHere.id);
+            notify('书签拿掉了');
+            await reloadAnns();
+            return;
+        }
+        const anchor = anchorOfCurrentPage();
+        if (!anchor) { notify('这一页还没排好，稍等一下再夹'); return; }
+        const first = currentSlicesRef.current[0];
+        const quote = first ? (chapter?.paras[first.paraIdx] ?? '').slice(first.startOffset, first.endOffset) : '';
+        const now = new Date().toISOString();
+        await putAnnotation({
+            id: uid(), bookId, ownerId: 'user',
+            anchor: {
+                startPara: anchor.paraIdx, startOffset: anchor.charOffset,
+                endPara: anchor.paraIdx, endOffset: anchor.charOffset,
+                text: quote.slice(0, 120),
+            },
+            kind: 'bookmark', styleSlot: 1, contentRev: book.contentRev, status: 'active',
+            chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pages.length, book.chapterCount),
+            createdAt: now, updatedAt: now,
+        });
+        notify('书签夹在这一页了');
+        await reloadAnns();
+    };
+
+    // ── 书内搜索（参考图「右上二搜索」：共找到 N 处 + 章节名/百分比 + 摘录） ──
+    const runHunt = async (raw: string) => {
+        const word = raw.trim();
+        if (!word || !book) return;
+        if (!chaptersRef.current) {
+            const all = await listChapters(bookId);
+            chaptersRef.current = [...all].sort((a, b) => a.idx - b.idx);
+        }
+        const lower = word.toLowerCase();
+        const list: HuntHit[] = [];
+        let cut = false;
+        for (const ch of chaptersRef.current) {
+            for (let pi = 0; pi < ch.paras.length; pi++) {
+                const at = ch.paras[pi].toLowerCase().indexOf(lower);
+                if (at < 0) continue;
+                list.push({
+                    ci: ch.idx, pi, off: at, text: ch.paras[pi],
+                    pct: percentOf(ch.idx, ch.paras.length > 0 ? (pi + 1) / ch.paras.length : 0),
+                });
+                if (list.length >= 200) { cut = true; break; }
+            }
+            if (cut) break;
+        }
+        setHunt({ list, cut });
+    };
+
+    const notes = useMemo(() => anns
+        .filter((a) => a.kind === 'note' || a.kind === 'highlight')
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [anns]);
+    const marks = useMemo(() => anns
+        .filter((a) => a.kind === 'bookmark')
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [anns]);
 
     const moreItems: Array<{ key: string; label: string; on: boolean; run: () => void }> = useMemo(() => [
         { key: 'read', label: '听书', on: false, run: () => notify('听书还没做，先欠着') },
@@ -427,16 +603,31 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
 
     return (
         <div className="rd-reader" data-rd-page="reader">
+            {/* 夹了书签：纸的右上角挂一条红丝带（参考图 1/3） */}
+            {bookmarked && <div className="rd-ribbon" aria-hidden />}
+
             {!chromeOff && (
                 <div className="rd-reader-bar">
                     <button className="rd-icon-btn" onClick={onBack} aria-label="返回"><ArrowLeft size={18} /></button>
                     <div className="rd-reader-bar-title">
                         {book ? `${book.title} · 第 ${chapterIdx + 1} / ${book.chapterCount} 章` : '…'}
                     </div>
-                    {/* 字号那格已经挪到底栏（A- / A+ 和排版面板里的滑杆），顶栏只留目录和更多 */}
+                    {/* 目录在底栏第一格、更多在底栏最后一格，顶栏右边只留搜索和书签 */}
                     <div className="rd-reader-bar-tools">
-                        <button className="rd-icon-btn" onClick={() => { setPanel(null); setSheet('toc'); }} aria-label="目录"><ListBullets size={19} /></button>
-                        <button className="rd-icon-btn" onClick={() => { setPanel(null); setSheet('more'); }} aria-label="更多"><DotsThree size={20} /></button>
+                        <button
+                            className="rd-icon-btn"
+                            aria-label="书内搜索"
+                            onClick={() => { setPanel(null); setSheet('hunt'); }}
+                        >
+                            <MagnifyingGlass size={19} />
+                        </button>
+                        <button
+                            className={`rd-icon-btn${bookmarked ? ' rd-tool-on' : ''}`}
+                            aria-label={bookmarked ? '取消书签' : '加书签'}
+                            onClick={() => void toggleBookmark()}
+                        >
+                            <BookmarkSimple size={19} weight={bookmarked ? 'fill' : 'regular'} />
+                        </button>
                     </div>
                 </div>
             )}
@@ -495,9 +686,15 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                                 <button className="rd-slider-nav" onClick={() => goPage(-1)} aria-label="上一页"><CaretLeft size={15} /></button>
                                 <div
                                     className="rd-slider-track"
-                                    onClick={(e) => {
+                                    onPointerDown={(e) => {
+                                        e.currentTarget.setPointerCapture(e.pointerId);
                                         const rect = e.currentTarget.getBoundingClientRect();
-                                        scrubTo((e.clientX - rect.left) / rect.width);
+                                        seekRatio((e.clientX - rect.left) / rect.width);
+                                    }}
+                                    onPointerMove={(e) => {
+                                        if (!e.buttons) return;
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        seekRatio((e.clientX - rect.left) / rect.width);
                                     }}
                                 >
                                     <div className="rd-slider-rail"><div className="rd-slider-fill" style={{ width: `${percent}%` }} /></div>
@@ -580,35 +777,159 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         </div>
                     )}
 
+                    {/* 工具排：目录 / 进度条 / 亮度 / 排版(A) / 主题 / 更多
+                        —— 左二那个不是按钮，是**进度条本体**（参考图里的 —◯—），点或拖都在调进度 */}
                     <div className="rd-reader-tools">
-                        <button className="rd-tool" onClick={() => { setPanel(null); setSheet('toc'); }}><ListBullets size={19} /></button>
-                        <button className="rd-tool" onClick={() => setTypography({ fontSize: prefs.typography.fontSize - 1 })}>A-</button>
-                        <button className={`rd-tool${brightness > 0 ? ' rd-tool-on' : ''}`} onClick={() => setSheet('bright')}><Lightbulb size={19} /></button>
-                        <button className="rd-tool" onClick={() => setTypography({ fontSize: prefs.typography.fontSize + 1 })}>A+</button>
-                        <button className={`rd-tool${panel === 'theme' ? ' rd-tool-on' : ''}`} onClick={() => setPanel(panel === 'theme' ? null : 'theme')}><TShirt size={19} /></button>
-                        <button className="rd-tool" onClick={() => { setPanel(null); setSheet('more'); }}><DotsThree size={20} /></button>
+                        <button className="rd-tool" onClick={() => { setPanel(null); setSheet('toc'); }} aria-label="目录"><ListBullets size={19} /></button>
+                        <div
+                            className="rd-seek"
+                            role="slider"
+                            aria-label="阅读进度"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={percent}
+                            onPointerDown={(e) => {
+                                e.currentTarget.setPointerCapture(e.pointerId);
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                seekRatio((e.clientX - rect.left) / rect.width);
+                            }}
+                            onPointerMove={(e) => {
+                                if (!e.buttons) return;
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                seekRatio((e.clientX - rect.left) / rect.width);
+                            }}
+                        >
+                            <div className="rd-seek-rail" />
+                            <div className="rd-seek-fill" style={{ width: `${percent}%` }} />
+                            <div className="rd-seek-knob" style={{ left: `${percent}%` }} />
+                        </div>
+                        <button className={`rd-tool${brightness > 0 ? ' rd-tool-on' : ''}`} onClick={() => setSheet('bright')} aria-label="亮度"><Lightbulb size={19} /></button>
+                        <button
+                            className={`rd-tool${panel === 'style' ? ' rd-tool-on' : ''}`}
+                            onClick={() => setPanel(panel === 'style' ? null : 'style')}
+                            aria-label="排版设置"
+                        >
+                            A
+                        </button>
+                        <button className={`rd-tool${panel === 'theme' ? ' rd-tool-on' : ''}`} onClick={() => setPanel(panel === 'theme' ? null : 'theme')} aria-label="主题"><TShirt size={19} /></button>
+                        <button className="rd-tool" onClick={() => { setPanel(null); setSheet('more'); }} aria-label="更多"><DotsThree size={20} /></button>
                     </div>
                 </div>
             )}
 
-            {/* ── 目录 ── */}
+            {/* ── 目录 / 笔记 / 书签（参考图「左下一展开」：书信息头 + 三页签 + 列表） ── */}
             {sheet === 'toc' && book && (
                 <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                    <div className="rd-sheet rd-sheet-tall" onClick={(e) => e.stopPropagation()}>
                         <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">目录</div>
-                        {book.toc.length === 0 && <div className="rd-muted">这本书没有目录</div>}
-                        <div className="rd-card rd-card-flush">
-                            <div className="rd-list">
-                                {book.toc.map((item) => (
-                                    <button key={`${item.chapterIdx}-${item.title}`} className="rd-item" onClick={() => jumpChapter(item.chapterIdx)}>
-                                        <span className="rd-item-label" style={{ fontWeight: item.chapterIdx === chapterIdx ? 600 : undefined }}>
-                                            {item.title}
-                                        </span>
-                                        {item.chapterIdx === chapterIdx && <span className="rd-item-value">在读</span>}
-                                    </button>
-                                ))}
+
+                        <div className="rd-toc-head">
+                            <div className="rd-toc-cover"><ReaderCover coverRef={book.coverRef} title={book.title} compact /></div>
+                            <div className="rd-toc-info">
+                                <div className="rd-toc-name">{book.title}</div>
+                                <div className="rd-toc-meta">
+                                    <span>共 {book.chapterCount} 章</span>
+                                    <span>{fmtWords(book.totalChars)}</span>
+                                    <span>{Math.max(1, Math.ceil(book.fileBytes / 1024))} KB</span>
+                                    <span>读过 {fmtDuration(elapsedTotal)}</span>
+                                </div>
                             </div>
+                        </div>
+
+                        <div className="rd-opt-seg" style={{ marginBottom: 'var(--rd-space-2)' }}>
+                            {([['chapters', '章节'], ['notes', '笔记'], ['bookmarks', '书签']] as Array<[TocTab, string]>).map(([k, label]) => (
+                                <button key={k} className={`rd-opt-seg-btn${tocTab === k ? ' rd-opt-seg-on' : ''}`} onClick={() => setTocTab(k)}>
+                                    {label}
+                                    {k === 'notes' && notes.length > 0 ? ` ${notes.length}` : ''}
+                                    {k === 'bookmarks' && marks.length > 0 ? ` ${marks.length}` : ''}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="rd-toc-scroll">
+                            {tocTab === 'chapters' && (book.toc.length === 0
+                                ? <div className="rd-muted">这本书没有目录</div>
+                                : book.toc.map((item) => (
+                                    <button key={`${item.chapterIdx}-${item.title}`} className="rd-toc-row" onClick={() => jumpChapter(item.chapterIdx)}>
+                                        <div className="rd-toc-row-head">
+                                            <span style={{ fontWeight: item.chapterIdx === chapterIdx ? 600 : undefined }}>{item.title}</span>
+                                            {item.chapterIdx === chapterIdx && <span className="rd-toc-pct">在读</span>}
+                                        </div>
+                                    </button>
+                                )))}
+
+                            {tocTab === 'notes' && (notes.length === 0
+                                ? <div className="rd-hunt-empty">这本书上还没有划线批注。</div>
+                                : notes.map((a) => {
+                                    const ci = chapterOfPara(a.anchor.startPara);
+                                    return (
+                                        <button key={a.id} className="rd-toc-row" onClick={() => jumpToAnchor(ci, a.anchor.startPara, a.anchor.startOffset)}>
+                                            <div className="rd-toc-row-head">
+                                                <span>{chapterTitleOf(ci)}</span>
+                                                <span className="rd-toc-pct">{percentOf(ci, 0).toFixed(2)}%</span>
+                                            </div>
+                                            <div className="rd-toc-quote">{a.note || a.anchor.text}</div>
+                                            <div className="rd-toc-time">{a.createdAt.slice(0, 10)}</div>
+                                        </button>
+                                    );
+                                }))}
+
+                            {tocTab === 'bookmarks' && (marks.length === 0
+                                ? <div className="rd-hunt-empty">还没有书签。读到想记的地方，点右上角那个书签。</div>
+                                : marks.map((a) => {
+                                    const ci = a.chapterIdx ?? chapterOfPara(a.anchor.startPara);
+                                    return (
+                                        <button key={a.id} className="rd-toc-row" onClick={() => jumpToAnchor(ci, a.anchor.startPara, a.anchor.startOffset)}>
+                                            <div className="rd-toc-row-head">
+                                                <span>{chapterTitleOf(ci)}</span>
+                                                <span className="rd-toc-pct">{(a.percent ?? percentOf(ci, 0)).toFixed(2)}%</span>
+                                            </div>
+                                            {a.anchor.text && <div className="rd-toc-quote">{a.anchor.text}</div>}
+                                            <div className="rd-toc-time">{a.createdAt.slice(0, 10)}</div>
+                                        </button>
+                                    );
+                                }))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 书内搜索（参考图「右上二搜索」：总条数 + 章节名/百分比 + 命中的字上底色） ── */}
+            {sheet === 'hunt' && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
+                    <div className="rd-sheet rd-sheet-tall" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
+                        <div className="rd-search-bar">
+                            <div className="rd-search-input">
+                                <MagnifyingGlass size={17} />
+                                <input
+                                    autoFocus
+                                    value={huntWord}
+                                    placeholder="在这本书里找"
+                                    onChange={(e) => { setHuntWord(e.target.value); if (!e.target.value.trim()) setHunt(null); }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') void runHunt(huntWord); }}
+                                />
+                                {huntWord && (
+                                    <button className="rd-search-cancel" onClick={() => { setHuntWord(''); setHunt(null); }} aria-label="清空"><X size={15} /></button>
+                                )}
+                            </div>
+                            <button className="rd-search-cancel" onClick={() => { setHunt(null); setSheet(null); }}>取消</button>
+                        </div>
+
+                        {hunt && <div className="rd-search-found">共找到 {hunt.list.length} 处{hunt.cut ? '（这里先列前面的）' : ''}</div>}
+
+                        <div className="rd-toc-scroll">
+                            {!hunt && <div className="rd-hunt-empty">打个词，回车开始找。</div>}
+                            {hunt && hunt.list.length === 0 && <div className="rd-hunt-empty">没有找到「{huntWord.trim()}」。</div>}
+                            {hunt?.list.map((hit, i) => (
+                                <button key={`${hit.ci}-${hit.pi}-${i}`} className="rd-toc-row" onClick={() => jumpToAnchor(hit.ci, hit.pi, hit.off)}>
+                                    <div className="rd-toc-row-head">
+                                        <span>{chapterTitleOf(hit.ci)}</span>
+                                        <span className="rd-toc-pct">{hit.pct.toFixed(2)}%</span>
+                                    </div>
+                                    <Excerpt text={hit.text} at={hit.off} len={Math.max(1, huntWord.trim().length)} />
+                                </button>
+                            ))}
                         </div>
                     </div>
                 </div>

@@ -135,6 +135,9 @@ export interface RdAnnotation {
     contentRev: string;
     /** orphaned = 段号对不上且回退线索也没救回来（只显示在笔记页，不上正文） */
     status: 'active' | 'orphaned';
+    /** kind==='bookmark' 时记下落点（列表上要显示「第七章 · 3.69%」，段号算不出书名） */
+    chapterIdx?: number;
+    percent?: number;
     createdAt: string;
     updatedAt: string;
 }

@@ -37,6 +37,8 @@ export const READER_VAR_KEYS = [
     '--rd-cover-a', '--rd-cover-b', '--rd-cover-ink',
     // 浮层与状态
     '--rd-scrim', '--rd-on-scrim', '--rd-veil', '--rd-danger',
+    // 书签丝带（纸上的实物红，不跟着皮肤走）
+    '--rd-ribbon',
     // 阴影
     '--rd-shadow', '--rd-shadow-sm',
 ] as const;
@@ -84,6 +86,7 @@ const BASE_SKINS: ReaderSkin[] = [
             '--rd-on-scrim': '#fbf9f6',
             '--rd-veil': '#000000',
             '--rd-danger': '#c1544f',
+            '--rd-ribbon': '#e0453a',
             '--rd-shadow': '0 10px 30px rgba(42, 38, 34, 0.10)',
             '--rd-shadow-sm': '0 2px 10px rgba(42, 38, 34, 0.06)',
         },
@@ -124,6 +127,7 @@ const BASE_SKINS: ReaderSkin[] = [
             '--rd-on-scrim': '#efebe4',
             '--rd-veil': '#000000',
             '--rd-danger': '#d97a72',
+            '--rd-ribbon': '#ef5a4d',
             '--rd-shadow': '0 10px 30px rgba(0, 0, 0, 0.45)',
             '--rd-shadow-sm': '0 2px 10px rgba(0, 0, 0, 0.35)',
         },
@@ -164,6 +168,7 @@ const BASE_SKINS: ReaderSkin[] = [
             '--rd-on-scrim': '#f7efde',
             '--rd-veil': '#000000',
             '--rd-danger': '#a8462f',
+            '--rd-ribbon': '#e0453a',
             '--rd-shadow': '0 10px 30px rgba(59, 47, 34, 0.14)',
             '--rd-shadow-sm': '0 2px 10px rgba(59, 47, 34, 0.10)',
         },
@@ -203,6 +208,7 @@ const BASE_SKINS: ReaderSkin[] = [
             '--rd-on-scrim': '#ffffff',
             '--rd-veil': '#000000',
             '--rd-danger': '#c0392b',
+            '--rd-ribbon': '#e0453a',
             '--rd-shadow': '0 10px 30px rgba(24, 24, 27, 0.10)',
             '--rd-shadow-sm': '0 2px 10px rgba(24, 24, 27, 0.06)',
         },
@@ -280,6 +286,7 @@ function derived(id: string, label: string, seed: SkinSeed, dark = false): Reade
             '--rd-on-scrim': onScrim,
             '--rd-veil': '#000000',
             '--rd-danger': dark ? '#d97a72' : '#c1544f',
+            '--rd-ribbon': dark ? '#ef5a4d' : '#e0453a',
             '--rd-shadow': `0 10px 30px ${alpha(ink, dark ? 0.45 : 0.10)}`,
             '--rd-shadow-sm': `0 2px 10px ${alpha(ink, dark ? 0.35 : 0.06)}`,
         },

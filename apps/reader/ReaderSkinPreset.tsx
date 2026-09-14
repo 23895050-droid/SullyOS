@@ -36,18 +36,17 @@ function varsToCss(selector: string, vars: Record<string, string | number>): str
 export function typographyVars(t: ReaderTypography): Record<string, string> {
     const stack = FONT_STACKS[t.fontFamily] ?? FONT_STACKS.serif;
     const body = Math.max(12, Math.min(30, Math.round(t.fontSize)));
-    /** 界面字号跟着正文字号整体缩放，但有上下限——调到 26px 正文时标题不该涨到 40px */
-    const scale = (k: number, min: number, max: number) => `${Math.round(Math.max(min, Math.min(max, body * k)))}px`;
+    /** 只有「书里的字」跟着正文字号走：正文 + 章标题（章标题略大一点，上下限兜住） */
+    const bookSize = (k: number, min: number, max: number) => `${Math.round(Math.max(min, Math.min(max, body * k)))}px`;
     return {
         '--rd-font-body': stack.body,
         '--rd-font-heading': stack.heading,
+        // 书里的字：跟用户设的字号
         '--rd-fs-body': `${body}px`,
-        '--rd-fs-hero': scale(1.75, 26, 34),
-        '--rd-fs-title': scale(1.35, 20, 28),
-        '--rd-fs-lg': scale(1.1, 17, 22),
-        '--rd-fs-md': scale(0.9, 14, 18),
-        '--rd-fs-sm': scale(0.78, 12, 15),
-        '--rd-fs-caption': scale(0.7, 11, 13),
+        '--rd-fs-chapter': bookSize(1.3, 19, 30),
+        // 界面上的字：**固定**。以前这里拿 body 乘系数，结果调正文字号把书架标题、
+        // 设置行、统计数字全顶起来了（她 2026-09-15 报的）。界面字号回骨架层的默认那套，
+        // 想改界面字号的走自定义 CSS（--rd-fs-hero 等一样能被覆盖）。
         '--rd-lh-body': String(Math.max(1.2, Math.min(3, t.lineHeight))),
         '--rd-para-gap': `${Math.max(0, Math.round(t.paragraphSpacing))}px`,
         '--rd-para-indent': `${Math.max(0, t.paragraphIndent)}em`,

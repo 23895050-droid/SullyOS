@@ -9,13 +9,19 @@
 // 数据来源分两处（口径写在 utils/reader/readerStats.ts 顶上）：
 //   · 总阅读时长 = rd_progress.readingSeconds 按书聚合（含流水开始记之前的旧账）
 //   · 每天读多久 / 翻页次数 / 阅读字数 = 阅读流水（localStorage，按天）
-//   · 时段分布 = 流水里的 24 个小时桶（全局累计，不分视图）
+//   · 时段分布 = 流水里那天的 24 个小时桶（**按天**——以前是全局一格，所以不分视图，她报过）
 
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpenText, CalendarBlank, CaretLeft, CaretRight, ChartBar, Clock, Flame, Lightning, TextAa, Trophy } from '@phosphor-icons/react';
+import {
+    ArrowUp, BookOpenText, CalendarBlank, CaretLeft, CaretRight, ChartBar, Clock, Flame, Hourglass,
+    Lightning, Sun, Target, TextAa, Trophy,
+} from '@phosphor-icons/react';
+import ReaderCover from '../ReaderCover';
+import DailyReport from './ReaderDaily';
 import { listBooks, listProgressByBook, type RdBook, type RdProgress } from '../../../utils/reader/readerDb';
 import {
-    dayKeyOf, fmtChars, fmtSec, heatLevel, loadStats, recentKeys, streakDays, sumDays,
+    dayBooks, dayKeyOf, dayOf, efficiency, fmtChars, fmtClock, fmtSec, fmtShort, heatLevel, loadStats,
+    partSeconds, peakPart, recentKeys, streakDays, sumDays, sumHours,
     type DayStat, type ReaderStatsData,
 } from '../../../utils/reader/readerStats';
 
@@ -34,6 +40,14 @@ const SPANS: Array<{ key: Span; label: string }> = [
 ];
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+
+/** 日期键往前/往后挪一天 */
+function shiftDay(key: string, delta: number): string {
+    const [y, m, d] = key.split('-').map(Number);
+    const t = new Date(y, (m ?? 1) - 1, d ?? 1);
+    t.setDate(t.getDate() + delta);
+    return dayKeyOf(t);
+}
 
 /** 书的短名（柱状图下面那行小字） */
 const shortName = (t: string) => (t.length > 4 ? t.slice(0, 4) : t);
@@ -97,6 +111,8 @@ export default function ReaderStats({ refreshToken }: Props) {
     const [owner, setOwner] = useState<string>('user');
     const [span, setSpan] = useState<Span>('total');
     const [year, setYear] = useState<number>(() => new Date().getFullYear());
+    /** 日报看的是哪一天（默认今天，能往前翻） */
+    const [dayPick, setDayPick] = useState<string>(() => dayKeyOf(new Date()));
 
     useEffect(() => { setLedger(loadStats()); }, [refreshToken, span]);
 
@@ -217,6 +233,8 @@ export default function ReaderStats({ refreshToken }: Props) {
     }, [rows]);
 
     const today = days[todayKey] ?? { sec: 0, pages: 0, chars: 0 };
+    /** 日报要书名和封面，按书号查 */
+    const bookMap = useMemo(() => new Map(rows.map((r) => [r.book.id, r.book])), [rows]);
     const yearDayCount = yearKeys.filter((k) => (days[k]?.sec ?? 0) > 0).length;
 
     /** 总视图的四个格子（数字随视图换） */
@@ -317,19 +335,19 @@ export default function ReaderStats({ refreshToken }: Props) {
                 </>
             ) : span === 'day' ? (
                 <>
-                    <div className="rd-hello">
-                        <div className="rd-hello-big">今天</div>
-                        <div className="rd-stat-tile-cap" style={{ marginTop: 4 }}>
-                            {today.sec > 0 ? `读了 ${fmtSec(today.sec).big}${fmtSec(today.sec).unit}` : '今天还没翻开书'}
-                            {` · 连续 ${streak} 天`}
-                        </div>
+                    {/* 日报是按天看的，所以先给个日期条（默认今天，一直能往前翻） */}
+                    <div className="rd-yearbar">
+                        <button className="rd-icon-btn" onClick={() => setDayPick((k) => shiftDay(k, -1))} aria-label="前一天"><CaretLeft size={17} /></button>
+                        <div className="rd-yearbar-title">{dayPick === todayKey ? '今天' : `${Number(dayPick.slice(5, 7))} 月 ${Number(dayPick.slice(8, 10))} 日`}</div>
+                        <button
+                            className="rd-icon-btn"
+                            onClick={() => setDayPick((k) => (k >= todayKey ? k : shiftDay(k, 1)))}
+                            aria-label="后一天"
+                        >
+                            <CaretRight size={17} />
+                        </button>
                     </div>
-                    <div className="rd-stat-grid">{tiles(today)}</div>
-                    <div className="rd-stat-hero">
-                        <div className="rd-stat-cap">阅读习惯</div>
-                        <div className="rd-stat-cap" style={{ marginBottom: 8 }}>一天里什么时候在读（全部时间累计）</div>
-                        <Hours hours={ledger.hours} />
-                    </div>
+                    <DailyReport dayKey={dayPick} day={dayOf(ledger, dayPick)} books={bookMap} />
                 </>
             ) : span === 'week' ? (
                 <>
@@ -439,8 +457,8 @@ export default function ReaderStats({ refreshToken }: Props) {
 
                     <div className="rd-stat-hero">
                         <div className="rd-stat-cap">阅读习惯</div>
-                        <div className="rd-stat-cap" style={{ marginBottom: 8 }}>一天里什么时候在读</div>
-                        <Hours hours={ledger.hours} />
+                        <div className="rd-stat-cap" style={{ marginBottom: 8 }}>一天里什么时候在读（{year} 年）</div>
+                        <Hours hours={sumHours(days, yearKeys)} />
                     </div>
 
                     {recentBook && (
