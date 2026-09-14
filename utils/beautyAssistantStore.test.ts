@@ -7,6 +7,7 @@ import {
   clearAssistantMessages, deleteAssistantMessage, addAssistantFavorite, renameAssistantFavorite, updateAssistantFavoriteCss,
   deleteAssistantFavorite, buildFavoritesExportText, setAssistantCodeFold,
   saveAssistantTheme, saveAssistantThemePreset, loadAssistantThemePreset, deleteAssistantThemePreset,
+  setAssistantPendingChat, lastAssistantUsage, assistantStoreApi,
   type AssistantMsg,
 } from './beautyAssistantStore';
 
@@ -210,5 +211,32 @@ describe('调色台预设', () => {
     expect(presets).toHaveLength(12);
     expect(presets[0].name).toBe('预设1'); // 预设0 被挤掉
     expect(saveAssistantThemePreset('   ')).toBe(false);
+  });
+});
+
+// 批F（2026-09-14）：后台生成 pending + 最近一轮 token
+describe('后台生成与用量', () => {
+  it('pendingChat 写进 store 并随 localStorage 持久化（离页回来接得上）', () => {
+    setAssistantPendingChat({ status: 'running', key: 's1', startedAt: 1000, stream: '半截正文' });
+    expect(getAssistant().pendingChat?.stream).toBe('半截正文');
+    __reloadAssistantForTest(); // 模拟下次打开页面
+    expect(getAssistant().pendingChat?.key).toBe('s1');
+    setAssistantPendingChat(undefined);
+    expect(getAssistant().pendingChat).toBeUndefined();
+  });
+
+  it('lastAssistantUsage 取最近一条带 usage 的消息；没有就 null（供应商不回传用量）', () => {
+    expect(lastAssistantUsage()).toBeNull();
+    ensureAssistantSession(); // 追加消息要有当前任务（没任务时 store 不落盘）
+    appendAssistantMessages([{ ...msg('a1', 'assistant', 'x'), usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 } }]);
+    appendAssistantMessages([msg('a2', 'assistant', 'y')]);
+    expect(lastAssistantUsage()).toEqual({ promptTokens: 10, completionTokens: 2, totalTokens: 12 });
+    appendAssistantMessages([{ ...msg('a3', 'assistant', 'z'), usage: { promptTokens: 99, completionTokens: 1, totalTokens: 100 } }]);
+    expect(lastAssistantUsage()?.totalTokens).toBe(100);
+  });
+
+  it('assistantStoreApi 是 bgTask 要的 get/set 句柄', () => {
+    assistantStoreApi.set((s) => ({ ...s, name: '改个名' }));
+    expect(assistantStoreApi.get().name).toBe('改个名');
   });
 });

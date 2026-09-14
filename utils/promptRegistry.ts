@@ -370,15 +370,16 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '【代码块】.as-code：AI 回复里的 CSS 代码卡片（顶部标签条「css」+ 复制/收藏/应用/折叠四个小按钮，下面是等宽字 pre 正文）。\n' +
       '【交付文件卡】.as-code-file：代码块被折叠后变成的文件卡（文件图标 + 文件名.txt + 字符数 + 下载/引用按钮 + 展开箭头）——它和 .as-code 是同一个东西的两种形态，美化时一起考虑。\n' +
       '【附件条】.as-attach-bar：用户选了图片/引用文件后在输入行上方出现的横条（虚线加号钮 .as-attach-add 续加图片 + 图片缩略图 + 文件胶囊 .as-attach-chip，各带小 X 移除钮）。\n' +
-      '【输入行】底部一行：左侧加号圆钮 .as-plus-btn + 聊天输入框 + 右侧渐变发送圆钮 .as-send-btn。\n' +
+      '【输入行】底部一行：左侧加号圆钮 .as-plus-btn + 聊天输入框（外层包裹 .as-input-wrap，框内右侧还有展开长文的小圆钮 .as-expand-btn）+ 右侧渐变发送圆钮 .as-send-btn。生成失败时输入行上方会出现提示条 .as-warn-strip（原因 + 重试 .as-warn-retry + 知道了 .as-warn-dismiss）。\n' +
       '【加号面板】.as-plus-panel 只是外层容器（自己没背景）；白色的面板卡是它内层的 .as-plus-card——改面板底色/圆角/阴影认准 .as-plus-card + !important，只改 .as-plus-panel 会把颜色垫在白卡下面像一块黑底片。\n' +
       '【弹窗】.as-modal 是半透明遮罩层（本来就带深色，改它的背景不是换肤）；真正要改的白卡是 .as-modal-card——设置、收藏夹、任务存档、长按菜单等每一张弹窗卡都长这样。\n\n' +
       '元素对照（容易改错的地方，照着选）：\n' +
       '· 聊天输入框 = .as-input（<input> 元素，没有 type 属性——不要用 input[type="text"] 选择器，匹配不到它）\n' +
-      '· AI 消息的正文文字 = .as-ai-text（12px 字号写在这个内层 div 上——只改 .as-bubble-ai 的字号改不到正文，继承会被内层显式字号挡住）；用户消息的文字直接写在 .as-bubble-user 上。想把字整体调大就两个一起写 + !important\n' +
-      '· 代码块正文 pre = .as-code-text（10px 字号在它上面）\n' +
+      '· AI 消息的正文文字 = .as-ai-text（14px 字号写在这个内层 div 上——只改 .as-bubble-ai 的字号改不到正文，继承会被内层显式字号挡住）；用户消息的文字直接写在 .as-bubble-user 上。想把字整体调大就两个一起写 + !important\n' +
+      '· 代码块正文 pre = .as-code-text（11px 字号在它上面）\n' +
       '· 弹窗里的所有输入框和文字域（设置里的名字/API 三项/预设名、收藏夹里的片段名和 CSS 内容、修改消息的输入）统一 = .as-field——要统一改弹窗输入样式就写 .as-field + !important\n' +
       '· CSS 编辑弹层的代码输入 = .as-css-editor（<textarea>）；要单独改它写 .as-css-editor\n' +
+      '· 长文编辑弹层里的大文本框 = .as-expand-editor（<textarea>）；设置面板里「最近一轮 token」那行 = .as-token-row\n' +
       '· 加号面板里的模块/页面/卡片选择小胶囊按钮 = .as-chip（三行都是它）；面板底部四个入口按钮 = .as-panel-btn\n' +
       '· 要改「聊天输入框」写 .as-input，别写 textarea（那是代码编辑器）\n\n' +
       '为什么有时候改不动：这个页面大量控件用内联样式（输入框、发送键、气泡、弹窗卡片都是），普通选择器优先级打不过内联样式——不是选择器写错了，用 .as-* 类 + !important 才有效。\n' +

@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, GearSix, PaperPlaneTilt, Copy, PaintBrush, Trash, Plus, PencilSimple,
   ImageSquare, BookmarkSimple, DownloadSimple, X, CaretDown, CheckSquare, FolderSimple, Stop,
-  FileText, CaretRight, Paperclip,
+  FileText, CaretRight, Paperclip, ArrowsOutSimple, WarningCircle, Coins,
 } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
 import { getPrompt, savePrompt, resetPrompt, isPromptOverridden, getPromptEntries } from '../utils/promptRegistry';
@@ -30,9 +30,15 @@ import {
   ensureAssistantSession, newAssistantSession, switchAssistantSession, deleteAssistantSession,
   setAssistantCodeFold,
   saveAssistantThemePreset, loadAssistantThemePreset, deleteAssistantThemePreset,
-  type AssistantMsg, type AssistantAttachment,
+  assistantStoreApi, setAssistantPendingChat, lastAssistantUsage,
+  type AssistantMsg, type AssistantAttachment, type AssistantUsage,
 } from '../utils/beautyAssistantStore';
+import { startBgTaskForResult, isBgTaskStale } from '../utils/bgTask';
 import DataBackupPanel from './couple/DataBackupPanel';
+
+// 后台生成的中断句柄（2026-09-14 批F）：放模块级而不是组件 ref——离页（组件卸载）时
+// 生成照跑，只有点「停止」才中断；切页回来还能接着停。
+let assistantAbort: AbortController | null = null;
 
 // ── 工作模式树（2026-08-30 重构）：模块 → 页面 → 卡片。
 //    页面 key 同时是 CSS 槽位：'base' = cssGlobal、'self' = 小助手自己页面（cssSelf），其余 = musicStore.cssPages[key]。
@@ -128,8 +134,6 @@ const AssistantApp: React.FC = () => {
   const [mode, setMode] = useState<PageKey>('player');
   const [card, setCard] = useState<string>('whole');
   const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [streaming, setStreaming] = useState('');
   const [showPlus, setShowPlus] = useState(false);
   const [showFavs, setShowFavs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -169,9 +173,20 @@ const AssistantApp: React.FC = () => {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const endRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const busyRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // 长文编辑（2026-09-14 批F）：输入行上那个「展开」按钮 → 全屏大文本框
+  const [expandOpen, setExpandOpen] = useState(false);
+  const [expandDraft, setExpandDraft] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // 后台生成态（2026-09-14 批F）：一律从 store.pendingChat 推导——生成中离页不断线，
+  // 回来看得到半截正文；页面重载超过 10 分钟判「上次中断」，给重试。
+  const pendingChat = store.pendingChat;
+  const chatRunning = !!pendingChat && pendingChat.status === 'running' && !isBgTaskStale(pendingChat);
+  const chatStale = !!pendingChat && pendingChat.status === 'running' && isBgTaskStale(pendingChat);
+  const chatFailed = !!pendingChat && pendingChat.status === 'failed';
+  // 半截正文只在「它属于当前任务」时显示（后台可能在给别的任务干活）
+  const streamText = chatRunning && pendingChat?.key === store.activeSessionId ? (pendingChat.stream ?? '') : '';
 
   const userName = userProfile?.name || '你';
   const pageInfo = pageOf(mode);
@@ -189,9 +204,8 @@ const AssistantApp: React.FC = () => {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [store.messages.length, streaming, store.activeSessionId]);
+  }, [store.messages.length, streamText, store.activeSessionId]);
 
-  useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   // 小助手自己页面的 CSS 注入（2026-08-30：美化他也可以写他自己）
   useEffect(() => {
@@ -313,11 +327,12 @@ const AssistantApp: React.FC = () => {
     ].join('\n\n');
   };
 
-  /** 发消息：文字 + 附件条里攒好的附件一起走（2026-08-31 附件化，不自动发了） */
+  /** 发消息：文字 + 附件条里攒好的附件一起走（2026-08-31 附件化，不自动发了）。
+   *  用户消息立刻落库，生成交给 runAssistantChat（后台跑）。 */
   const send = (text?: string) => {
     const content = (text ?? input).trim();
     const attachments = [...draftAttachments];
-    if ((!content && attachments.length === 0) || busyRef.current) return;
+    if ((!content && attachments.length === 0) || chatRunning) return;
     const api = getAssistant().api;
     if (!api?.baseUrl || !api.apiKey || !api.model) {
       addToast('先给小助手配一个专属 API（齿轮里）', 'info');
@@ -327,49 +342,81 @@ const AssistantApp: React.FC = () => {
     setInput('');
     setShowPlus(false);
     setDraftAttachments([]);
-    busyRef.current = true;
-    setBusy(true);
-    setStreaming('');
 
     // 任务存档：没有任务就现建一个，消息只进当前任务
     const sessionId = ensureAssistantSession();
     const userMsg: AssistantMsg = {
       id: `as-${Date.now()}-u`, role: 'user', content,
       attachments: attachments.length > 0 ? attachments : undefined,
+      sessionId: sessionId ?? undefined,
       at: new Date().toISOString(),
     };
-    appendAssistantMessages([userMsg]);
+    appendAssistantMessages([userMsg], sessionId ?? undefined);
+    runAssistantChat(sessionId);
+  };
 
-    // 上下文只看当前任务的对话（任务之间互不共享，和上游工作台同款隔离）。
-    // 附件化规则（2026-08-31）：历史 AI 消息里已折叠的代码块只留文件名占位；
-    // 用户挂的文件附件按「消息 id + 序号」注入完整代码；图片附件转 image_url。
-    const all = getAssistant().messages;
-    const history = all.filter((m) => m.sessionId === sessionId);
-    const codeFold = getAssistant().codeFold;
-    const apiMessages = [
-      { role: 'system' as const, content: buildSystemPrompt() },
-      ...history.slice(-30).map((m) =>
-        m.role === 'user'
-          ? { role: 'user' as const, content: buildAssistantUserParts(m, all) }
-          : { role: 'assistant' as const, content: foldFoldedCodeBlocks(m.content, m.id, codeFold) },
-      ),
-    ];
+  /** 重试：用户消息已经在库里了，按原任务直接重跑一轮（不重复写用户消息） */
+  const retryAssistantChat = () => {
+    const key = pendingChat?.key;
+    if (key === undefined) return;
+    runAssistantChat(key || null);
+  };
 
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
+  /** 停止当前生成：句柄是模块级的，切页回来也停得掉；页面重载过就没真句柄了 → 直接放弃这轮 */
+  const stopAssistantChat = () => {
+    if (assistantAbort) { assistantAbort.abort(); addToast('正在停止…', 'info'); }
+    else { setAssistantPendingChat(undefined); addToast('已放弃这轮（页面重载过，它其实没在跑）', 'info'); }
+  };
 
-    void (async () => {
+  /** 跑一轮生成（2026-09-14 批F：走 bgTask 后台——离页不断线、生成完自动落消息、失败留在 pending 可重试） */
+  const runAssistantChat = (sessionId: string | null) => {
+    const api = getAssistant().api;
+    if (!api?.baseUrl || !api.apiKey || !api.model) {
+      addToast('先给小助手配一个专属 API（齿轮里）', 'info');
+      setShowSettings(true);
+      return;
+    }
+    const key = sessionId ?? '';
+    const startedAt = Date.now();
+    void startBgTaskForResult(assistantStoreApi, 'pendingChat', key, async () => {
+      // 上下文只看当前任务的对话（任务之间互不共享，和上游工作台同款隔离）。
+      // 附件化规则（2026-08-31）：历史 AI 消息里已折叠的代码块只留文件名占位；
+      // 用户挂的文件附件按「消息 id + 序号」注入完整代码；图片附件转 image_url。
+      const all = getAssistant().messages;
+      const history = all.filter((m) => m.sessionId === sessionId);
+      const codeFold = getAssistant().codeFold;
+      const apiMessages = [
+        { role: 'system' as const, content: buildSystemPrompt() },
+        ...history.slice(-30).map((m) =>
+          m.role === 'user'
+            ? { role: 'user' as const, content: buildAssistantUserParts(m, all) }
+            : { role: 'assistant' as const, content: foldFoldedCodeBlocks(m.content, m.id, codeFold) },
+        ),
+      ];
+
+      const abort = new AbortController();
+      assistantAbort = abort;
       // buffer/fullContent 在 try 外面声明：手动停止（AbortError）时 catch 要拿 fullContent 落半截消息
       let buffer = '';
       let fullContent = '';
+      let usage: AssistantUsage | undefined;
+      // 边流边把正文写进 pendingChat（bgTask 只认 pending 字段）：切任务/离页回来接着显示半截。
+      // 节流 400ms——每次写都落 localStorage，整份消息树序列化一遍，逐 token 写会卡。
+      let lastPushAt = 0;
+      const pushStream = () => {
+        const now = Date.now();
+        if (now - lastPushAt < 400) return;
+        lastPushAt = now;
+        setAssistantPendingChat({ status: 'running', key, startedAt, stream: fullContent });
+      };
       try {
         const baseUrl = String(api.baseUrl).replace(/\/+$/, '');
         const res = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey}` },
-          // 一次输出很多（含代码），额度给够（她的前端 API 按次计费，返回太少反而亏）
-          body: JSON.stringify({ model: api.model, messages: apiMessages, max_tokens: 16000, stream: true }),
+          // 一次输出很多（含代码），额度给够（她的前端 API 按次计费，返回太少反而亏）；
+          // include_usage = 末块回传本轮 token 用量（供应商不支持就自然没有，显示成「—」）
+          body: JSON.stringify({ model: api.model, messages: apiMessages, max_tokens: 16000, stream: true, stream_options: { include_usage: true } }),
           signal: abort.signal,
         });
         if (!res.ok) {
@@ -395,30 +442,45 @@ const AssistantApp: React.FC = () => {
               const delta = parsed.choices?.[0]?.delta?.content;
               if (delta) {
                 fullContent += delta;
-                setStreaming(fullContent);
+                pushStream();
+              }
+              if (parsed.usage) {
+                usage = {
+                  promptTokens: Number(parsed.usage.prompt_tokens) || 0,
+                  completionTokens: Number(parsed.usage.completion_tokens) || 0,
+                  totalTokens: Number(parsed.usage.total_tokens) || 0,
+                };
               }
             } catch { /* 忽略坏行 */ }
           }
         }
-        const assistantMsg: AssistantMsg = { id: `as-${Date.now()}-a`, role: 'assistant', content: fullContent.trim(), at: new Date().toISOString() };
-        appendAssistantMessages([assistantMsg]);
+      if (fullContent.trim()) {
+        appendAssistantMessages([{
+          id: `as-${Date.now()}-a`, role: 'assistant', content: fullContent.trim(),
+          sessionId: sessionId ?? undefined, usage, at: new Date().toISOString(),
+        }], sessionId ?? undefined); // 点名任务：后台跑完时她可能已经切走了，结果不能落错任务
+      }
       } catch (e: any) {
         if (e?.name === 'AbortError') {
-          // 手动停止：已经流出来的内容别白写，保留成一条消息
+          // 手动停止：已经流出来的内容别白写，保留成一条消息（正常返回，不算失败）
           if (fullContent.trim()) {
-            const partialMsg: AssistantMsg = { id: `as-${Date.now()}-a`, role: 'assistant', content: fullContent.trim(), at: new Date().toISOString() };
-            appendAssistantMessages([partialMsg]);
+            appendAssistantMessages([{
+              id: `as-${Date.now()}-a`, role: 'assistant', content: fullContent.trim(),
+              sessionId: sessionId ?? undefined, at: new Date().toISOString(),
+            }], sessionId ?? undefined);
           }
           addToast('已停止', 'info');
-        } else {
-          addToast(`小助手出错了：${e?.message || '网络错误'}`, 'error');
+          return;
         }
+        // 别的错（网络/HTTP）交给 bgTask 记成 failed：输入行上面的提示条显示原因 + 重试
+        throw e;
       } finally {
-        busyRef.current = false;
-        setBusy(false);
-        setStreaming('');
+        assistantAbort = null;
       }
-    })();
+    }).then(({ started, result }) => {
+      if (!started) return;
+      if (result === null) addToast('小助手出错了，看输入框上面的提示条', 'error');
+    });
   };
 
   /** 选图 → 进附件条（2026-08-31 附件化：不自动发送，攒齐了点发送才走） */
@@ -482,8 +544,8 @@ const AssistantApp: React.FC = () => {
         {parts.map((part, i) => {
           if (part.type === 'text') {
             return (
-              /* as-ai-text = AI 正文文字层（12px 字号在这上面，改气泡字号认准它） */
-              <div key={`${keyPrefix}-t${i}`} className="as-ai-text text-[12px] leading-relaxed whitespace-pre-wrap" style={{ color: colors.text }}>
+              /* as-ai-text = AI 正文文字层（14px 字号在这上面，改气泡字号认准它） */
+              <div key={`${keyPrefix}-t${i}`} className="as-ai-text text-sm leading-relaxed whitespace-pre-wrap" style={{ color: colors.text }}>
                 {part.content}
               </div>
             );
@@ -564,7 +626,7 @@ const AssistantApp: React.FC = () => {
                   )}
                 </div>
               </div>
-              <pre className="as-code-text px-2.5 py-2 overflow-x-auto text-[10px] leading-relaxed"
+              <pre className="as-code-text px-3 py-2 overflow-x-auto text-[11px] leading-relaxed"
                 style={{ color: colors.text, fontFamily: `'SF Mono','Cascadia Code',Consolas,monospace`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {part.content}
               </pre>
@@ -629,7 +691,7 @@ const AssistantApp: React.FC = () => {
 
       {/* 消息流（只看当前任务的对话） */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 relative z-10">
-        {sessionMessages.length === 0 && !streaming && (
+        {sessionMessages.length === 0 && !streamText && (
           <div className="pt-16 flex flex-col items-center gap-2.5" style={{ color: colors.faint }}>
             <PaintBrush size={22} color={colors.accent} />
             <div className="text-[11px] italic tracking-wider">告诉 {store.name} 想把哪页变成什么样</div>
@@ -652,11 +714,13 @@ const AssistantApp: React.FC = () => {
             onToggleSelect={() => toggleSelect(m.id)}
           />
         ))}
-        {streaming && (
+        {(streamText || (chatRunning && pendingChat?.key === store.activeSessionId)) && (
           <div className="flex justify-start">
-            <div className="max-w-[88%] rounded-2xl px-3 py-2" style={bubbleStyle(false)}>
-              {renderAssistantContent(streaming, 'stream')}
-              <span className="inline-block w-1.5 h-3 ml-0.5 align-middle animate-pulse" style={{ background: colors.primary }} />
+            <div className="as-bubble-ai max-w-[86%] rounded-2xl px-4 py-2.5" style={bubbleStyle(false)}>
+              {streamText
+                ? renderAssistantContent(streamText, 'stream')
+                : <span className="text-[13px] italic" style={{ color: colors.muted }}>{store.name} 正在写…</span>}
+              <span className="inline-block w-1.5 h-3.5 ml-0.5 align-middle animate-pulse" style={{ background: colors.primary }} />
             </div>
           </div>
         )}
@@ -828,6 +892,26 @@ const AssistantApp: React.FC = () => {
               )}
             </div>
           )}
+          {/* 生成失败/中断提示条（2026-09-14 批F）：原因 + 重试 + 知道了 */}
+          {(chatFailed || chatStale) && (
+            <div className="as-warn-strip flex items-center gap-2 rounded-2xl px-3 py-2 mb-2"
+              style={{ background: 'rgba(255,241,238,0.95)', border: '1px solid rgba(224,91,110,0.28)' }}>
+              <WarningCircle size={15} color="#e05b6e" className="shrink-0" />
+              <span className="text-[11px] flex-1 min-w-0 truncate" style={{ color: '#a8443f' }}>
+                {chatStale ? '上次生成中断了（页面重载过）' : `上次生成失败：${pendingChat?.error || '网络错误'}`}
+              </span>
+              <button onClick={retryAssistantChat}
+                className="as-warn-retry shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold text-white border-0 cursor-pointer"
+                style={{ background: 'linear-gradient(135deg, #e05b6e, #c96a8e)' }}>
+                重试
+              </button>
+              <button onClick={() => setAssistantPendingChat(undefined)}
+                className="as-warn-dismiss shrink-0 px-1 text-[10px] border-0 bg-transparent cursor-pointer"
+                style={{ color: colors.faint }}>
+                知道了
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowPlus((v) => !v)}
@@ -837,32 +921,43 @@ const AssistantApp: React.FC = () => {
             >
               <Plus size={17} weight="bold" />
             </button>
-            {/* as-input = 聊天输入框（<input> 无 type 属性——别用 input[type="text"] 选择器，匹配不到） */}
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(); }}
-              placeholder={`想让 ${pageInfo.label} 变成什么样？`}
-              className="as-input flex-1 min-w-0 rounded-full px-4 py-2.5 outline-none text-[12px]"
-              style={{ color: colors.text, background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(201,106,142,0.18)' }}
-            />
+            {/* as-input = 聊天输入框（<input> 无 type 属性——别用 input[type="text"] 选择器，匹配不到）
+                行内还是单行快发；长文走右边那个展开键（2026-09-14 批F 她要求） */}
+            <div className="as-input-wrap flex-1 min-w-0 relative flex items-center">
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(); }}
+                placeholder={`想让 ${pageInfo.label} 变成什么样？`}
+                className="as-input w-full min-w-0 rounded-full pl-4 pr-10 py-3 outline-none text-[15px]"
+                style={{ color: colors.text, background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(201,106,142,0.18)' }}
+              />
+              <button
+                onClick={() => { setExpandDraft(input); setExpandOpen(true); }}
+                className="as-expand-btn absolute right-1.5 w-8 h-8 rounded-full flex items-center justify-center border-0 bg-transparent cursor-pointer transition-all active:scale-90"
+                style={{ color: colors.muted }}
+                aria-label="展开编辑长文"
+              >
+                <ArrowsOutSimple size={15} weight="bold" />
+              </button>
+            </div>
             <button
-              onClick={() => { if (busy) { abortRef.current?.abort(); } else { send(); } }}
+              onClick={() => { if (chatRunning) { stopAssistantChat(); } else { send(); } }}
               className="as-send-btn w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90"
-              style={busy
+              style={chatRunning
                 ? { background: 'rgba(255,255,255,0.85)', color: '#e05b6e', border: '1.5px solid rgba(224,91,110,0.5)' }
                 : { background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`, color: '#fff', boxShadow: '0 3px 12px rgba(201,106,142,0.3)' }}
-              aria-label={busy ? '停止' : '发送'}
+              aria-label={chatRunning ? '停止' : '发送'}
             >
-              {busy ? (
+              {chatRunning ? (
                 <Stop size={16} weight="fill" />
               ) : (
                 <PaperPlaneTilt size={16} weight="fill" />
               )}
             </button>
           </div>
-          <div className="text-center text-[8px] mt-1" style={{ color: colors.faint }}>
-            专属 API · 一次输出很多 · 代码块可复制 / 收藏 / 一键应用
+          <div className="text-center text-[9px] mt-1.5" style={{ color: colors.faint }}>
+            专属 API · 一次输出很多 · 长文点 ⤢ 展开编辑 · 生成中可以离开这个页面
           </div>
         </div>
       )}
@@ -910,6 +1005,48 @@ const AssistantApp: React.FC = () => {
                 style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
               >
                 完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 长文编辑弹层（2026-09-14 批F 她要求）：输入行太小 → 展开写长文，写完直接发 */}
+      {expandOpen && (
+        <div className="as-modal fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(60,30,44,0.3)' }} onClick={() => setExpandOpen(false)}>
+          <div className="as-modal-card w-full max-h-[82vh] rounded-t-3xl p-4 flex flex-col"
+            style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 -12px 40px rgba(0,0,0,0.18)', paddingBottom: 'calc(1rem + var(--safe-bottom))' }}
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <div className="text-[14px] font-bold" style={{ color: colors.text }}>写长文</div>
+                <div className="text-[10px] mt-0.5" style={{ color: colors.faint }}>换行随便用；发送时附件条里攒的图/文件一起走</div>
+              </div>
+              <button onClick={() => setExpandOpen(false)} className="px-2 text-xl leading-none border-0 bg-transparent cursor-pointer" style={{ color: colors.muted }}>×</button>
+            </div>
+            <textarea
+              value={expandDraft}
+              onChange={(e) => setExpandDraft(e.target.value)}
+              autoFocus
+              className="as-expand-editor flex-1 min-h-[38vh] rounded-2xl px-3 py-2.5 outline-none text-[15px] leading-relaxed"
+              style={{ color: colors.text, background: 'rgba(249,236,242,0.6)', border: '1px solid rgba(201,106,142,0.2)', resize: 'none' }}
+              placeholder={`想让 ${pageInfo.label} 变成什么样？\n长文可以分行、贴代码、列条目……`}
+            />
+            <div className="flex items-center gap-2 mt-2.5">
+              <button
+                onClick={() => { setInput(expandDraft); setExpandOpen(false); }}
+                className="flex-1 py-2.5 rounded-full text-[12px] font-semibold border-0 cursor-pointer"
+                style={{ color: colors.primary, border: '1px solid rgba(201,106,142,0.3)', background: 'rgba(255,255,255,0.8)' }}
+              >
+                收回到输入框
+              </button>
+              <button
+                onClick={() => { setExpandOpen(false); send(expandDraft); }}
+                disabled={!expandDraft.trim() || chatRunning}
+                className="flex-1 py-2.5 rounded-full text-[12px] font-semibold text-white border-0 cursor-pointer disabled:opacity-40"
+                style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
+              >
+                发送
               </button>
             </div>
           </div>
@@ -1157,7 +1294,7 @@ const AssistantApp: React.FC = () => {
               <div className="text-[12px] font-semibold" style={{ color: colors.text }}>任务存档</div>
               <button
                 onClick={() => { newAssistantSession(); addToast('新任务已开，开始派活吧', 'success'); setShowSessions(false); }}
-                disabled={busy}
+                disabled={chatRunning}
                 className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-semibold text-white border-0 cursor-pointer disabled:opacity-50"
                 style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})` }}
               >
@@ -1185,7 +1322,7 @@ const AssistantApp: React.FC = () => {
                       }}
                       onClick={() => {
                         if (isActive) { setShowSessions(false); return; }
-                        if (busy) { addToast('等他回完再切换任务', 'info'); return; }
+                        if (chatRunning) { addToast('等他回完再切换任务', 'info'); return; }
                         switchAssistantSession(sess.id);
                         setShowSessions(false);
                       }}
@@ -1200,7 +1337,7 @@ const AssistantApp: React.FC = () => {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (busy) { addToast('等他回完再删任务', 'info'); return; }
+                          if (chatRunning) { addToast('等他回完再删任务', 'info'); return; }
                           deleteAssistantSession(sess.id);
                           addToast(isActive ? '任务已删除' : '任务已删除', 'info');
                         }}
@@ -1413,6 +1550,17 @@ const AssistantApp: React.FC = () => {
                 <input value={apiForm.model} onChange={(e) => setApiForm({ ...apiForm, model: e.target.value })} placeholder="模型名"
                   className="as-field w-full rounded-xl px-3 py-2 outline-none text-[10px]" style={{ color: colors.text, border: '1px solid rgba(201,106,142,0.2)' }} />
               </div>
+              {/* 最近一轮 token（2026-09-14 批F）：请求带 include_usage；供应商不回传就显示「暂无」，不猜 */}
+              <div className="as-token-row flex items-center gap-1.5 mt-2 text-[10px] flex-wrap" style={{ color: colors.muted }}>
+                <Coins size={12} style={{ color: colors.primary }} className="shrink-0" />
+                <span className="shrink-0">最近一轮 token：</span>
+                {(() => {
+                  const u = lastAssistantUsage();
+                  return u
+                    ? <span style={{ color: colors.text }}>输入 {u.promptTokens.toLocaleString()} · 输出 {u.completionTokens.toLocaleString()} · 合计 {u.totalTokens.toLocaleString()}</span>
+                    : <span style={{ color: colors.faint }}>暂无（这个 API 不回传用量，或还没发过消息）</span>;
+                })()}
+              </div>
             </div>
 
             {/* 美化分类 · 提示词（2026-08-30 她定：美化助手的 prompt 在这里改，不进 noxhome） */}
@@ -1500,7 +1648,7 @@ const AssistantBubble: React.FC<{
     return (
       <div className="flex justify-end">
         <div
-          className={`as-bubble-user max-w-[78%] rounded-2xl px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap text-white relative`}
+          className={`as-bubble-user max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-white relative`}
           style={{ background: colors.bubbleUser, borderTopRightRadius: 6, boxShadow: '0 2px 10px rgba(227,164,188,0.3)', ...selStyle }}
           {...lp}
           onClick={selectMode ? onToggleSelect : undefined}
@@ -1534,7 +1682,7 @@ const AssistantBubble: React.FC<{
   return (
     <div className="flex justify-start">
       <div
-        className="as-bubble-ai max-w-[88%] rounded-2xl px-3 py-2 relative"
+        className="as-bubble-ai max-w-[86%] rounded-2xl px-4 py-2.5 relative"
         style={{ background: colors.bubbleAi, borderTopLeftRadius: 6, border: '1px solid rgba(255,255,255,0.6)', boxShadow: '0 2px 8px rgba(201,106,142,0.06)', ...selStyle }}
         {...lp}
         onClick={selectMode ? onToggleSelect : undefined}

@@ -4,6 +4,7 @@ import { diaryBgStore } from '../../apps/couple/diaryBgStore';
 import { dietBgStore } from '../../apps/couple/dietBgStore';
 import { albumBgStore } from '../../apps/couple/albumBgStore';
 import { useMusicStore } from '../../apps/couple/musicStore';
+import { useAssistant } from '../../utils/beautyAssistantStore';
 
 // 全局「后台生成」状态条 —— 挂在 PhoneShell，任何页面/App 里都可见（样式对齐原版人格模拟/梦境指示条）。
 // 数据源 = 各 feature store 的 bgTask pending（running 且未过期才显示；多个任务时显示最早开始的那个）。
@@ -12,6 +13,7 @@ const GlobalGenStatus: React.FC = () => {
   const diet = dietBgStore.use();
   const album = albumBgStore.use();
   const music = useMusicStore();
+  const assistant = useAssistant();
 
   const actives: { at: number; text: string }[] = [];
   const push = (p: BgTaskPending | undefined, text: string) => {
@@ -24,6 +26,7 @@ const GlobalGenStatus: React.FC = () => {
   push(album.pendingRecall, '正在生成观后感…');
   push(album.pendingAutoTag, '正在整理相册标签…');
   push(music.pendingSummary, '正在补听歌总结…');
+  push(assistant.pendingChat, '小助手正在写…');
   if (!actives.length) return null;
   actives.sort((a, b) => a.at - b.at);
 

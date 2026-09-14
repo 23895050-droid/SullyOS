@@ -4,6 +4,15 @@
 // 2026-08-30 任务存档：消息按「任务（会话）」分组，做完一个活就新建任务，不用删聊天记录。
 import { useSyncExternalStore } from 'react';
 import { deleteBlobRef } from './blobRef';
+import type { BgTaskPending } from './bgTask';
+
+/** 一轮 API 用量（2026-09-14 批F）：请求带 stream_options.include_usage，可用的供应商会在末块回传；
+ *  不回传的就没有（显示为「—」），不猜。 */
+export interface AssistantUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
 
 /** 用户消息附件（2026-08-31 附件化，学主流 AI 聊天）：
  *  图片 = 参考图（blobRef）；文件 = 引用某个交付文件的完整代码（按消息 id + 代码块序号精确定位，不靠名字猜） */
@@ -21,6 +30,8 @@ export interface AssistantMsg {
   attachments?: AssistantAttachment[];
   /** 所属任务；旧数据迁移时补齐，此后每条都有 */
   sessionId?: string;
+  /** 这一轮 API 的用量（2026-09-14 批F：设置面板显示「最近一轮 token」用） */
+  usage?: AssistantUsage;
   at: string;
 }
 
@@ -66,6 +77,9 @@ export interface AssistantV1 {
   activeSessionId: string | null;
   /** 代码块折叠（2026-08-31 学上游工作台「交付文件」）：key = `${messageId}:${代码块序号}`，true = 折叠成文件卡 */
   codeFold: Record<string, boolean>;
+  /** 后台生成中（2026-09-14 批F）：pending 生命周期由 utils/bgTask 管；stream = 已经流出的半截正文，
+   *  离页（小助手组件卸载）也不断线，回来看得到、生成完自动落消息 */
+  pendingChat?: BgTaskPending & { stream?: string };
 }
 
 const KEY = 'assistant_v1';
@@ -181,6 +195,24 @@ export const useAssistant = (): AssistantV1 =>
 
 export const getAssistant = (): AssistantV1 => state;
 
+/** 后台生成（utils/bgTask）要的 get/set 句柄 */
+export const assistantStoreApi = {
+  get: (): AssistantV1 => state,
+  set: (updater: (s: AssistantV1) => AssistantV1) => patch(updater),
+};
+
+/** 写 pendingChat：生成中不断刷新 stream（离页回来接着显示半截正文） */
+export const setAssistantPendingChat = (p: AssistantV1['pendingChat']) =>
+  patch((s) => ({ ...s, pendingChat: p }));
+
+/** 最近一轮 token：从消息回读（usage 挂在消息上，不额外存字段；没有 = 供应商不回传用量） */
+export const lastAssistantUsage = (): AssistantUsage | null => {
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    if (state.messages[i].usage) return state.messages[i].usage as AssistantUsage;
+  }
+  return null;
+};
+
 /** 仅测试用：把模块状态重置回默认（vitest 里每个用例之间隔离） */
 export const __resetAssistantForTest = () => {
   state = { ...DEFAULT };
@@ -211,11 +243,12 @@ const touchSession = (sessions: AssistantSession[], sessionId: string, now: stri
   sessions.map((x) => (x.id === sessionId ? { ...x, updatedAt: now } : x));
 
 /** 自动起名：任务还是「新任务」且来了第一条用户消息 → 用它的前 18 字当标题 */
-const autoTitleSession = (s: AssistantV1, msgs: AssistantMsg[], now: string): AssistantSession[] => {
+const autoTitleSession = (s: AssistantV1, msgs: AssistantMsg[], now: string, sessionId?: string): AssistantSession[] => {
   const firstUser = msgs.find((m) => m.role === 'user' && m.content.trim());
   if (!firstUser) return s.sessions;
+  const target = sessionId ?? s.activeSessionId;
   return s.sessions.map((x) =>
-    x.id === s.activeSessionId && x.title === NEW_TASK_TITLE
+    x.id === target && x.title === NEW_TASK_TITLE
       ? { ...x, title: firstUser.content.trim().slice(0, 18), updatedAt: now }
       : x,
   );
@@ -232,22 +265,26 @@ export const ensureAssistantSession = (): string | null => {
   return session.id;
 };
 
-export const appendAssistantMessages = (msgs: AssistantMsg[]) =>
+/** 追加消息。默认为「当前任务」；后台生成跑完时可以点名任务（她可能已经切到别的任务，
+ *  结果不能落错地方）；点名的任务已经不存在（删掉了）就落回当前任务，免得消息成孤儿看不见。 */
+export const appendAssistantMessages = (msgs: AssistantMsg[], sessionIdOverride?: string) =>
   patch((s) => {
-    const sessionId = s.activeSessionId;
-    if (!sessionId) return s; // 没有任务就不落盘（理论上 send 前已 ensure）
+    const target = sessionIdOverride && s.sessions.some((x) => x.id === sessionIdOverride)
+      ? sessionIdOverride
+      : s.activeSessionId;
+    if (!target) return s; // 没有任务就不落盘（理论上 send 前已 ensure）
     const now = isoNow();
-    const stamped = msgs.map((m) => ({ ...m, sessionId }));
+    const stamped = msgs.map((m) => ({ ...m, sessionId: target }));
     const merged = [...s.messages, ...stamped];
     // 单任务上限：当前任务超过就丢它最旧的
-    const inSession = merged.filter((m) => m.sessionId === sessionId);
+    const inSession = merged.filter((m) => m.sessionId === target);
     const trimmed = inSession.length > SESSION_MESSAGE_CAP
-      ? merged.filter((m) => !(m.sessionId === sessionId && inSession.indexOf(m) < inSession.length - SESSION_MESSAGE_CAP))
+      ? merged.filter((m) => !(m.sessionId === target && inSession.indexOf(m) < inSession.length - SESSION_MESSAGE_CAP))
       : merged;
     return {
       ...s,
       messages: trimmed.slice(-MESSAGE_CAP),
-      sessions: touchSession(autoTitleSession(s, msgs, now), sessionId, now),
+      sessions: touchSession(autoTitleSession(s, msgs, now, target), target, now),
       updatedAt: now,
     };
   });
