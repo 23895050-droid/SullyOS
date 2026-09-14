@@ -44,7 +44,7 @@ export const OUR_FEATURE_SCOPES: OurFeatureScope[] = [
     ],
     includeReceipts: false,
   },
-  { id: 'album', label: '相册', localStorageKeys: ['os_memory_archive', 'couple_album_bg_v1'], includeReceipts: false },
+  { id: 'album', label: '相册', localStorageKeys: ['os_memory_archive', 'couple_album_bg_v1', 'url_gallery_v1'], includeReceipts: false },
   { id: 'receipts', label: '近期接收', localStorageKeys: [], includeReceipts: true },
   {
     id: 'noxhome', label: 'NoxHome（含情侣空间）',

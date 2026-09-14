@@ -15,6 +15,9 @@ import { updateDiaryApi, updateDiaryFont, useDiaryStore } from './diaryStore';
 import { useCouplePaletteStore, setCouplePalette, resetCouplePalette, saveCouplePreset, loadCouplePreset, deleteCouplePreset } from './couplePaletteStore';
 import { useAnnivStore, saveAnniv, togetherStartKey } from './annivStore';
 import { COUPLE_PALETTE_KEYS, COUPLE_PALETTE_DEFAULTS, CARD_ALPHA_DEFAULT } from './couplePalette';
+import { useUrlGallery } from './urlGalleryStore';
+import { normalizeImageUrl } from './urlGalleryMath';
+import TokenImg from '../../components/os/TokenImg';
 
 const BEAUTY_KEY = 'couple_beauty_v1';
 type CoupleBeauty = { headerBg?: string; capsuleBg?: string; accent?: string; avatarNox?: string; avatarAngelica?: string; homeDisc?: string; homeBg?: string; coupleBg?: string };
@@ -100,37 +103,84 @@ const shrinkImage = (file: File, maxW: number): Promise<Blob> =>
     img.src = url;
   });
 
-// 单个图片槽位：预览 + 更换（本地图片 → blobRef）+ 恢复默认
+// 单个图片槽位：预览 + 更换（本地图片 → blobRef）+ 贴外链 + 恢复默认
+// 贴链接（2026-09-14 外链通道）：直接存 http(s) 字符串，不打包 base64，备份只带链接
 const Slot: React.FC<{
   label: string; desc: string; value?: string;
   onPick: (file: File) => Promise<void>; onReset: () => void;
-}> = ({ label, desc, value, onPick, onReset }) => {
+  /** 贴外链：返回 true 表示已应用（收起输入区） */
+  onSetUrl: (url: string) => boolean;
+}> = ({ label, desc, value, onPick, onReset, onSetUrl }) => {
   const url = useBlobRefUrl(value);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkDraft, setLinkDraft] = useState('');
+  const gallery = useUrlGallery();
+  const applyDraft = () => {
+    if (onSetUrl(linkDraft)) { setLinkDraft(''); setLinkOpen(false); }
+  };
   return (
-    <div className="flex items-center gap-3 rounded-2xl p-3.5" style={{ background: '#fff', boxShadow: '0 6px 18px rgba(233,160,190,0.14)' }}>
-      <div className="rounded-xl overflow-hidden shrink-0 flex items-center justify-center" style={{ width: 52, height: 52, background: url ? 'transparent' : 'linear-gradient(165deg, #ffd3e4, #ffeaf3)', border: '1px solid var(--cs-border, #f2d3e0)' }}>
-        {url ? <img src={url} alt="" className="w-full h-full object-cover" /> : <ImageSquare style={{ width: 18, height: 18, color: 'var(--cs-deep, #d98ba9)' }} />}
+    <div className="rounded-2xl p-3.5" style={{ background: '#fff', boxShadow: '0 6px 18px rgba(233,160,190,0.14)' }}>
+      <div className="flex items-center gap-3">
+        <div className="rounded-xl overflow-hidden shrink-0 flex items-center justify-center" style={{ width: 52, height: 52, background: url ? 'transparent' : 'linear-gradient(165deg, #ffd3e4, #ffeaf3)', border: '1px solid var(--cs-border, #f2d3e0)' }}>
+          {url ? <img src={url} alt="" className="w-full h-full object-cover" /> : <ImageSquare style={{ width: 18, height: 18, color: 'var(--cs-deep, #d98ba9)' }} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#3a2a33' }}>{label}</div>
+          <div style={{ fontSize: 11, color: '#9a7a8a', marginTop: 2 }}>{desc}</div>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) await onPick(f);
+          }}
+        />
+        <button type="button" onClick={() => inputRef.current?.click()} className="border-0 cursor-pointer rounded-full" style={{ background: 'var(--cs-soft, #fce8f1)', color: 'var(--cs-deep, #c25a82)', fontSize: 12, padding: '6px 14px', fontWeight: 600 }}>更换</button>
+        <button type="button" onClick={() => setLinkOpen((v) => !v)} className="border-0 cursor-pointer rounded-full" style={{ background: linkOpen ? 'var(--cs-accent, #f0a8c0)' : 'transparent', color: linkOpen ? '#fff' : 'var(--cs-deep, #c25a82)', border: '1px solid var(--cs-border, #f2d3e0)', fontSize: 12, padding: '5px 12px', fontWeight: 600 }}>🔗</button>
+        <button type="button" aria-label="恢复默认" onClick={onReset} className="border-0 bg-transparent cursor-pointer" style={{ color: '#b0909c' }}>
+          <ArrowCounterClockwise style={{ width: 16, height: 16 }} />
+        </button>
       </div>
-      <div className="flex-1 min-w-0">
-        <div style={{ fontSize: 14, fontWeight: 600, color: '#3a2a33' }}>{label}</div>
-        <div style={{ fontSize: 11, color: '#9a7a8a', marginTop: 2 }}>{desc}</div>
-      </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={async (e) => {
-          const f = e.target.files?.[0];
-          e.target.value = '';
-          if (f) await onPick(f);
-        }}
-      />
-      <button type="button" onClick={() => inputRef.current?.click()} className="border-0 cursor-pointer rounded-full" style={{ background: 'var(--cs-soft, #fce8f1)', color: 'var(--cs-deep, #c25a82)', fontSize: 12, padding: '6px 14px', fontWeight: 600 }}>更换</button>
-      <button type="button" aria-label="恢复默认" onClick={onReset} className="border-0 bg-transparent cursor-pointer" style={{ color: '#b0909c' }}>
-        <ArrowCounterClockwise style={{ width: 16, height: 16 }} />
-      </button>
+      {linkOpen && (
+        <div className="flex flex-col gap-2" style={{ marginTop: 10 }}>
+          <div className="flex gap-2">
+            <input
+              value={linkDraft}
+              onChange={(e) => setLinkDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyDraft(); }}
+              placeholder="https://… 图片直链"
+              className="flex-1 min-w-0"
+              style={{ fontSize: 12, color: '#3a2a33', border: '1px solid #f2d3e0', borderRadius: 10, padding: '8px 10px', background: '#faf7f8', outline: 'none' }}
+            />
+            <button type="button" onClick={applyDraft} className="border-0 cursor-pointer rounded-xl shrink-0" style={{ background: '#3a2a33', color: '#fff', fontSize: 12, padding: '8px 16px', fontWeight: 700 }}>用这张</button>
+          </div>
+          {gallery.items.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, color: '#9a7a8a' }}>从图库里挑（点一下直接换上）</div>
+              <div className="flex gap-2 overflow-x-auto" style={{ paddingBottom: 2 }}>
+                {gallery.items.map((it) => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    title={it.name}
+                    onClick={() => { if (onSetUrl(it.url)) { setLinkDraft(''); setLinkOpen(false); } }}
+                    className="border-0 p-0 cursor-pointer shrink-0 rounded-lg overflow-hidden"
+                    style={{ width: 44, height: 44, border: '1px solid #f2d3e0', background: '#faf7f8' }}
+                  >
+                    <TokenImg value={it.url} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <div style={{ fontSize: 10, color: '#9a7a8a', lineHeight: 1.5 }}>用链接的图不进备份包、不占存储；上传到自己桶是下一步的事。</div>
+        </div>
+      )}
     </div>
   );
 };
@@ -471,6 +521,16 @@ const CoupleBeauty: React.FC = () => {
     saveCoupleBeauty(next);
     addToast('已恢复默认', 'info');
   };
+  // 贴外链（2026-09-14 外链通道）：存 http(s) 字符串本身，不下载不打包；返回是否已应用
+  const setUrl = (key: BeautyKey, url: string): boolean => {
+    const u = normalizeImageUrl(url);
+    if (!u) { addToast('链接要以 http:// 或 https:// 开头', 'error'); return false; }
+    const next = { ...beauty, [key]: u };
+    setBeauty(next);
+    saveCoupleBeauty(next);
+    addToast(`${PICK_LABELS[key]}（外链）——不进备份包，不占存储`, 'success');
+    return true;
+  };
   const setAccent = (accent?: string) => {
     const next = { ...beauty, accent };
     setBeauty(next);
@@ -492,11 +552,11 @@ const CoupleBeauty: React.FC = () => {
         </BeautyFold>
 
         <BeautyFold title="情侣空间 · 图片与皮肤色">
-          <Slot label="宣告区背景图" desc="头像后面的那块大背景，支持本地图片替换" value={beauty.headerBg} onPick={(f) => pick('headerBg', f)} onReset={() => reset('headerBg')} />
-          <Slot label="胶囊条背景图" desc="歌曲卡片下方的横向胶囊条" value={beauty.capsuleBg} onPick={(f) => pick('capsuleBg', f)} onReset={() => reset('capsuleBg')} />
-          <Slot label="Nox 头像" desc="同时复用到 Nox 的单间左上角" value={beauty.avatarNox} onPick={(f) => pick('avatarNox', f)} onReset={() => reset('avatarNox')} />
-          <Slot label="Angelica 头像" desc="宣告区右边的圆形头像" value={beauty.avatarAngelica} onPick={(f) => pick('avatarAngelica', f)} onReset={() => reset('avatarAngelica')} />
-          <Slot label="情侣空间背景图" desc="整个情侣空间页面背景（默认粉 #ffe3ef）" value={beauty.coupleBg} onPick={(f) => pick('coupleBg', f)} onReset={() => reset('coupleBg')} />
+          <Slot label="宣告区背景图" desc="头像后面的那块大背景，支持本地图片替换" value={beauty.headerBg} onPick={(f) => pick('headerBg', f)} onSetUrl={(u) => setUrl('headerBg', u)} onReset={() => reset('headerBg')} />
+          <Slot label="胶囊条背景图" desc="歌曲卡片下方的横向胶囊条" value={beauty.capsuleBg} onPick={(f) => pick('capsuleBg', f)} onSetUrl={(u) => setUrl('capsuleBg', u)} onReset={() => reset('capsuleBg')} />
+          <Slot label="Nox 头像" desc="同时复用到 Nox 的单间左上角" value={beauty.avatarNox} onPick={(f) => pick('avatarNox', f)} onSetUrl={(u) => setUrl('avatarNox', u)} onReset={() => reset('avatarNox')} />
+          <Slot label="Angelica 头像" desc="宣告区右边的圆形头像" value={beauty.avatarAngelica} onPick={(f) => pick('avatarAngelica', f)} onSetUrl={(u) => setUrl('avatarAngelica', u)} onReset={() => reset('avatarAngelica')} />
+          <Slot label="情侣空间背景图" desc="整个情侣空间页面背景（默认粉 #ffe3ef）" value={beauty.coupleBg} onPick={(f) => pick('coupleBg', f)} onSetUrl={(u) => setUrl('coupleBg', u)} onReset={() => reset('coupleBg')} />
           {/* 皮肤颜色：爱心固定粉色，其余粉色元素跟随此颜色 */}
           <div className="flex flex-col gap-3" style={{ borderTop: '1px dashed #f2d3e0', paddingTop: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#3a2a33' }}>皮肤颜色</div>
@@ -529,8 +589,8 @@ const CoupleBeauty: React.FC = () => {
         </BeautyFold>
 
         <BeautyFold title="Nox 的单间">
-          <Slot label="大圆照片" desc="主页上部的大圆形照片框（专辑/照片墙后续接入）" value={beauty.homeDisc} onPick={(f) => pick('homeDisc', f)} onReset={() => reset('homeDisc')} />
-          <Slot label="单间背景图" desc="Nox 的单间整页背景（默认深蓝渐变）" value={beauty.homeBg} onPick={(f) => pick('homeBg', f)} onReset={() => reset('homeBg')} />
+          <Slot label="大圆照片" desc="主页上部的大圆形照片框（专辑/照片墙后续接入）" value={beauty.homeDisc} onPick={(f) => pick('homeDisc', f)} onSetUrl={(u) => setUrl('homeDisc', u)} onReset={() => reset('homeDisc')} />
+          <Slot label="单间背景图" desc="Nox 的单间整页背景（默认深蓝渐变）" value={beauty.homeBg} onPick={(f) => pick('homeBg', f)} onSetUrl={(u) => setUrl('homeBg', u)} onReset={() => reset('homeBg')} />
         </BeautyFold>
 
         <BeautyFold title="提示词管理">

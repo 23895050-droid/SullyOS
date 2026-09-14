@@ -17,6 +17,8 @@ import {
 } from '../utils/archive';
 import { startBgTask, startBgTaskForResult, isBgTaskStale } from '../utils/bgTask';
 import { albumBgStore, albumBgStoreApi, setRecallResult } from './couple/albumBgStore';
+import UrlGalleryPage from './couple/UrlGalleryPage';
+import { useUrlGallery } from './couple/urlGalleryStore';
 
 type View =
   | { name: 'home' }
@@ -24,7 +26,8 @@ type View =
   | { name: 'receipts' }
   | { name: 'archives' }
   | { name: 'favorites' }
-  | { name: 'charAlbum'; charId: string };
+  | { name: 'charAlbum'; charId: string }
+  | { name: 'urlGallery' };
 
 type KindFilter = 'all' | ArchiveKind;
 const KIND_LABEL: Record<ArchiveKind, string> = { camera: '相机', chat: '聊天', board: '留言板', together: '和Ta' };
@@ -870,6 +873,8 @@ const AlbumApp: React.FC = () => {
   const [receiptCount, setReceiptCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showRecall, setShowRecall] = useState(false);
+  // 外链图库条数（2026-09-14）：入口卡上的计数
+  const urlCount = useUrlGallery().items.length;
 
   const refresh = useCallback(() => setArchive(loadArchive()), []);
 
@@ -960,6 +965,8 @@ const AlbumApp: React.FC = () => {
             />
           );
         })()
+      ) : view.name === 'urlGallery' ? (
+        <UrlGalleryPage onBack={back} />
       ) : view.name === 'myAlbums' ? (
         <div className="h-full flex flex-col">
           <SectionHeader title="我的相册" onBack={back} />
@@ -985,6 +992,17 @@ const AlbumApp: React.FC = () => {
                 <div className="text-[11px] text-slate-400 mt-0.5">文字记忆卡片 · 可编辑 · 可转发</div>
               </div>
               <span className="text-xs text-slate-400 font-mono">{archive.length}</span>
+            </button>
+            <button
+              onClick={() => setView({ name: 'urlGallery' })}
+              className="w-full bg-white rounded-3xl border border-slate-100 shadow-sm p-4 flex items-center gap-4 active:scale-[0.98] transition-transform"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-sky-50 flex items-center justify-center text-2xl">🔗</div>
+              <div className="flex-1 text-left">
+                <div className="text-sm font-semibold text-slate-800">外链图库</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">存 URL · 看缩略图 · 复制链接</div>
+              </div>
+              <span className="text-xs text-slate-400 font-mono">{urlCount}</span>
             </button>
           </div>
         </div>
@@ -1033,6 +1051,19 @@ const AlbumApp: React.FC = () => {
                   <div className="text-[10px] text-slate-400">{favorites.length} 张收藏</div>
                 </button>
               </div>
+
+              {/* 外链图库（2026-09-14 外链通道）：桶里有什么一眼看全，存链接/复制链接不占存储 */}
+              <button
+                onClick={() => setView({ name: 'urlGallery' })}
+                className="w-full bg-white rounded-3xl border border-slate-100 shadow-sm p-4 flex items-center gap-4 active:scale-[0.98] transition-transform"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-sky-50 flex items-center justify-center text-2xl">🔗</div>
+                <div className="flex-1 text-left">
+                  <div className="text-sm font-semibold text-slate-800">外链图库</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">存在桶里的图 · 看缩略图 · 一键复制链接</div>
+                </div>
+                <span className="text-xs text-slate-400 font-mono">{urlCount}</span>
+              </button>
 
               {/* 角色相册 */}
               <div className="pt-1">
