@@ -336,8 +336,9 @@ const MoneyCard: React.FC<{ hp: Pct; onOpen: () => void }> = ({ hp, onOpen }) =>
   );
 };
 
-const DiaryCard: React.FC<{ hp: Pct; i: number; title: string; meta: string; text: string; onOpen: () => void }> = ({ hp, i, title, meta, text, onOpen }) => {
+const DiaryCard: React.FC<{ hp: Pct; i: number; title: string; meta: string; text: string; photoRef?: string; onOpen: () => void }> = ({ hp, i, title, meta, text, photoRef, onOpen }) => {
   const mirror = i === 1; // A = Nox（图右），B = Angel（图左）
+  const photoUrl = useBlobRefUrl(photoRef);
   const y = 1660 + i * 250;
   const imgX = mirror ? 684 : 1030;
   const textX = mirror ? 826 : 684;
@@ -345,7 +346,7 @@ const DiaryCard: React.FC<{ hp: Pct; i: number; title: string; meta: string; tex
     <>
       <div className="absolute" style={{ left: wPct(650), top: hp(y), width: wPct(540), height: hp(210), zIndex: 10, background: 'var(--cp-card, #fff)', borderRadius: cqw(28, 12), boxShadow: CARD_SHADOW }} />
       <div className="absolute overflow-hidden pointer-events-none" style={{ left: wPct(imgX), top: hp(y + 45), width: wPct(120), height: hp(120), zIndex: 11, borderRadius: cqw(16, 8) }}>
-        <img src="/Couple/留白图.jpg" alt="" draggable={false} decoding="async" className="w-full h-full object-cover select-none" />
+        <img src={photoUrl ?? '/Couple/留白图.jpg'} alt="" draggable={false} decoding="async" className="w-full h-full object-cover select-none" />
       </div>
       <Text hp={hp} x={textX} y={y + 34} w={320} h={18} size={9} min={8} color="var(--cp-faint, #b0909c)">{meta}</Text>
       <Text hp={hp} x={textX} y={y + 60} w={320} h={30} size={16} min={10} color="var(--cp-text, #3a2a33)" weight={700}>{title}</Text>
@@ -413,7 +414,7 @@ const CoupleBelow: React.FC<{ onOpen: (route: string) => void }> = ({ onOpen }) 
       return { title, meta: '还没写', text: '今天的日记还是空白的。' };
     }
     const snippet = latest.content.length > 40 ? `${latest.content.slice(0, 40)}…` : latest.content;
-    return { title, meta: `${fmtDiaryMeta(latest.date, now)} · ${latest.date.slice(5).replace('-', '/')}`, text: snippet };
+    return { title, meta: `${fmtDiaryMeta(latest.date, now)} · ${latest.date.slice(5).replace('-', '/')}`, text: snippet, photoRef: latest.photo?.blobRef };
   };
   const hisCard = diaryCard('me', 'Nox 的日记');
   const herCard = diaryCard('her', 'Angel 的日记');

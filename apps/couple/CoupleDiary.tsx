@@ -5,18 +5,18 @@
 // 交换日记 = 两篇都写 + 双方都批；完成后两张卡片转发进聊天——这是他唯一读到她的日记的通道
 // API 槽：日记独立配置，未配回退主 API（diaryApi.resolveDiaryApi）；提示词在设置·提示词管理可改
 // 分句编号必须与 utils/diaryMath.diarySentences 完全一致（发 prompt 与渲染定位用同一套）
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowsLeftRight, CaretDown, Check, Circle, PaperPlaneTilt,
   PencilSimple, Sparkle, SpinnerGap, Trash, X,
 } from '@phosphor-icons/react';
 import { useOS } from '../../context/OSContext';
-import { useBlobRefUrl } from '../../utils/blobRef';
+import { putImageBlob, useBlobRefUrl } from '../../utils/blobRef';
 import type { CharacterProfile } from '../../types';
 import { getLocalDateKey } from '../../utils/localDate';
 import { getMountConfig } from '../../utils/noxhomeMount';
 import {
-  deleteDiaryEntry, deleteDiaryReview, diaryDates, diaryOn, saveDiaryEntry, setDiaryReview, useDiaryStore,
+  deleteDiaryEntry, deleteDiaryReview, diaryDates, diaryOn, saveDiaryEntry, setDiaryPhoto, setDiaryReview, useDiaryStore,
   type DiaryOwner, type DiarySeg, type SentenceAnchor,
 } from './diaryStore';
 import {
@@ -27,6 +27,11 @@ import { generateNoxAnnotation, generateNoxDiary, resolveDiaryApi } from './diar
 import { forwardDiaryCard } from './coupleForward';
 import { ForwardPicker } from './CouplePeriod';
 import ConfirmDialog from '../../components/os/ConfirmDialog';
+import { generateImage } from '../../utils/imageGenService';
+import { loadImageGenSettings } from '../../utils/imageGenStorage';
+import { getPrompt } from '../../utils/promptRegistry';
+import { diaryBgStore, diaryBgStoreApi } from './diaryBgStore';
+import { isBgTaskStale, startBgTaskForResult } from '../../utils/bgTask';
 
 // ── 纸张设计常量 ──
 
@@ -226,17 +231,63 @@ const MOOD_DOT: Record<DiaryMood, string> = {
   joy: '#e8c35a', calm: '#e6dcc8', soft: '#e8b7c6', flirt: '#b48fd9', ache: '#3f5f8f', sad: '#a8c0d6', angry: '#d98a66', night: '#3a4157',
 };
 
+/** 日记照片压缩（最长边 900） */
+const shrinkPhoto = (file: File, maxW: number): Promise<Blob> =>
+  new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      if (img.naturalWidth <= maxW) { resolve(file); return; }
+      const c = document.createElement('canvas');
+      c.width = maxW;
+      c.height = Math.max(1, Math.round((img.naturalHeight * maxW) / img.naturalWidth));
+      const ctx = c.getContext('2d');
+      if (!ctx) { resolve(file); return; }
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob((b) => resolve(b ?? file), 'image/jpeg', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+
+/** 日记照片（纸面内贴一张） */
+const DiaryPhoto: React.FC<{ blobRef: string }> = ({ blobRef }) => {
+  const url = useBlobRefUrl(blobRef);
+  if (!url) return null;
+  return (
+    <img
+      src={url}
+      alt="日记照片"
+      className="rounded-2xl"
+      style={{ width: '76%', objectFit: 'cover', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 4px 14px rgba(60,40,20,0.14)' }}
+    />
+  );
+};
+
 const WriteModal: React.FC<{
   owner: DiaryOwner;
   initial: string;
   initialMood: DiaryMood;
+  photoRef?: string;
+  onPhoto: (blobRef: string | null) => void;
   onSave: (text: string, mood: DiaryMood) => void;
   onClose: () => void;
-}> = ({ owner, initial, initialMood, onSave, onClose }) => {
+}> = ({ owner, initial, initialMood, photoRef, onPhoto, onSave, onClose }) => {
+  const { addToast } = useOS();
   const [draft, setDraft] = useState(initial);
   const [mood, setMood] = useState<DiaryMood>(initialMood);
   const ink = owner === 'me' ? HIS_INK : HER_INK;
   const p = MOOD_PAPER[mood];
+  const fileRef = useRef<HTMLInputElement>(null);
+  const photoUrl = useBlobRefUrl(photoRef);
+  const onPick = async (f: File) => {
+    try {
+      onPhoto(await putImageBlob(await shrinkPhoto(f, 900)));
+    } catch {
+      addToast('照片保存失败', 'error');
+    }
+  };
   return (
     <div
       className="fixed inset-0 flex items-end justify-center"
@@ -279,6 +330,40 @@ const WriteModal: React.FC<{
             color: p.ink, background: p.paper, border: '1px solid #e7dcc8', borderRadius: 14, padding: 14, outline: 'none', resize: 'none',
           }}
         />
+        {/* 照片（可选）：上传实拍；他的日记还可以在日记页点「配一张图」由 AI 生成 */}
+        <div className="flex items-center" style={{ gap: 10 }}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void onPick(f); }}
+          />
+          {photoUrl ? (
+            <>
+              <img src={photoUrl} alt="日记照片" style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 12, border: '1px solid #e7dcc8' }} />
+              <span style={{ fontSize: 11, color: '#9a8a76' }}>这篇日记配了照片</span>
+              <span className="flex-1" />
+              <button
+                type="button"
+                onClick={() => onPhoto(null)}
+                className="border-0 cursor-pointer rounded-full"
+                style={{ padding: '5px 12px', fontSize: 11, color: '#c26b6b', background: '#fdeef0' }}
+              >
+                删掉照片
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="border-0 cursor-pointer rounded-full"
+              style={{ padding: '7px 14px', fontSize: 11, fontWeight: 600, color: '#6b5a4a', background: '#f4eee6' }}
+            >
+              📷 配张照片
+            </button>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => { if (!draft.trim()) return; onSave(draft.trim(), mood); onClose(); }}
@@ -442,24 +527,9 @@ const ExchangeModal: React.FC<{
 
 // ── 日记页主组件 ──
 
-const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = ({ initialOwner, onBack }) => {
+/** 自定义手写字体（设置页上传 ttf）共享 hook：日记页与留言板同字体，卸载时删同名字体防堆积 */
+export const useDiaryHandFont = (): string => {
   const store = useDiaryStore();
-  const { addToast, apiConfig, characters, userProfile } = useOS();
-  const [owner, setOwner] = useState<DiaryOwner>(initialOwner);
-  const today = getLocalDateKey();
-  const [viewDate, setViewDate] = useState(today);
-  const [writeOpen, setWriteOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [datesOpen, setDatesOpen] = useState(false);
-  const [busy, setBusy] = useState<'diary' | 'annotate' | null>(null);
-  const [rerollConfirm, setRerollConfirm] = useState(false);
-  const [delConfirm, setDelConfirm] = useState<'entry' | 'review' | null>(null);
-  const [genFor, setGenFor] = useState<'diary' | 'annotate' | null>(null);
-  const [langs, setLangs] = useState<string[]>(['简体中文']);
-  const [forwardKind, setForwardKind] = useState<'review-his' | 'review-hers' | null>(null);
-  const [exchangeOpen, setExchangeOpen] = useState(false);
-
-  // 自定义字体（设置页上传 ttf）：blob URL → FontFace 注册，卸掉旧的同名字体防堆积
   const fontUrl = useBlobRefUrl(store.fontRef);
   useEffect(() => {
     if (!fontUrl) return;
@@ -478,7 +548,35 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
       if (face) document.fonts.delete(face);
     };
   }, [fontUrl]);
-  const fontStack = store.fontRef ? `'DiaryHand', ${SERIF}` : SERIF;
+  return store.fontRef ? `'DiaryHand', ${SERIF}` : SERIF;
+};
+
+const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = ({ initialOwner, onBack }) => {
+  const store = useDiaryStore();
+  const { addToast, apiConfig, characters, userProfile } = useOS();
+  const [owner, setOwner] = useState<DiaryOwner>(initialOwner);
+  const today = getLocalDateKey();
+  const [viewDate, setViewDate] = useState(today);
+  const [writeOpen, setWriteOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [datesOpen, setDatesOpen] = useState(false);
+  const [busy, setBusy] = useState<'diary' | 'annotate' | 'exchange' | 'photo' | null>(null);
+  // 后台生成状态（生成中可离页，回来续显示；失败/中断给重试提示）
+  const bg = diaryBgStore.use();
+  const diaryPending = bg.pendingDiary;
+  const annotatePending = bg.pendingAnnotate;
+  const diaryRunning = !!diaryPending && diaryPending.status === 'running' && !isBgTaskStale(diaryPending);
+  const annotateRunning = !!annotatePending && annotatePending.status === 'running' && !isBgTaskStale(annotatePending);
+  const bgStuck = [diaryPending, annotatePending].some((p) => !!p && (p.status === 'failed' || isBgTaskStale(p)));
+  const [rerollConfirm, setRerollConfirm] = useState(false);
+  const [delConfirm, setDelConfirm] = useState<'entry' | 'review' | null>(null);
+  const [genFor, setGenFor] = useState<'diary' | 'annotate' | null>(null);
+  const [langs, setLangs] = useState<string[]>(['简体中文']);
+  const [forwardKind, setForwardKind] = useState<'review-his' | 'review-hers' | null>(null);
+  const [exchangeOpen, setExchangeOpen] = useState(false);
+
+  // 自定义手写字体（设置页上传 ttf）：与留言板共享同一 hook
+  const fontStack = useDiaryHandFont();
 
   const entry = diaryOn(store.entries, viewDate, owner);
   const isToday = viewDate === today;
@@ -500,33 +598,85 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
     return true;
   };
 
-  const handleGenerate = async (useLangs: string[]) => {
+  /** 生成他的日记并落库（不带 busy/toast，供「喊他写」与「交换日记」共用） */
+  const runGenerateCore = async (useLangs: string[]) => {
+    const { text, summary, mood: m, anchors } = await generateNoxDiary({ char: mountChar!, user: userProfile!, mainApi: apiConfig, langs: useLangs });
+    saveDiaryEntry({ owner: 'me', content: text, summary: summary || undefined, generated: true, mood: m, anchors });
+  };
+
+  /** 生成他对她日记的批注并落库（同上） */
+  const runAnnotateCore = async (useLangs: string[], herContent: string) => {
+    const { summary, anchors } = await generateNoxAnnotation({ char: mountChar!, user: userProfile!, herDiary: herContent, mainApi: apiConfig, langs: useLangs });
+    const content = flattenAnchors(anchors, diarySentences(herContent));
+    const now = new Date().toISOString();
+    setDiaryReview(today, 'her', { content, anchors, summary: summary || undefined, createdAt: now, updatedAt: now });
+  };
+
+  const handleGenerate = (useLangs: string[]) => {
     if (!ensureReady()) return;
-    setBusy('diary');
+    // 后台跑：生成中可离页，回来续显示「生成中」；完成落库、失败留可重试态
+    void startBgTaskForResult(diaryBgStoreApi, 'pendingDiary', 'diary', async () => {
+      await runGenerateCore(useLangs);
+      return true;
+    }).then(({ started, result }) => {
+      if (!started) { addToast('上一次生成还在进行中', 'info'); return; }
+      if (result === null) addToast('生成失败，再点一次就能重试', 'error');
+      else addToast('Nox 写好了今天的日记', 'success');
+    });
+  };
+
+  const handleAnnotate = (useLangs: string[]) => {
+    if (!ensureReady()) return;
+    const herEntry = diaryOn(store.entries, today, 'her');
+    if (!herEntry?.content.trim()) { addToast('先写今天的日记', 'info'); return; }
+    void startBgTaskForResult(diaryBgStoreApi, 'pendingAnnotate', 'annotate', async () => {
+      await runAnnotateCore(useLangs, herEntry.content);
+      return true;
+    }).then(({ started, result }) => {
+      if (!started) { addToast('上一次批注还在进行中', 'info'); return; }
+      if (result === null) addToast('批注失败，再点一次就能重试', 'error');
+      else addToast('Nox 批注好了', 'success');
+    });
+  };
+
+  /** 交换日记：串行完成「他写今天的日记 → 批注她的日记」，完成后打开检查表（第③步她批阅他的） */
+  const handleExchange = async () => {
+    if (!ensureReady()) return;
+    const herEntry = diaryOn(store.entries, today, 'her');
+    if (!herEntry?.content.trim()) { addToast('发起交换失败：先写今天的日记', 'info'); return; }
+    const needGen = !diaryOn(store.entries, today, 'me')?.content.trim();
+    const needAnn = !herEntry.review?.content.trim();
+    if (!needGen && !needAnn) { setExchangeOpen(true); return; } // 他这边两步都完成了：直接看进度/转发
+    setBusy('exchange');
     try {
-      const { text, summary, mood: m, anchors } = await generateNoxDiary({ char: mountChar!, user: userProfile!, mainApi: apiConfig, langs: useLangs });
-      saveDiaryEntry({ owner: 'me', content: text, summary: summary || undefined, generated: true, mood: m, anchors });
-      addToast('Nox 写好了今天的日记', 'success');
+      if (needGen) await runGenerateCore(langs);
+      if (needAnn) await runAnnotateCore(langs, herEntry.content);
+      addToast('交换好了：他写完了日记，也批注了你的', 'success');
+      setExchangeOpen(true);
     } catch (e) {
-      addToast(`生成失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
+      addToast(`交换失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
     } finally {
       setBusy(null);
     }
   };
 
-  const handleAnnotate = async (useLangs: string[]) => {
-    if (!ensureReady()) return;
-    const herEntry = diaryOn(store.entries, today, 'her');
-    if (!herEntry?.content.trim()) { addToast('先写今天的日记', 'info'); return; }
-    setBusy('annotate');
+  /** 给他的日记配一张图（AI 生图；共享「生图·随手拍风格」，再点覆盖旧图） */
+  const handlePhoto = async () => {
+    const hisEntry = diaryOn(store.entries, today, 'me');
+    if (!mountChar || !hisEntry?.content.trim()) return;
+    const ig = loadImageGenSettings();
+    if (!(ig.enabled && ig.apiKey.trim() && ig.baseUrl.trim() && ig.model.trim())) {
+      addToast('先在系统设置里配置生图 API（相机用的那个）', 'info');
+      return;
+    }
+    setBusy('photo');
     try {
-      const { summary, anchors } = await generateNoxAnnotation({ char: mountChar!, user: userProfile!, herDiary: herEntry.content, mainApi: apiConfig, langs: useLangs });
-      const content = flattenAnchors(anchors, diarySentences(herEntry.content));
-      const now = new Date().toISOString();
-      setDiaryReview(today, 'her', { content, anchors, summary: summary || undefined, createdAt: now, updatedAt: now });
-      addToast('Nox 批注好了', 'success');
+      const style = getPrompt('生图·随手拍风格').replace(/\{\{char\}\}/g, mountChar.name);
+      const r = await generateImage(`${style}\n画面取材自他今天的日记：${hisEntry.content.slice(0, 180)}`, { settings: ig });
+      setDiaryPhoto(today, 'me', { blobRef: r.blobRef });
+      addToast('配好图了', 'success');
     } catch (e) {
-      addToast(`批注失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
+      addToast(`配图失败：${e instanceof Error ? e.message : '网络错误'}`, 'error');
     } finally {
       setBusy(null);
     }
@@ -539,12 +689,12 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
       if (forwardKind === 'review-his') {
         const rv = todayMe?.review;
         if (todayMe && rv) {
-          await forwardDiaryCard(c, { kind: '日记·批阅', title: 'Angel 批阅了 Nox 的日记', subtitle: fmtDiaryDateStamp(today), date: today, original: todayMe.content, review: rv.content });
+          await forwardDiaryCard(c, { kind: '日记·批阅', title: 'Angel 批阅了 Nox 的日记', subtitle: `${fmtDiaryDateStamp(today)}${todayMe.photo ? ' · 附照片' : ''}`, date: today, original: todayMe.content, review: rv.content });
         }
       } else if (forwardKind === 'review-hers') {
         const rv = todayHer?.review;
         if (todayHer && rv) {
-          await forwardDiaryCard(c, { kind: '日记·批注', title: 'Nox 批注了 Angel 的日记', subtitle: fmtDiaryDateStamp(today), date: today, original: todayHer.content, review: rv.content });
+          await forwardDiaryCard(c, { kind: '日记·批注', title: 'Nox 批注了 Angel 的日记', subtitle: `${fmtDiaryDateStamp(today)}${todayHer.photo ? ' · 附照片' : ''}`, date: today, original: todayHer.content, review: rv.content });
         }
       }
     } catch {
@@ -653,16 +803,31 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
               <DiaryBody content={content} anchors={herAnchors} />
             </div>
           )}
+          {entry?.photo && (
+            <div className="flex justify-center" style={{ marginTop: 16 }}>
+              <DiaryPhoto blobRef={entry.photo.blobRef} />
+            </div>
+          )}
         </PaperSheet>
+
+        {bgStuck && (
+          <p style={{ margin: '8px 0 0', fontSize: 11, color: '#b08a8a', textAlign: 'center' }}>上次生成中断或失败过，再点一次按钮就能重试。</p>
+        )}
 
         {/* 今日操作行 */}
         {isToday && content && (
           <div className="flex items-center justify-center" style={{ marginTop: 12, gap: 8 }}>
             <Pill onClick={() => setWriteOpen(true)} ink={ink} ghost><PencilSimple style={{ width: 13, height: 13 }} /> 编辑</Pill>
             {owner === 'me' && entry?.generated && (
-              <Pill onClick={() => setRerollConfirm(true)} ink={ink} disabled={busy === 'diary'}>
-                {busy === 'diary' ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
+              <Pill onClick={() => setRerollConfirm(true)} ink={ink} disabled={diaryRunning}>
+                {diaryRunning ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
                 重roll
+              </Pill>
+            )}
+            {owner === 'me' && entry && (
+              <Pill onClick={() => void handlePhoto()} ink={ink} ghost disabled={busy === 'photo'}>
+                {busy === 'photo' ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
+                {entry.photo ? '换配图' : '配一张图'}
               </Pill>
             )}
             {owner === 'me' && entry && (
@@ -679,8 +844,8 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
           <div className="flex items-center justify-center" style={{ marginTop: 12, gap: 8 }}>
             <Pill onClick={() => setWriteOpen(true)} ink={ink}><PencilSimple style={{ width: 13, height: 13 }} /> {owner === 'me' ? '手动写' : '写日记'}</Pill>
             {owner === 'me' && (
-              <Pill onClick={() => setGenFor('diary')} ink={ink} disabled={busy === 'diary'}>
-                {busy === 'diary' ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
+              <Pill onClick={() => setGenFor('diary')} ink={ink} disabled={diaryRunning}>
+                {diaryRunning ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
                 喊他写
               </Pill>
             )}
@@ -727,19 +892,19 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
               <button
                 type="button"
                 onClick={() => setGenFor('annotate')}
-                disabled={busy === 'annotate'}
+                disabled={annotateRunning}
                 className="border-0 cursor-pointer rounded-full flex items-center justify-center mx-auto"
-                style={{ gap: 6, padding: '11px 22px', fontSize: 13, fontWeight: 700, color: '#fff', background: busy === 'annotate' ? '#9db4d6' : NOTE_INK }}
+                style={{ gap: 6, padding: '11px 22px', fontSize: 13, fontWeight: 700, color: '#fff', background: annotateRunning ? '#9db4d6' : NOTE_INK }}
               >
-                {busy === 'annotate' ? <SpinnerGap className="animate-spin" style={{ width: 14, height: 14 }} /> : <Sparkle style={{ width: 14, height: 14 }} />}
-                {busy === 'annotate' ? 'Nox 正在批注…' : '喊他来看'}
+                {annotateRunning ? <SpinnerGap className="animate-spin" style={{ width: 14, height: 14 }} /> : <Sparkle style={{ width: 14, height: 14 }} />}
+                {annotateRunning ? 'Nox 正在批注…' : '喊他来看'}
               </button>
             )
           )}
           {entry?.review?.anchors?.length && isToday && (
             <div className="flex items-center justify-center" style={{ marginTop: 10, gap: 8 }}>
-              <Pill onClick={() => setGenFor('annotate')} ink={NOTE_INK} disabled={busy === 'annotate'}>
-                {busy === 'annotate' ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
+              <Pill onClick={() => setGenFor('annotate')} ink={NOTE_INK} disabled={annotateRunning}>
+                {annotateRunning ? <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} /> : <Sparkle style={{ width: 13, height: 13 }} />}
                 重roll
               </Pill>
               <Pill onClick={() => setForwardKind('review-hers')} ink={NOTE_INK}><PaperPlaneTilt style={{ width: 13, height: 13 }} /> 转发给他</Pill>
@@ -767,11 +932,13 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
             </div>
             <button
               type="button"
-              onClick={() => setExchangeOpen(true)}
+              onClick={() => void handleExchange()}
+              disabled={busy !== null}
               className="border-0 cursor-pointer rounded-full flex items-center justify-center w-full"
-              style={{ gap: 6, marginTop: 10, padding: '10px 0', fontSize: 12, fontWeight: 700, color: '#fff', background: ink }}
+              style={{ gap: 6, marginTop: 10, padding: '10px 0', fontSize: 12, fontWeight: 700, color: '#fff', background: busy === 'exchange' ? '#9db4d6' : ink, opacity: busy !== null && busy !== 'exchange' ? 0.6 : 1 }}
             >
-              {steps.every((s) => s.done) ? '交换完成 · 去转发卡片' : '交换日记'}
+              {busy === 'exchange' && <SpinnerGap className="animate-spin" style={{ width: 13, height: 13 }} />}
+              {busy === 'exchange' ? '交换中：写日记 + 批注…' : steps.every((s) => s.done) ? '交换完成 · 去转发卡片' : '交换日记'}
             </button>
           </div>
         </div>
@@ -783,6 +950,8 @@ const CoupleDiary: React.FC<{ initialOwner: DiaryOwner; onBack: () => void }> = 
           owner={owner}
           initial={content}
           initialMood={mood}
+          photoRef={entry?.photo?.blobRef}
+          onPhoto={(ref) => setDiaryPhoto(today, owner, ref ? { blobRef: ref } : null)}
           onSave={(text, m) => saveDiaryEntry({ owner, content: text, mood: m, generated: owner === 'me' ? false : undefined })}
           onClose={() => setWriteOpen(false)}
         />

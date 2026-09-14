@@ -43,6 +43,7 @@ export interface DiaryEntry {
   generated?: boolean;   // 他的日记是否 AI 生成（决定「重roll」按钮；手动写的当天可编辑）
   mood?: string;         // 心情基调 → 信纸配色（joy/calm/soft/sad/angry/night；他的由 AI 输出，她手动选）
   anchors?: SentenceAnchor[]; // 他自己的旁批（AI 生成时输出，写在正文句子上；与他的批注渲染同机制）
+  photo?: { blobRef: string; archiveId?: string }; // 日记照片（她上传实拍 / 他「配一张图」AI 生成）
   review?: DiaryReview;  // 对方给这篇的批阅
   createdAt: string;
   updatedAt: string;
@@ -129,6 +130,16 @@ export function saveDiaryEntry(input: {
   }));
   addActivity({ kind: 'diary', date, owner: input.owner, text: input.owner === 'me' ? 'Nox 写了日记' : 'Angelica 写了日记' });
   return entry;
+}
+
+/** 设/清日记照片（null 清掉）——与正文 upsert 分开：undefined 语义不打架，方便「配一张图」随时覆盖 */
+export function setDiaryPhoto(date: string, owner: DiaryOwner, photo: { blobRef: string; archiveId?: string } | null): void {
+  const now = isoNow();
+  store.set((prev) => ({
+    ...prev,
+    entries: prev.entries.map((e) => (e.date === date && e.owner === owner ? { ...e, photo: photo ?? undefined, updatedAt: now } : e)),
+    updatedAt: now,
+  }));
 }
 
 /** 写 / 替换一篇的批阅（她的批阅手动、他的批注 AI，都走这个；重roll = 覆盖） */

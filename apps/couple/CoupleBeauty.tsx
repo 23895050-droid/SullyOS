@@ -1,11 +1,14 @@
 // 美化区 — 设置 tab（2026-08-19）：情侣空间图片自定义（宣告区背景 / 胶囊条背景）+ 单间美化的入口占位
 // 图片走 blobRef（IndexedDB blob_assets），配置存 localStorage couple_beauty_v1；旧值/渐变字符串原样透传
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useOS } from '../../context/OSContext';
 import { ArrowCounterClockwise, ImageSquare, CaretDown } from '@phosphor-icons/react';
 import { putImageBlob, useBlobRefUrl } from '../../utils/blobRef';
 import PromptSettings from '../../components/settings/PromptSettings';
 import MountSettings from './MountSettings';
+import { gatherBoardDayInfo } from './boardApi';
+import { getMountConfig } from '../../utils/noxhomeMount';
+import { getLocalDateKey } from '../../utils/localDate';
 import DataBackupPanel from './DataBackupPanel';
 import { deleteBlobRef } from '../../utils/blobRef';
 import { updateDiaryApi, updateDiaryFont, useDiaryStore } from './diaryStore';
@@ -228,6 +231,53 @@ const BeautyFold: React.FC<{ title: string; children: React.ReactNode }> = ({ ti
   );
 };
 
+// ── 留言板批阅输入预览（透明化：他每次「批阅今天」读到的就是这段） ──
+const BoardInputPreview: React.FC = () => {
+  const { userProfile, characters } = useOS();
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    setBusy(true);
+    try {
+      const raw = await gatherBoardDayInfo(getLocalDateKey());
+      const char = characters.find((c) => c.id === getMountConfig().charId);
+      setText(
+        raw
+          .replace(/\{\{user\}\}/g, userProfile?.name ?? '她')
+          .replace(/\{\{char\}\}/g, char?.name ?? '他'),
+      );
+    } catch {
+      setText('读取失败，点下面刷新重试');
+    } finally {
+      setBusy(false);
+    }
+  };
+  // BeautyFold 折叠时不渲染 children：展开即重新读一次，总是最新数据
+  useEffect(() => { void load(); }, []);
+  return (
+    <div className="flex flex-col" style={{ gap: 8 }}>
+      <div style={{ fontSize: 11, color: '#8aa397', lineHeight: 1.7 }}>
+        他每次「批阅今天」读到的就是下面这段（今天的实时数据）。她日记的正文不会进来，只给「写没写」的状态。
+      </div>
+      <div
+        className="rounded-xl"
+        style={{ background: '#fdf7fa', border: '1px solid #f3dbe6', padding: 10, fontSize: 11, color: '#5a4a52', lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto' }}
+      >
+        {busy ? '读取中…' : text || '（今天还没有可用于批阅的记录）'}
+      </div>
+      <button
+        type="button"
+        onClick={load}
+        disabled={busy}
+        className="border-0 cursor-pointer rounded-full"
+        style={{ padding: '7px 0', fontSize: 12, fontWeight: 600, color: '#b2568a', background: '#fbeef4' }}
+      >
+        {busy ? '读取中…' : '刷新'}
+      </button>
+    </div>
+  );
+};
+
 // ── 情侣页调色台面板（2026-08-30 她要求：情侣页面每个颜色/卡片透明度/卡片颜色/文字颜色可调 + 命名保存预设） ──
 const CP_LABELS: Record<string, string> = {
   bg: '渐变上端', bgMid: '渐变中段', bgDeep: '渐变下端',
@@ -434,6 +484,10 @@ const CoupleBeauty: React.FC = () => {
 
         <BeautyFold title="挂载到角色">
           <MountSettings />
+        </BeautyFold>
+
+        <BeautyFold title="留言板批阅输入">
+          <BoardInputPreview />
         </BeautyFold>
       </div>
     </div>

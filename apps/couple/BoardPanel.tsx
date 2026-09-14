@@ -11,8 +11,12 @@ import { getDiaryStore } from './diaryStore';
 import { resolveDiaryApi } from './diaryApi';
 import { generateBoardMessage, archiveBoardImage } from './boardApi';
 import { getMountConfig } from '../../utils/noxhomeMount';
+import { getPrompt } from '../../utils/promptRegistry';
 import { getLocalDateKey } from '../../utils/localDate';
 import { fmtDiaryDateStamp } from '../../utils/diaryMath';
+import { useDiaryHandFont } from './CoupleDiary';
+import { diaryBgStore, diaryBgStoreApi } from './diaryBgStore';
+import { isBgTaskStale, startBgTaskForResult } from '../../utils/bgTask';
 import { generateImage } from '../../utils/imageGenService';
 import { loadImageGenSettings } from '../../utils/imageGenStorage';
 import { getBlobForRef, blobToDataUrl, useBlobRefUrl } from '../../utils/blobRef';
@@ -43,7 +47,7 @@ const BoardImageThumb: React.FC<{ blobRef: string }> = ({ blobRef }) => {
 };
 
 /** 往期留言详情（只读） */
-const BoardHistoryDetail: React.FC<{ m: BoardMessage; onBack: () => void; onClose: () => void }> = ({ m, onBack, onClose }) => (
+const BoardHistoryDetail: React.FC<{ m: BoardMessage; onBack: () => void; onClose: () => void; fontFamily: string }> = ({ m, onBack, onClose, fontFamily }) => (
   <div className="flex flex-col" style={{ width: 'min(100%, 560px)', background: '#fff', borderRadius: 24, padding: 16, gap: 10, maxHeight: 'calc(100dvh - 120px)', overflowY: 'auto' }}>
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
@@ -57,7 +61,7 @@ const BoardHistoryDetail: React.FC<{ m: BoardMessage; onBack: () => void; onClos
       </button>
     </div>
     <span style={{ fontSize: 10, color: '#c4aeb8' }}>Nox · {timeOf(m.createdAt)} 留言</span>
-    <div style={{ fontSize: 13, color: '#3a2a33', lineHeight: 1.8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.content}</div>
+    <div style={{ fontSize: 13, color: '#3a2a33', lineHeight: 1.8, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily }}>{m.content}</div>
     {m.image && (
       <div className="flex flex-col" style={{ gap: 6 }}>
         <BoardImageThumb blobRef={m.image.blobRef} />
@@ -71,6 +75,7 @@ const BoardHistoryDetail: React.FC<{ m: BoardMessage; onBack: () => void; onClos
 /** 往期留言（日期列表 → 详情） */
 const BoardHistory: React.FC<{ messages: BoardMessage[]; onClose: () => void }> = ({ messages, onClose }) => {
   const [sel, setSel] = useState<BoardMessage | null>(null);
+  const fontFamily = useDiaryHandFont();
   return (
     <div
       className="fixed inset-0 flex items-end justify-center"
@@ -78,7 +83,7 @@ const BoardHistory: React.FC<{ messages: BoardMessage[]; onClose: () => void }> 
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       {sel ? (
-        <BoardHistoryDetail m={sel} onBack={() => setSel(null)} onClose={onClose} />
+        <BoardHistoryDetail m={sel} onBack={() => setSel(null)} onClose={onClose} fontFamily={fontFamily} />
       ) : (
         <div className="flex flex-col" style={{ width: 'min(100%, 560px)', background: '#fff', borderRadius: 24, padding: 16, gap: 10, maxHeight: 'calc(100dvh - 120px)', overflowY: 'auto' }}>
           <div className="flex items-center justify-between">
@@ -99,7 +104,7 @@ const BoardHistory: React.FC<{ messages: BoardMessage[]; onClose: () => void }> 
                 {fmtDiaryDateStamp(m.date)}
                 {m.image && <Camera style={{ width: 12, height: 12, color: '#c9a0b2' }} />}
               </span>
-              <span style={{ fontSize: 11, color: '#b0909c', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{m.content}</span>
+              <span style={{ fontSize: 11, color: '#b0909c', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', fontFamily }}>{m.content}</span>
             </button>
           ))}
           <p style={{ fontSize: 10, color: '#b5a68c', margin: 0, textAlign: 'center' }}>往期留言不能更改，只供回看。</p>
@@ -121,18 +126,22 @@ const BoardPanel: React.FC = () => {
     .map((d) => boardOn(store.messages, d, 'me'))
     .filter((m): m is BoardMessage => Boolean(m));
   const mountChar = characters.find((c) => c.id === getMountConfig().charId) ?? null;
+  const fontFamily = useDiaryHandFont();
 
   const [busy, setBusy] = useState<'gen' | 'archive' | null>(null);
+  // 后台生成状态（生成中可离页，回来续显示）
+  const bg = diaryBgStore.use();
+  const boardPending = bg.pendingBoard;
+  const boardRunning = !!boardPending && boardPending.status === 'running' && !isBgTaskStale(boardPending);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
 
-  /** 喊他留言 / 重roll（当天；模型输出配图意图 → 生图 API 生成，未配生图就不画） */
-  const gen = async (isReroll: boolean) => {
+  /** 喊他留言 / 重roll（后台跑：生成中可离页；模型输出配图意图 → 生图 API 生成，未配生图就不画） */
+  const gen = (isReroll: boolean) => {
     if (!mountChar) { addToast('先去「挂载设置」选要挂载的角色', 'info'); return; }
     if (!userProfile?.name) { addToast('还没有用户资料', 'info'); return; }
     if (!resolveDiaryApi(getDiaryStore().api, apiConfig)) { addToast('还没配置 API（日记设置或主 API）', 'info'); return; }
-    setBusy('gen');
-    try {
+    void startBgTaskForResult(diaryBgStoreApi, 'pendingBoard', 'board', async () => {
       const { content, image } = await generateBoardMessage({
         char: mountChar, user: userProfile, mainApi: apiConfig, date: today,
         rerollOf: isReroll ? todayMe?.content : undefined,
@@ -142,7 +151,9 @@ const BoardPanel: React.FC = () => {
         const ig = loadImageGenSettings();
         if (ig.enabled && ig.apiKey.trim() && ig.baseUrl.trim() && ig.model.trim()) {
           try {
-            const r = await generateImage(image.prompt, { settings: ig });
+            // 共享出图风格（设置·提示词管理「生图·随手拍风格」，日记配图同一条）
+            const style = getPrompt('生图·随手拍风格').replace(/\{\{char\}\}/g, mountChar.name);
+            const r = await generateImage(style ? `${style}\n${image.prompt}` : image.prompt, { settings: ig });
             imgData = { blobRef: r.blobRef, prompt: image.prompt, why: image.why };
           } catch {
             addToast('配图没画出来，留言先贴上了', 'info');
@@ -150,12 +161,12 @@ const BoardPanel: React.FC = () => {
         }
       }
       saveBoardMessage({ date: today, owner: 'me', content, generated: true, image: imgData });
-      addToast(isReroll ? '留言重写好了 ✍️' : '他留言了 💬', 'success');
-    } catch {
-      addToast('生成失败，请重试', 'error');
-    } finally {
-      setBusy(null);
-    }
+      return true;
+    }).then(({ started, result }) => {
+      if (!started) { addToast('上一次生成还在进行中', 'info'); return; }
+      if (result === null) addToast('生成失败，再点一次就能重试', 'error');
+      else addToast(isReroll ? '留言重写好了 ✍️' : '他留言了 💬', 'success');
+    });
   };
 
   /** 照片留档进相册（三点摘要：时间与语境 / 为什么贴 / 照片什么样） */
@@ -199,11 +210,11 @@ const BoardPanel: React.FC = () => {
               <button
                 type="button"
                 onClick={() => void gen(false)}
-                disabled={busy === 'gen'}
+                disabled={boardRunning}
                 className="flex items-center gap-1.5"
-                style={{ ...pill, background: 'var(--cs-accent, #f0a8c0)', color: '#fff', opacity: busy === 'gen' ? 0.6 : 1 }}
+                style={{ ...pill, background: 'var(--cs-accent, #f0a8c0)', color: '#fff', opacity: boardRunning ? 0.6 : 1 }}
               >
-                {busy === 'gen' ? (
+                {boardRunning ? (
                   <>
                     <SpinnerGap className="animate-spin" style={{ width: 11, height: 11 }} />
                     写留言中…
@@ -211,20 +222,23 @@ const BoardPanel: React.FC = () => {
                 ) : (
                   <PencilSimple style={{ width: 11, height: 11 }} />
                 )}
-                {busy !== 'gen' && '喊他留言'}
+                {!boardRunning && '喊他留言'}
               </button>
             )}
           </div>
         </div>
 
-        {busy === 'gen' && todayMe && (
+        {boardRunning && todayMe && (
           <p style={{ ...NOTE, marginTop: 2 }}>正在重写今天的留言……</p>
+        )}
+        {boardPending?.status === 'failed' && (
+          <p style={{ ...NOTE, marginTop: 2, color: '#b08a8a' }}>上次生成失败过，再点一次就能重试。</p>
         )}
 
         {todayMe ? (
           <>
             <span style={{ fontSize: 10, color: '#c4aeb8' }}>{fmtDiaryDateStamp(today)} · {timeOf(todayMe.createdAt)}</span>
-            <div style={{ fontSize: 13, color: '#3a2a33', lineHeight: 1.8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{todayMe.content}</div>
+            <div style={{ fontSize: 13, color: '#3a2a33', lineHeight: 1.8, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily }}>{todayMe.content}</div>
             {todayMe.image && (
               <div className="flex flex-col" style={{ gap: 6, marginTop: 2 }}>
                 <BoardImageThumb blobRef={todayMe.image.blobRef} />
