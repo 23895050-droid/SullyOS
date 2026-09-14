@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowLeft, ListBullets, TextAa } from '@phosphor-icons/react';
-import { getBook, getChapter, getProgress, putProgress, type RdBook, type RdChapter } from '../../utils/reader/readerDb';
+import { getBook, getChapter, getProgress, putProgress, type RdBook, type RdChapter, type RdProgress } from '../../utils/reader/readerDb';
 import {
     pageForAnchor, paginateFlow, slicesForPage, type PageSlice, type RdPageBox,
 } from '../../utils/reader/paginate';
@@ -44,6 +44,11 @@ export default function ReaderPage({ bookId, onBack }: Props) {
     const currentSlicesRef = useRef<PageSlice[]>([]);
     /** 上一页的锚点：重排（字体就绪/转屏）时用它回位，别跳回第一页 */
     const lastAnchorRef = useRef<{ paraIdx: number; charOffset: number } | null>(null);
+    /** 待落盘的进度（防抖写入，离开页面时立刻写掉——退出去不能丢） */
+    const pendingSaveRef = useRef<RdProgress | null>(null);
+    const sessionStartRef = useRef(Date.now());
+    const baseSecondsRef = useRef(0);
+    const sessionCountRef = useRef(1);
     const saveTimerRef = useRef<number | null>(null);
     const touchRef = useRef<{ x: number; y: number; t: number; locked: boolean } | null>(null);
     const restoringRef = useRef(true);
@@ -57,6 +62,10 @@ export default function ReaderPage({ bookId, onBack }: Props) {
             if (!b) { setError('这本书不见了'); return; }
             setBook(b);
             const prog = await getProgress(bookId, 'user');
+            // 本次阅读时长从打开这一页开始算（别拿「上次的秒数 + 固定值」糊弄）
+            sessionStartRef.current = Date.now();
+            baseSecondsRef.current = prog?.readingSeconds ?? 0;
+            sessionCountRef.current = (prog?.sessionCount ?? 0) + 1;
             const startChapter = prog?.chapterIdx ?? 0;
             setChapterIdx(Math.max(0, Math.min(startChapter, Math.max(0, b.chapterCount - 1))));
             if (prog) pendingRef.current = { anchor: { paraIdx: prog.paraIdx, charOffset: prog.charOffset } };
@@ -94,8 +103,17 @@ export default function ReaderPage({ bookId, onBack }: Props) {
         else if (lastAnchorRef.current) {
             // 没有明确目标（比如字体就绪后补量）：回到「刚才读的那一页」，不是第一页
             idx = pageForAnchor(flow, next, lastAnchorRef.current.paraIdx, lastAnchorRef.current.charOffset);
+        } else {
+            // 连锚点都没有：至少留在当前页码，绝不跳回第一页
+            idx = Math.max(0, Math.min(pageIdx, next.length - 1));
         }
         pendingRef.current = null;
+        // 量完立刻把「这一页的锚点」记下来——后面任何一次补量（字体/转屏）都靠它回位，
+        // 不能等副作用跑完再记（那中间的补量会拿到 null 而跳回第一页）
+        const firstSlice = slicesForPage(flow, next[idx], height)[0];
+        lastAnchorRef.current = firstSlice
+            ? { paraIdx: firstSlice.paraIdx, charOffset: firstSlice.startOffset }
+            : null;
         setPageIdx(idx);
         restoringRef.current = false;
     }, [chapter, prefs.typography, layoutNonce]);
@@ -122,21 +140,35 @@ export default function ReaderPage({ bookId, onBack }: Props) {
         return first ? { paraIdx: first.paraIdx, charOffset: first.startOffset } : null;
     }, [pages, pageIdx]);
 
+    /** 给观察器用的「当前页锚点」取值口：ref 保持最新，观察器就不用随翻页重建。 */
+    const anchorGetterRef = useRef(anchorOfCurrentPage);
+    useEffect(() => { anchorGetterRef.current = anchorOfCurrentPage; }, [anchorOfCurrentPage]);
+
     useEffect(() => {
         const viewport = viewportRef.current;
         if (!viewport || typeof ResizeObserver === 'undefined') return;
         let timer: number | null = null;
+        // 只在**尺寸真的变了**时重排：ResizeObserver 每次 observe() 都会立刻回调一次，
+        // 如果照单全收就会「重排 → 页数组换新 → 观察器重建 → 又立刻回调」转成死循环
+        // （页面一直重渲染，进度保存的防抖也被无限重置）。
+        let lastH = viewport.clientHeight;
+        let lastW = viewport.clientWidth;
         const ro = new ResizeObserver(() => {
+            const h = viewport.clientHeight;
+            const w = viewport.clientWidth;
+            if (h === lastH && w === lastW) return;
+            lastH = h;
+            lastW = w;
             if (timer) window.clearTimeout(timer);
             timer = window.setTimeout(() => {
-                const anchor = anchorOfCurrentPage();
+                const anchor = anchorGetterRef.current();
                 if (anchor) pendingRef.current = { anchor };
                 setLayoutNonce((n) => n + 1);
             }, 150);
         });
         ro.observe(viewport);
         return () => { if (timer) window.clearTimeout(timer); ro.disconnect(); };
-    }, [anchorOfCurrentPage]);
+    }, []);
 
     // ── 翻页 + 进度存 ──
     const goPage = useCallback((delta: number) => {
@@ -151,31 +183,48 @@ export default function ReaderPage({ bookId, onBack }: Props) {
         setChapterIdx(nextChapter);
     }, [pages.length, pageIdx, book, chapterIdx]);
 
+    /** 把待落盘的进度写掉（幂等：写完就清空）。 */
+    const flushProgress = useCallback(async () => {
+        const payload = pendingSaveRef.current;
+        if (!payload) return;
+        pendingSaveRef.current = null;
+        try { await putProgress(payload); } catch { /* 落盘失败不打断阅读 */ }
+    }, []);
+
     useEffect(() => {
         if (!book || !chapter || pages.length === 0) return;
         const anchor = anchorOfCurrentPage();
         if (anchor) lastAnchorRef.current = anchor;
         const span = 100 / Math.max(1, book.chapterCount);
         const percent = Math.round((chapterIdx * span + ((pageIdx + 1) / pages.length) * span) * 10) / 10;
+        const elapsed = Math.round((Date.now() - sessionStartRef.current) / 1000);
+        pendingSaveRef.current = {
+            bookId: book.id,
+            ownerId: 'user',
+            chapterIdx,
+            paraIdx: anchor?.paraIdx ?? 0,
+            charOffset: anchor?.charOffset ?? 0,
+            percent,
+            readingSeconds: baseSecondsRef.current + elapsed,
+            sessionCount: sessionCountRef.current,
+            updatedAt: new Date().toISOString(),
+        };
         if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = window.setTimeout(() => {
-            void (async () => {
-                const prev = await getProgress(book.id, 'user');
-                await putProgress({
-                    bookId: book.id,
-                    ownerId: 'user',
-                    chapterIdx,
-                    paraIdx: anchor?.paraIdx ?? 0,
-                    charOffset: anchor?.charOffset ?? 0,
-                    percent,
-                    readingSeconds: (prev?.readingSeconds ?? 0) + 30,
-                    sessionCount: prev?.sessionCount ?? 1,
-                    updatedAt: new Date().toISOString(),
-                });
-            })();
-        }, SAVE_DEBOUNCE);
+        saveTimerRef.current = window.setTimeout(() => { void flushProgress(); }, SAVE_DEBOUNCE);
         return () => { if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current); };
-    }, [pageIdx, chapterIdx, pages.length, book, chapter, anchorOfCurrentPage]);
+    }, [pageIdx, chapterIdx, pages.length, book, chapter, anchorOfCurrentPage, flushProgress]);
+
+    // 退出书房 / 切后台 / 组件卸载：立刻落盘（只靠防抖的话，退出去那次就丢了）
+    useEffect(() => {
+        const onHide = () => { void flushProgress(); };
+        window.addEventListener('pagehide', onHide);
+        document.addEventListener('visibilitychange', onHide);
+        return () => {
+            window.removeEventListener('pagehide', onHide);
+            document.removeEventListener('visibilitychange', onHide);
+            void flushProgress();
+        };
+    }, [flushProgress]);
 
     // ── 触摸：左右滑翻页（纵向不管） ──
     const onTouchStart = (e: React.TouchEvent) => {

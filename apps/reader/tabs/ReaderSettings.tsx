@@ -8,7 +8,7 @@
 
 import { useState } from 'react';
 import {
-    DEFAULT_TYPOGRAPHY, setCssGlobal, setReadingMode, setShelfLayout, setTheme, setTypography, useReaderPrefs,
+    DEFAULT_TYPOGRAPHY, setCssGlobal, setShelfLayout, setTheme, setTypography, useReaderPrefs,
 } from '../readerPrefs';
 import { HIGHLIGHT_SLOTS, READER_SKINS } from '../readerSkinPresets';
 import { setHighlightSlot } from '../readerPrefs';
@@ -95,16 +95,9 @@ export default function ReaderSettings() {
                     </div>
                 </div>
 
-                <div className="rd-sheet">
-                    <div className="rd-row-label" style={{ marginBottom: 8 }}>共读模式</div>
-                    <div className="rd-btn-row">
-                        <button className={prefs.readingMode === 'focus' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => setReadingMode('focus')}>专注（本页为主）</button>
-                        <button className={prefs.readingMode === 'casual' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => setReadingMode('casual')}>随心（带日常上下文）</button>
-                    </div>
-                    <div className="rd-muted" style={{ marginTop: 6 }}>
-                        专注模式：上下文以当前页正文为主，只带本页最近几条批注；随心模式：保留正常聊天上下文。
-                    </div>
-                </div>
+                {/* 共读模式（专注/随心）是**单书**设置，不放这里——它属于那本书的信息页
+                    右上角的小设置（v3 §4.6 的「单书设置」）。等书信息页做出来再接上；
+                    存储字段 readerPrefs.readingMode 已就绪，届时直接读写即可。 */}
 
                 <div className="rd-sheet">
                     <div className="rd-row-label" style={{ marginBottom: 8 }}>划线配色（自己一个槽，每个角色各一个）</div>
