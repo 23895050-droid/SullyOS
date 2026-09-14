@@ -1705,44 +1705,36 @@ const MessageItem = React.memo(({
         // 反馈3 #2：按 direction 标清发起方——她发起 = 你邀请 Ta；他发起 = Ta 邀请你
         const byUser = inv.direction === 'user';
         return (
-            <div className="w-64 rounded-2xl overflow-hidden shadow-sm border"
-                style={{ borderColor: '#f3d9e6', background: 'linear-gradient(135deg, #fff2f7 0%, #f5edff 55%, #eaf1ff 100%)' }}>
+            <div className="w-64 rounded-2xl overflow-hidden shadow-sm border mz-music-card mz-music-card-invite">
                 <div className="relative px-3 pt-3 pb-2 overflow-hidden">
-                    <div aria-hidden className="pointer-events-none absolute inset-0 opacity-70"
-                        style={{
-                            background: `radial-gradient(ellipse at 30% 50%, rgba(255,170,200,0.32) 0%, transparent 52%),
-                                         radial-gradient(ellipse at 70% 50%, rgba(195,178,255,0.32) 0%, transparent 55%)`,
-                        }} />
+                    <div aria-hidden className="pointer-events-none absolute inset-0 opacity-70 mz-music-card-glow" />
                     <div className="relative flex items-center justify-center gap-2">
                         {musicCardAvatar(userAvatar, '你', '#ffb5cf')}
                         <svg width="16" height="15" viewBox="0 0 24 22" fill="none"
-                            className="animate-pulse"
-                            style={{ color: '#ff7fae', filter: 'drop-shadow(0 0 5px rgba(255,127,174,0.55))' }}>
+                            className="animate-pulse mz-music-card-heart">
                             <path d="M12 21s-8-5.3-8-11.5C4 6 6.5 3.5 9.5 3.5c1.6 0 3 .8 2.5 2.2C11.5 4.3 12.9 3.5 14.5 3.5 17.5 3.5 20 6 20 9.5 20 15.7 12 21 12 21z"
                                 fill="currentColor" />
                         </svg>
                         {musicCardAvatar(charAvatar, charName || 'Ta', '#c3b2ff')}
                     </div>
-                    <div className="relative mt-1.5 text-center text-[9px] tracking-[0.3em] uppercase font-semibold"
-                        style={{ color: '#9c6fc2', opacity: 0.8 }}>
+                    <div className="relative mt-1.5 text-center text-[9px] tracking-[0.3em] uppercase font-semibold mz-music-card-label">
                         Listening Together
                     </div>
-                    <div className="relative mt-0.5 text-center text-[11px]"
-                        style={{ color: '#5a49a8', fontFamily: `'Noto Serif','Georgia',serif` }}>
+                    <div className="relative mt-0.5 text-center text-[11px] mz-music-card-names">
                         <span className="font-medium">你</span>
                         <span className="mx-1.5 opacity-50">×</span>
                         <span className="font-medium">{charName || 'Ta'}</span>
                     </div>
                 </div>
                 <div className="p-3 pt-1.5">
-                    <div className="text-[11px] leading-relaxed" style={{ color: '#6b5b8f' }}>
+                    <div className="text-[11px] leading-relaxed mz-music-card-text">
                         {byUser ? (
                             name
-                                ? <>你邀请 <span className="font-semibold" style={{ color: '#2a1f4d' }}>{charName || 'Ta'}</span> 一起听 <span className="font-semibold" style={{ color: '#2a1f4d' }}>《{name}》</span></>
-                                : <>你邀请 <span className="font-semibold" style={{ color: '#2a1f4d' }}>{charName || 'Ta'}</span> 一起听首歌</>
+                                ? <>你邀请 <span className="font-semibold mz-music-card-strong">{charName || 'Ta'}</span> 一起听 <span className="font-semibold mz-music-card-strong">《{name}》</span></>
+                                : <>你邀请 <span className="font-semibold mz-music-card-strong">{charName || 'Ta'}</span> 一起听首歌</>
                         ) : (
                             name
-                                ? <>邀请你一起听 <span className="font-semibold" style={{ color: '#2a1f4d' }}>《{name}》</span></>
+                                ? <>邀请你一起听 <span className="font-semibold mz-music-card-strong">《{name}》</span></>
                                 : '想和你一起听首歌'
                         )}
                     </div>
@@ -2150,13 +2142,14 @@ const MessageItem = React.memo(({
         if (m.type === 'music_invite' && m.metadata?.invite) {
             const inv = m.metadata.invite as { song?: any; inviteSongName?: string; status?: string };
             const status = inv.status || 'pending';
+            const chipCls = 'mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium mz-music-card-chip';
             const statusChip = status === 'accepted'
-                ? <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium" style={{ background: 'rgba(195,178,255,0.3)', color: '#7a5db0', border: '1px solid rgba(195,178,255,0.5)' }}>💗 {charName || 'Ta'} 已接受</span>
+                ? <span className={`${chipCls} mz-music-card-chip-accepted`}>💗 {charName || 'Ta'} 已接受</span>
                 : status === 'declined'
-                    ? <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium" style={{ background: 'rgba(148,163,184,0.15)', color: '#7a7a85', border: '1px solid rgba(148,163,184,0.3)' }}>🍃 婉拒了这次邀请</span>
+                    ? <span className={`${chipCls} mz-music-card-chip-declined`}>🍃 婉拒了这次邀请</span>
                     : status === 'cancelled'
-                        ? <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium" style={{ background: 'rgba(148,163,184,0.15)', color: '#7a7a85', border: '1px solid rgba(148,163,184,0.3)' }}>↩ 已取消，重新发起了邀请</span>
-                        : <span className="mt-2.5 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-medium animate-pulse" style={{ background: 'rgba(255,181,207,0.25)', color: '#b06a8d', border: '1px solid rgba(255,181,207,0.4)' }}>⏳ 等 Ta 回应</span>;
+                        ? <span className={`${chipCls} mz-music-card-chip-cancelled`}>↩ 已取消，重新发起了邀请</span>
+                        : <span className={`${chipCls} mz-music-card-chip-pending animate-pulse`}>⏳ 等 Ta 回应</span>;
             return (
                 <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
                     {selectionMode && (
@@ -2167,7 +2160,7 @@ const MessageItem = React.memo(({
                         </div>
                     )}
                     <div className="w-full px-4 my-3" {...interactionProps}>
-                        <div className="mx-auto flex justify-center mz-music-card">
+                        <div className="mx-auto flex justify-center">
                             {musicInviteCardBody(inv, <div className="flex justify-center">{statusChip}</div>)}
                         </div>
                     </div>
@@ -2194,14 +2187,13 @@ const MessageItem = React.memo(({
                         </div>
                     )}
                     <div className="w-full px-4 my-3" {...interactionProps}>
-                        <div className="mz-music-card mx-auto w-60 rounded-2xl border px-4 py-3 text-center shadow-sm"
-                            style={{ borderColor: '#f3d9e6', background: 'linear-gradient(135deg, #fff7fa 0%, #f7f1ff 100%)' }}>
+                        <div className="mz-music-card mz-music-card-accept mx-auto w-60 rounded-2xl border px-4 py-3 text-center shadow-sm">
                             <div className="text-base leading-none">{isAccept ? '💗' : isDecline ? '🍃' : '🎧'}</div>
-                            <div className="text-[11px] font-semibold mt-1.5" style={{ color: '#383639' }}>
+                            <div className="text-[11px] font-semibold mt-1.5 mz-music-card-title">
                                 {isAccept ? `${actor} 接受了一起听` : isDecline ? `${actor} 婉拒了这次邀请` : `${actor} 结束了这次一起听`}
                             </div>
                             {songName ? (
-                                <div className="text-[10px] mt-0.5 truncate" style={{ color: '#9c6fc2' }}>《{songName}》</div>
+                                <div className="text-[10px] mt-0.5 truncate mz-music-card-sub">《{songName}》</div>
                             ) : null}
                         </div>
                     </div>
@@ -2239,13 +2231,12 @@ const MessageItem = React.memo(({
                         </div>
                     )}
                     <div className="w-full px-4 my-3" {...interactionProps}>
-                        <div className="mz-music-card mx-auto w-72 rounded-2xl overflow-hidden shadow-md"
-                            style={{ border: '1.5px solid #f3d9e6', background: 'linear-gradient(135deg, #fff2f7 0%, #f5edff 55%, #eaf1ff 100%)' }}>
-                            <div className="px-3 pt-2.5 pb-2 flex items-center gap-2" style={{ borderBottom: '1px solid rgba(156,111,194,0.15)' }}>
+                        <div className="mz-music-card mz-music-card-summary mx-auto w-72 rounded-2xl overflow-hidden shadow-md">
+                            <div className="px-3 pt-2.5 pb-2 flex items-center gap-2 mz-music-card-head">
                                 <span className="text-sm">🎧</span>
                                 <div className="flex-1 min-w-0">
-                                    <div className="text-[9px] tracking-[0.3em] uppercase font-semibold" style={{ color: '#9c6fc2', opacity: 0.8 }}>Listening Together</div>
-                                    <div className="text-[11px] font-semibold" style={{ color: '#2a1f4d' }}>
+                                    <div className="text-[9px] tracking-[0.3em] uppercase font-semibold mz-music-card-label">Listening Together</div>
+                                    <div className="text-[11px] font-semibold mz-music-card-title">
                                         一起听了 {songs.length} 首歌{minutes > 0 ? ` · 约 ${minutes} 分钟` : ''}
                                     </div>
                                 </div>
@@ -2259,20 +2250,19 @@ const MessageItem = React.memo(({
                                         {s.albumPic ? (
                                             <img src={s.albumPic} alt="" className="w-8 h-8 rounded-md object-cover shrink-0 bg-slate-100" loading="lazy" decoding="async" referrerPolicy="no-referrer" />
                                         ) : (
-                                            <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 text-sm text-white"
-                                                style={{ background: 'linear-gradient(135deg, #8b7ab8 0%, #6b95c7 100%)' }}>♪</div>
+                                            <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 text-sm text-white mz-music-card-cover">♪</div>
                                         )}
                                         <div className="flex-1 min-w-0">
-                                            <div className="text-[11px] font-semibold line-clamp-1" style={{ color: '#2a1f4d' }}>{s.name || '未命名'}</div>
-                                            <div className="text-[9px] truncate" style={{ color: '#9c8ab8' }}>{(s.artists || []).join(' / ') || '—'}</div>
+                                            <div className="text-[11px] font-semibold line-clamp-1 mz-music-card-title">{s.name || '未命名'}</div>
+                                            <div className="text-[9px] truncate mz-music-card-sub">{(s.artists || []).join(' / ') || '—'}</div>
                                         </div>
                                         {s.count > 1 && (
-                                            <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(195,178,255,0.3)', color: '#7a5db0' }}>×{s.count}</span>
+                                            <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full mz-music-card-count">×{s.count}</span>
                                         )}
                                     </div>
                                 ))}
                                 {card.summaryText && (
-                                    <div className="mt-1 pt-2 text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#5a49a8', borderTop: '1px dashed rgba(156,111,194,0.25)' }}>
+                                    <div className="mt-1 pt-2 text-[11px] leading-relaxed whitespace-pre-wrap mz-music-card-text">
                                         {card.summaryText}
                                     </div>
                                 )}
@@ -2296,16 +2286,15 @@ const MessageItem = React.memo(({
                         </div>
                     )}
                     <div className="w-full px-4 my-3" {...interactionProps}>
-                        <div className="mz-music-card mx-auto w-64 rounded-2xl border px-3 py-2.5 shadow-sm"
-                            style={{ borderColor: '#dbe7f4', background: 'linear-gradient(180deg, #f6faff 0%, #f0f6ff 100%)' }}>
+                        <div className="mz-music-card mz-music-card-chatsummary mx-auto w-64 rounded-2xl border px-3 py-2.5 shadow-sm">
                             <div className="flex items-center gap-1.5">
                                 <span className="text-xs">💬</span>
-                                <span className="text-[9px] tracking-[0.25em] uppercase font-semibold" style={{ color: '#7c93b8' }}>聊歌小结</span>
+                                <span className="text-[9px] tracking-[0.25em] uppercase font-semibold mz-music-card-label">聊歌小结</span>
                                 {typeof card.segFrom === 'number' && (
-                                    <span className="text-[8px] ml-auto" style={{ color: '#a8b8d0' }}>第 {card.segFrom + 1}-{card.segTo || card.segFrom + 1} 条</span>
+                                    <span className="text-[8px] ml-auto mz-music-card-dim">第 {card.segFrom + 1}-{card.segTo || card.segFrom + 1} 条</span>
                                 )}
                             </div>
-                            <div className="mt-1 text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#4a5f80' }}>
+                            <div className="mt-1 text-[11px] leading-relaxed whitespace-pre-wrap mz-music-card-text">
                                 {card.summaryText || displayText}
                             </div>
                         </div>
@@ -2566,23 +2555,21 @@ const MessageItem = React.memo(({
             <div className="mt-2.5 flex gap-2">
                 <button
                     onClick={(e) => { e.stopPropagation(); void respondInvite(true); }}
-                    className="flex-1 py-1.5 rounded-full text-[10px] font-semibold active:scale-95 transition-transform"
-                    style={{ background: 'linear-gradient(135deg, #ff9dbb, #c9b3ff)', color: '#fff', boxShadow: '0 2px 8px rgba(201,141,255,0.35)' }}>
+                    className="flex-1 py-1.5 rounded-full text-[10px] font-semibold active:scale-95 transition-transform mz-music-card-btn-accept">
                     💗 接受
                 </button>
                 <button
                     onClick={(e) => { e.stopPropagation(); void respondInvite(false); }}
-                    className="flex-1 py-1.5 rounded-full text-[10px] font-medium active:scale-95 transition-transform"
-                    style={{ background: 'rgba(148,163,184,0.12)', color: '#7a7a85', border: '1px solid rgba(148,163,184,0.3)' }}>
+                    className="flex-1 py-1.5 rounded-full text-[10px] font-medium active:scale-95 transition-transform mz-music-card-btn-decline">
                     婉拒
                 </button>
             </div>
         ) : status === 'accepted' ? (
-            <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a5db0' }}>💗 已接受，正在一起听</div>
+            <div className="mt-2.5 text-center text-[10px] font-medium mz-music-card-foot-ok">💗 已接受，正在一起听</div>
         ) : status === 'cancelled' ? (
-            <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a7a85' }}>↩ 已取消，重新发起了邀请</div>
+            <div className="mt-2.5 text-center text-[10px] font-medium mz-music-card-foot">↩ 已取消，重新发起了邀请</div>
         ) : (
-            <div className="mt-2.5 text-center text-[10px] font-medium" style={{ color: '#7a7a85' }}>已婉拒这次邀请</div>
+            <div className="mt-2.5 text-center text-[10px] font-medium mz-music-card-foot">已婉拒这次邀请</div>
         );
         return commonLayout(musicInviteCardBody(inv, footer));
     }
@@ -2626,45 +2613,33 @@ const MessageItem = React.memo(({
         );
 
         return commonLayout(
-            <div className="w-64 rounded-2xl overflow-hidden shadow-sm border cursor-pointer active:opacity-90 transition-opacity"
-                style={{
-                    borderColor: '#f3d9e6',
-                    background: 'linear-gradient(135deg, #fff2f7 0%, #f5edff 55%, #eaf1ff 100%)',
-                }}>
+            <div className="w-64 rounded-2xl overflow-hidden shadow-sm border cursor-pointer active:opacity-90 transition-opacity mz-music-card mz-music-card-song">
 
                 {/* 一起听 · 居中双头像头图（仅 join / join_and_add 显示）*/}
                 {isTogether && (
                     <div className="relative px-3 pt-3 pb-2 overflow-hidden">
                         {/* 粉紫光晕背景 */}
-                        <div aria-hidden className="pointer-events-none absolute inset-0 opacity-70"
-                            style={{
-                                background: `radial-gradient(ellipse at 30% 50%, rgba(255,170,200,0.32) 0%, transparent 52%),
-                                             radial-gradient(ellipse at 70% 50%, rgba(195,178,255,0.32) 0%, transparent 55%)`,
-                            }} />
+                        <div aria-hidden className="pointer-events-none absolute inset-0 opacity-70 mz-music-card-glow" />
                         {/* 居中：用户头像 · ♥ · 角色头像 */}
                         <div className="relative flex items-center justify-center gap-2">
                             {renderAvatar(userAvatar, '你', '#ffb5cf')}
                             <svg width="16" height="15" viewBox="0 0 24 22" fill="none"
-                                className="animate-pulse"
-                                style={{ color: '#ff7fae', filter: 'drop-shadow(0 0 5px rgba(255,127,174,0.55))' }}>
+                                className="animate-pulse mz-music-card-heart">
                                 <path d="M12 21s-8-5.3-8-11.5C4 6 6.5 3.5 9.5 3.5c1.6 0 3 .8 2.5 2.2C11.5 4.3 12.9 3.5 14.5 3.5 17.5 3.5 20 6 20 9.5 20 15.7 12 21 12 21z"
                                     fill="currentColor" />
                             </svg>
                             {renderAvatar(charAvatar, charName, '#c3b2ff')}
                         </div>
                         {/* 标签 */}
-                        <div className="relative mt-1.5 text-center text-[9px] tracking-[0.3em] uppercase font-semibold"
-                            style={{ color: '#9c6fc2', opacity: 0.8 }}>
+                        <div className="relative mt-1.5 text-center text-[9px] tracking-[0.3em] uppercase font-semibold mz-music-card-label">
                             Listening Together
                         </div>
-                        <div className="relative mt-0.5 text-center text-[11px]"
-                            style={{ color: '#5a49a8', fontFamily: `'Noto Serif','Georgia',serif` }}>
+                        <div className="relative mt-0.5 text-center text-[11px] mz-music-card-names">
                             <span className="font-medium">你</span>
                             <span className="mx-1.5 opacity-50">×</span>
                             <span className="font-medium">{charName || 'Ta'}</span>
                             {intent === 'join_and_add' && (
-                                <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded-full align-middle"
-                                    style={{ background: 'rgba(195,178,255,0.3)', color: '#7a5db0', border: '1px solid rgba(195,178,255,0.5)' }}>
+                                <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded-full align-middle mz-music-card-tag">
                                     + 歌单
                                 </span>
                             )}
@@ -2688,41 +2663,37 @@ const MessageItem = React.memo(({
                                 img.style.display = 'none';
                                 if (container.querySelector('.music-cover-fallback')) return;
                                 const fallback = document.createElement('div');
-                                fallback.className = 'music-cover-fallback w-full h-full flex items-center justify-center';
-                                fallback.style.background = 'linear-gradient(135deg, #8b7ab8 0%, #6b95c7 100%)';
-                                fallback.innerHTML = `<div style="color:rgba(255,255,255,0.9);font-size:24px;">♪</div>`;
+                                fallback.className = 'music-cover-fallback w-full h-full flex items-center justify-center mz-music-card-cover';
+                                fallback.innerHTML = `<div class="mz-music-card-cover-note" style="font-size:24px;">♪</div>`;
                                 container.appendChild(fallback);
                             }}
                         />
                     ) : (
-                        <div className="w-full h-full flex items-center justify-center"
-                            style={{ background: 'linear-gradient(135deg, #8b7ab8 0%, #6b95c7 100%)' }}>
-                            <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: '28px' }}>♪</span>
+                        <div className="w-full h-full flex items-center justify-center mz-music-card-cover">
+                            <span className="mz-music-card-cover-note">♪</span>
                         </div>
                     )}
                     {/* 纯"收入歌单"保留角标；一起听意图已在头部表达，不再重复 */}
                     {!isTogether && (
-                        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full backdrop-blur-sm text-[9px] font-medium"
-                            style={{ background: 'rgba(255,255,255,0.85)', color: '#5a49a8' }}>
+                        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full backdrop-blur-sm text-[9px] font-medium mz-music-card-badge">
                             📌 收入歌单
                         </div>
                     )}
                 </div>
                 <div className="p-3">
-                    <div className="font-bold text-sm line-clamp-1 leading-snug"
-                        style={{ color: '#2a1f4d', fontFamily: `'Noto Serif','Georgia',serif` }}>
+                    <div className="font-bold text-sm line-clamp-1 leading-snug mz-music-card-songname">
                         {song.name || '未命名'}
                     </div>
-                    <div className="text-[10px] mt-0.5 truncate" style={{ color: '#6b5b8f' }}>
+                    <div className="text-[10px] mt-0.5 truncate mz-music-card-text">
                         {song.artists || '—'}
                     </div>
                     {addedTo && (
-                        <div className="text-[9px] mt-1.5 italic" style={{ color: '#5a49a8' }}>
+                        <div className="text-[9px] mt-1.5 italic mz-music-card-note">
                             已加入《{addedTo}》
                         </div>
                     )}
-                    <div className="mt-2 pt-1.5 flex items-center gap-1 text-[9px] border-t" style={{ color: '#a89bc5', borderColor: '#e0d9f0' }}>
-                        <span style={{ color: '#5a49a8', fontWeight: 600 }}>Shizuku Music</span>
+                    <div className="mt-2 pt-1.5 flex items-center gap-1 text-[9px] border-t mz-music-card-footer">
+                        <span className="mz-music-card-brand">Shizuku Music</span>
                         <span>·</span>
                         <span>{isUser ? '分享' : '互动'}</span>
                     </div>

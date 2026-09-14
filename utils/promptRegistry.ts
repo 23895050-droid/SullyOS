@@ -244,8 +244,8 @@ const PROMPT_ENTRIES: PromptEntry[] = [
       '--mz-bg #fbfbff（页面底色）/ --mz-bgDeep #f3f1fa / --mz-bgTint #ebe9f5 / --mz-primary #807c9d（主紫灰）/ --mz-accent #b3a8ce / --mz-soft #e0d9f0 / --mz-glow #cdc6e9 / --mz-sakura #f4c2cf（樱花粉）/ --mz-lavender #cfc3e8 / --mz-surface rgba(255,255,255,0.65)（玻璃面）/ --mz-glass rgba(255,255,255,0.35) / --mz-text #22232a / --mz-muted #7c779a / --mz-faint #bcb8cc / --mz-vip #d4a06a / --mz-danger #ba1a1a\n' +
       '透明度拼接处用 rgb 三元组变量：--mz-bg-rgb / --mz-primary-rgb / --mz-accent-rgb / --mz-glow-rgb / --mz-sakura-rgb / --mz-lavender-rgb / --mz-muted-rgb / --mz-faint-rgb / --mz-vip-rgb（如 rgba(var(--mz-glow-rgb, 205,198,233), 0.2)）。改颜色时同步改同名 -rgb 变量，否则透明拼接处还是旧色。\n' +
       '玻璃 class（全局可用）：.shizuku-glass（浅玻璃 blur16）/ .shizuku-glass-strong（深玻璃 blur24）——重写这两个类整体改玻璃质感；滚动条 .shizuku-scrollbar。\n' +
-      '各页钩子清单（页面级，类名都已挂在 DOM 上）：.mz-app（音乐 App 根）/ .mz-search（搜索页）/ .mz-player（播放页）/ .mz-chat（聊歌页）/ .mz-settings（设置页）/ .mz-songrow（搜索结果行）/ .mz-miniplayer（音乐 App 内迷你条）/ .mz-together（一起听徽章块）/ .mz-together-strip（夜色预设双人状态区）/ .mz-vinyl（黑胶唱片）/ .mz-chat-bubble + .mz-chat-bubble-user + .mz-chat-bubble-ai（聊歌气泡）/ .mz-chat-voice（聊歌语音条）/ .mz-chat-avatar（聊歌头像）/ .mz-music-card（主聊天里的一起听四张卡）。\n' +
-      '注意：组件很多颜色/边框是 inline style，class 规则覆盖不掉时用 !important，或优先改 --mz-* 变量（变量优先级最高、最省事）。\n' +
+      '各页钩子清单（页面级，类名都已挂在 DOM 上）：.mz-app（音乐 App 根）/ .mz-search（搜索页）/ .mz-player（播放页）/ .mz-chat（聊歌页）/ .mz-settings（设置页）/ .mz-songrow（搜索结果行）/ .mz-miniplayer（音乐 App 内迷你条）/ .mz-together（一起听徽章块）/ .mz-together-strip（夜色预设双人状态区）/ .mz-vinyl（黑胶唱片）/ .mz-chat-bubble + .mz-chat-bubble-user + .mz-chat-bubble-ai（聊歌气泡）/ .mz-chat-voice（聊歌语音条）/ .mz-chat-avatar（聊歌头像）/ .mz-music-card（主聊天里的一起听卡钩子；五张卡各有 .mz-music-card-invite / -accept / -summary / -chatsummary / -song 卡类 + 一批零件类，已全部类化——详见「聊天卡片」模式，直接覆盖、无需 !important）。\n' +
+      '注意：音乐 App 内组件仍有不少颜色/边框是 inline style，class 规则覆盖不掉时用 !important，或优先改 --mz-* 变量（变量优先级最高、最省事）；但主聊天的一起听卡已全部类化（见「聊天卡片」模式），直接写类名覆盖即可，不需要 !important。\n' +
       '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS、position:fixed 全局浮层。可以改布局、位置、大小、间距——类名都是真实存在的，但不要假设清单之外还有别的 class；没把握的区块就只动 --mz-* 变量。',
   },
   {
@@ -286,16 +286,18 @@ const PROMPT_ENTRIES: PromptEntry[] = [
   {
     category: '美化助手',
     label: '美化助手-聊天卡片',
-    description: '美化小助手「音乐 App · 聊天卡片」模式：主聊天四张卡逐张的选择器知识',
+    description: '美化小助手「音乐 App · 聊天卡片」模式：主聊天五张一起听卡逐张的选择器知识',
     defaultValue:
-      '这是 SullyOS 主聊天消息流里的一起听系列卡片——每张卡的根都有 .mz-music-card 钩子。四张卡（用户挑哪张就只改哪张）：\n\n' +
-      '【邀请卡】双头像 + 歌名 + 状态 chip（等你回应/已接受/婉拒）+ 卡片底部按钮（接受/拒绝——只在他发起的邀请卡上出现）。\n' +
-      '【回应卡】三种状态：💗 接受 / 🍃 婉拒 / 🎧 结束。\n' +
-      '【一起听总结卡】「Listening Together」抬头 + 曲目列表行（封面 + 歌名 + 次数，行可点击点播）+ 总结文字。\n' +
-      '【聊歌小结卡】💬 抬头 + 段落范围 + 小结文字。\n\n' +
-      '卡片底色是浅粉紫渐变（inline style 写死），改底色/圆角/阴影用 .mz-music-card + !important；区分四张卡用 .mz-music-card 内部的文字/结构选择器（每张卡的抬头文案不同，可以用 :has() 或 nth 结构区分，没把握就整组一起改）。\n' +
-      '注意：这些卡渲染在主聊天 App 里，不是音乐 App——CSS 经全局注入（基础 + 悬浮窗 + 卡片三层），--mz-* 变量在这里无效，颜色要直接写死值。\n' +
-      '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS。可以改布局、位置、大小；不要改卡片内的交互按钮（点播/接受/拒绝）。',
+      '这是 SullyOS 主聊天消息流里的一起听系列卡片。2026-09-13 起卡片视觉已全部类化——底色/边框/文字色直接用类覆盖即可，不再需要 !important。\n\n' +
+      '五张卡（用户挑哪张就只改哪张），每张卡的根都带 .mz-music-card 钩子 + 自己的卡类：\n' +
+      '【邀请卡】.mz-music-card-invite——双头像 + 歌名 + 状态 chip（等你回应/已接受/婉拒）+ 底部按钮（接受/拒绝）。\n' +
+      '【回应卡】.mz-music-card-accept——三种状态：💗 接受 / 🍃 婉拒 / 🎧 结束。\n' +
+      '【一起听总结卡】.mz-music-card-summary——「Listening Together」抬头 + 曲目列表行（封面 + 歌名 + 次数，行可点击点播）+ 总结文字。\n' +
+      '【聊歌小结卡】.mz-music-card-chatsummary——💬 抬头 + 段落范围 + 小结文字。\n' +
+      '【收歌单卡】.mz-music-card-song——分享歌卡（他收歌/加歌单时出现）。\n\n' +
+      '常用零件类（共享，个别卡做了颜色适配）：.mz-music-card-label（小标签）/ -title（主文字）/ -sub（副文字）/ -text（正文）/ -names（你×Ta 行）/ -glow（粉紫光晕背景，不要就 display:none）/ -cover（封面兜底块）/ -chip-accepted / -chip-declined / -chip-cancelled / -chip-pending（状态 chip）/ -btn-accept / -btn-decline（接受/婉拒按钮）/ -badge / -tag / -foot。\n' +
+      '注意：这些卡渲染在主聊天 App 里，不是音乐 App——CSS 经全局注入（卡片基础层 → 预设 → 用户三层），--mz-* 变量在这里无效，颜色要直接写死值。用户写的卡片 CSS 排在内置基础层之后，同权重时用户的胜。\n' +
+      '铁律：只写 CSS；单份 ≤8KB；禁 @import、外链、JS。可以改布局、位置、大小；按钮只改外观别动行为（点播/接受/拒绝）。',
   },
   {
     category: '美化助手',
