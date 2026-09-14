@@ -94,7 +94,7 @@ const Text = ({ x, y, w, h, size, min, color, weight, align = 'left', opacity = 
 );
 
 const NoxHomeApp: React.FC = () => {
-  const { closeApp, addToast, openApp, theme } = useOS();
+  const { closeApp, addToast, openApp } = useOS();
   const [tab, setTab] = useState<'home' | 'couple' | 'feed' | 'settings'>('home');
   const [inner, setInner] = useState<string | null>(null); // b 页内页（diary = 日记页）
   const [beauty, setBeauty] = useState(loadCoupleBeauty);
@@ -146,34 +146,31 @@ const NoxHomeApp: React.FC = () => {
   // 所以底下闪不闪都看不见；不再让页面元素自己淡入淡出（那不叫转场，是一种「闪」的来源）。
   const pageKey = `${tab}:${inner ?? 'root'}`;
   const [shownKey, setShownKey] = useState(pageKey);   // 幕布后面真正在展示的那一页
-  const [curtain, setCurtain] = useState<'in' | 'out' | null>(null);
+  const [curtain, setCurtain] = useState<'covering' | 'revealing' | null>(null);
+  const [curtainRun, setCurtainRun] = useState(0);   // 连点两下时换 key，让横扫动画重新开始
   const [mounted, setMounted] = useState<string[]>([pageKey]);
   const lastPageRef = useRef(pageKey);
   useEffect(() => {
     if (lastPageRef.current === pageKey) return;
     lastPageRef.current = pageKey;
-    setCurtain('in');
+    setCurtain('covering');
+    setCurtainRun((n) => n + 1);
+    // 节拍：扫进来 280ms 盖满 → 换页（被挡着）→ 停 40ms → 继续往左扫出去 320ms
     const t1 = window.setTimeout(() => {
-      // 幕布已盖满：这时才换页（挂上新页、切显示），换的过程被幕布挡住
       setMounted((m) => (m.includes(pageKey) ? m : [...m, pageKey]));
       setShownKey(pageKey);
-      setCurtain('out');
-    }, 170);
-    const t2 = window.setTimeout(() => setCurtain(null), 170 + 260);
+      setCurtain('revealing');
+    }, 280);
+    const t2 = window.setTimeout(() => setCurtain(null), 280 + 40 + 320);
     return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
   }, [pageKey]);
 
-  // 幕布材料 = 壳那套转场底（打开 App 时你能看到的朦胧背景）：壁纸虚化 + 白色蒙版 + 柔光点。
-  // 为什么不能像上游那样直接透明：上游那层幕是透明的，因为它脚下有壳铺好的「虚化壁纸 + 白蒙版」
-  // 稳定底；Nox 的家是全屏的，把壳那层盖住了——直接透明就会透过幕布看见换页。所以把那个底
-  // 一起抄进来：底色天然统一（不再按页配色），观感跟打开 App 完全一套语言。
-  const veilWallpaper = useBlobRefUrl(theme?.wallpaper);
-  const veilBg = (() => {
-    const wp = veilWallpaper;
-    if (!wp) return 'linear-gradient(160deg, #f7e9f1 0%, #e9dfec 100%)';   // 没设壁纸时给一层中性柔光底
-    const isUrl = wp.startsWith('http') || wp.startsWith('data:') || wp.startsWith('blob:') || wp.startsWith('/');
-    return isUrl ? `url("${wp}")` : wp;
-  })();
+  // 幕布材料 = **目标页自己的底色**（家 = 壁纸或深底；我们/设置 = 粉）。为什么不用上游那层
+  // 「虚化壁纸 + 白蒙版」：上游那层幕是透明的、脚下有壳铺好的稳定底；我们是全屏页面、没有那个底，
+  // 只好拿一块外来材料去补 —— 结果就是「白的很突然、消失也很突然」（她 2026-09-14 报的）。
+  // 换成本页自己的底色后：扫到哪儿都是新页面本来该有的颜色，没有外来材料、没有亮度冲击；
+  // 前缘的软影 + 柔光缝让「边」在同底色页面之间也看得见。
+  const veilStyle = () => ({ ...bgFor(tab) });
 
   // 空闲预热（2026-09-14）：首屏落定后、浏览器空闲时把「我们」「设置」两页先在后台挂上
   // （隐藏）——图片那时就解析好了，第一次切过去幕布揭开就已经是完整页面。
@@ -392,26 +389,15 @@ const NoxHomeApp: React.FC = () => {
         );
       })}
 
-      {/* 转场幕布：盖满 → 后面换页 → 揭开（只动 opacity；盖着的时候不接事件）
+      {/* 转场幕布：目标页底色板横扫——扫入盖满 → 后面换页 → 继续往左扫出（一块板一直在动）
           z 阶梯（重要）：画布内容 ≤60（文字层 40 / 热区 50 / 圆钮 60）＜ 幕布 65 ＜ 底部胶囊导航 70。
           幕布必须压过画布里所有 z-index 的元素，否则会有文字浮在幕布上面（她 2026-09-14 报的）。 */}
       {curtain && (
         <div
-          className={`absolute inset-0 pointer-events-none ${curtain === 'in' ? 'veil-in' : 'veil-out'}`}
-          style={{ zIndex: 65 }}
-        >
-          {/* ① 壁纸虚化（放大一点点，免得虚化把四边拉出透明描边） */}
-          <div className="absolute inset-0" style={{ backgroundImage: veilBg, backgroundSize: 'cover', backgroundPosition: 'center', filter: 'blur(12px)', transform: 'scale(1.06)' }} />
-          {/* ② 白色蒙版：和 PhoneShell 里开 App 时那层同款，负责「朦胧、看不清」 */}
-          <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.55)' }} />
-          {/* ③ 柔光点（抄上游 AppLoadingFallback）：一次性静态光点，无持续动画 */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="relative" style={{ width: 72, height: 72 }}>
-              <div className="absolute inset-0" style={{ borderRadius: '9999px', filter: 'blur(8px)', background: 'radial-gradient(circle, hsla(var(--primary-hue),75%,72%,0.42) 0%, hsla(var(--primary-hue),70%,60%,0.10) 50%, transparent 70%)' }} />
-              <div className="absolute" style={{ left: '50%', top: '50%', width: 10, height: 10, transform: 'translate(-50%,-50%)', borderRadius: '9999px', background: 'radial-gradient(circle, #fff, hsla(var(--primary-hue),80%,75%,0.6) 60%, transparent)', boxShadow: '0 0 10px hsla(var(--primary-hue),80%,75%,0.6)' }} />
-            </div>
-          </div>
-        </div>
+          key={curtainRun}
+          className={`veil-slab absolute inset-0 pointer-events-none ${curtain === 'covering' ? 'veil-cover' : 'veil-reveal'}`}
+          style={{ zIndex: 65, ...veilStyle() }}
+        />
       )}
 
       {/* ── 底部胶囊导航（固定悬浮） ── */}
