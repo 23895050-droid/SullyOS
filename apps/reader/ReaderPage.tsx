@@ -27,6 +27,7 @@ import {
     DEFAULT_TYPOGRAPHY, readingModeFor, setBookMode, setHighlightSlot, setTheme, setTypography, useReaderPrefs,
 } from './readerPrefs';
 import { HIGHLIGHT_SLOTS, READER_SKINS } from './readerSkinPresets';
+import { recordReading } from '../../utils/reader/readerStats';
 
 const SAVE_DEBOUNCE = 900;
 /** 估「还要读多久」用的速度（字/秒）——按每分钟 400 字算 */
@@ -259,15 +260,34 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         return () => { if (timer) window.clearTimeout(timer); ro.disconnect(); };
     }, []);
 
-    // 阅读时长自己走
+    // 阅读时长自己走；顺手把这一段记进阅读流水（统计页的「每天读多久」靠它）
     useEffect(() => {
-        const t = window.setInterval(() => setTick((n) => n + 1), 20000);
-        return () => window.clearInterval(t);
+        let last = Date.now();
+        const flushTick = () => {
+            const now = Date.now();
+            const sec = Math.round((now - last) / 1000);
+            if (sec > 0) recordReading({ sec });
+            last = now;
+        };
+        const t = window.setInterval(() => { flushTick(); setTick((n) => n + 1); }, 20000);
+        window.addEventListener('pagehide', flushTick);
+        return () => {
+            window.clearInterval(t);
+            window.removeEventListener('pagehide', flushTick);
+            flushTick();          // 走之前把没满 20 秒的那一截也记上
+        };
     }, []);
 
     // ── 翻页 + 进度存 ──
+    /** 这一页有多少字（切片就是段落区间，把区间长度加起来） */
+    const pageChars = useCallback(
+        () => currentSlicesRef.current.reduce((n, sl) => n + Math.max(0, sl.endOffset - sl.startOffset), 0),
+        [],
+    );
+
     const goPage = useCallback((delta: number) => {
         if (pages.length === 0) return;
+        recordReading({ pages: 1, chars: pageChars() });   // 翻过去 = 刚把这一页读完
         const next = pageIdx + delta;
         if (next >= 0 && next < pages.length) { setPageIdx(next); return; }
         // 跨章
@@ -276,7 +296,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         if (nextChapter < 0 || nextChapter >= book.chapterCount) return;
         pendingRef.current = delta > 0 ? { page: 0 } : { page: Number.MAX_SAFE_INTEGER };
         setChapterIdx(nextChapter);
-    }, [pages.length, pageIdx, book, chapterIdx]);
+    }, [pages.length, pageIdx, book, chapterIdx, pageChars]);
 
     /** 全书进度：章节位置 + 章内页位置（页面上那两个百分比与存档都用它） */
     const bookPercent = useCallback((chIdx: number, pgIdx: number, pageCount: number, chapterCount: number) => {
@@ -364,6 +384,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const mySlot = prefs.highlightStyles.user ?? 1;
 
     const jumpChapter = (idx: number) => {
+        if (idx !== chapterIdx) recordReading({ pages: 1, chars: pageChars() });
         pendingRef.current = { page: 0 };
         setChapterIdx(idx);
         setSheet(null);

@@ -386,7 +386,18 @@ export const READER_SKELETON_CSS = `
 /* ── 书详情 ── */
 .rd-detail { padding-bottom: calc(var(--safe-bottom, 0px) + 88px); }
 .rd-detail-hero { display: flex; gap: var(--rd-space-4); }
-.rd-detail-cover { width: 104px; flex: 0 0 auto; aspect-ratio: 2 / 3; border-radius: var(--rd-r-sm); overflow: hidden; background: var(--rd-card); box-shadow: var(--rd-shadow); position: relative; }
+.rd-detail-cover {
+  width: 104px; flex: 0 0 auto; aspect-ratio: 2 / 3; border-radius: var(--rd-r-sm); overflow: hidden;
+  background: var(--rd-card); box-shadow: var(--rd-shadow); position: relative;
+  border: 0; padding: 0;   /* 它是 <button>：换封面就点它 */
+}
+/* 封面下角那条「换封面」 */
+.rd-cover-edit {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 3px 0; text-align: center;
+  background: var(--rd-scrim); color: var(--rd-on-scrim);
+  font-size: var(--rd-fs-caption);
+}
 .rd-detail-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .rd-detail-title { font-family: var(--rd-font-heading); font-size: var(--rd-fs-title); line-height: 1.25; font-weight: 600; }
 .rd-detail-sub { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); }
@@ -556,6 +567,66 @@ export const READER_SKELETON_CSS = `
 .rd-pickbar .rd-btn { padding: 6px var(--rd-space-3); font-size: var(--rd-fs-sm); }
 .rd-pickbar > span:first-child { flex: 1 1 auto; color: var(--rd-ink-soft); }
 .rd-check { color: var(--rd-accent); flex: 0 0 auto; display: inline-flex; }
+
+/* 设置首页那排彩色小图标（参考图 10 的「Mine」页）；色相旋转同统计页那套 */
+.rd-row-ico {
+  width: 26px; height: 26px; flex: 0 0 auto;
+  border-radius: var(--rd-r-sm); background: var(--rd-accent-soft); color: var(--rd-accent);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.rd-row-ico-2 { filter: hue-rotate(118deg); }
+.rd-row-ico-3 { filter: hue-rotate(-118deg); }
+.rd-row-ico-4 { filter: hue-rotate(58deg); }
+
+/* ── 统计页（参考图 7/8）：问候卡 · 2×2 数字格 · 柱状图 · 热力格 · 年份条 · 时段分布 ── */
+.rd-hello { background: var(--rd-card); border-radius: var(--rd-r-lg); box-shadow: var(--rd-shadow-sm); padding: var(--rd-space-4); margin-bottom: var(--rd-space-3); }
+.rd-hello-big { font-family: var(--rd-font-heading); font-size: var(--rd-fs-title); line-height: 1.3; }
+.rd-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--rd-space-3); margin-bottom: var(--rd-space-3); }
+.rd-stat-tile { background: var(--rd-card); border-radius: var(--rd-r-lg); box-shadow: var(--rd-shadow-sm); padding: var(--rd-space-4); display: flex; flex-direction: column; gap: 6px; }
+.rd-stat-ico { width: 26px; height: 26px; border-radius: var(--rd-r-pill); background: var(--rd-accent-soft); color: var(--rd-accent); display: flex; align-items: center; justify-content: center; }
+/* 四个格子四个色：不新增皮肤变量，直接把强调色转个色相（任何皮肤下都成立） */
+.rd-stat-ico-2 { filter: hue-rotate(118deg); }
+.rd-stat-ico-3 { filter: hue-rotate(-118deg); }
+.rd-stat-ico-4 { filter: hue-rotate(58deg); }
+.rd-stat-tile-cap { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); }
+.rd-stat-tile-num { font-family: var(--rd-font-heading); font-size: var(--rd-fs-title); line-height: 1.2; }
+.rd-stat-tile-num small { font-family: var(--rd-font-body); font-size: var(--rd-fs-sm); color: var(--rd-ink-soft); margin-left: 3px; }
+
+/* 热力格（最近 30 天 / 当月 / 年度） */
+.rd-heat { display: grid; gap: 4px; }
+.rd-heat-30 { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+.rd-heat-year { grid-template-columns: repeat(31, minmax(0, 1fr)); }
+.rd-heat-cell { aspect-ratio: 1 / 1; border-radius: var(--rd-r-sm); background: var(--rd-track); }
+.rd-heat-1 { background: var(--rd-accent-soft); }
+.rd-heat-2 { background: var(--rd-accent); opacity: 0.3; }
+.rd-heat-3 { background: var(--rd-accent); opacity: 0.6; }
+.rd-heat-4 { background: var(--rd-accent); }
+.rd-heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); margin-top: var(--rd-space-3); }
+.rd-heat-key { width: 11px; height: 11px; border-radius: var(--rd-r-sm); }
+.rd-month-row { display: flex; align-items: center; gap: var(--rd-space-2); margin-bottom: 3px; }
+.rd-month-label { width: 30px; flex: 0 0 auto; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-month-cells { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: repeat(31, minmax(0, 1fr)); gap: 2px; }
+.rd-month-cells > span { aspect-ratio: 1 / 1; border-radius: var(--rd-radius-hl); background: var(--rd-track); }
+
+/* 年份选择条 */
+.rd-yearbar { display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-3); background: var(--rd-card); border-radius: var(--rd-r-lg); box-shadow: var(--rd-shadow-sm); padding: var(--rd-space-3) var(--rd-space-4); margin-bottom: var(--rd-space-3); }
+.rd-yearbar-title { font-size: var(--rd-fs-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 时段分布（0:00 - 23:00） */
+.rd-hours { display: flex; align-items: flex-end; gap: 3px; height: 64px; }
+.rd-hour-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+.rd-hour-bar { background: var(--rd-chart-bar); border-radius: var(--rd-r-sm) var(--rd-r-sm) 0 0; min-height: 2px; }
+.rd-hour-axis { display: flex; justify-content: space-between; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); margin-top: 4px; }
+
+/* 工作日 vs 周末 的两格 */
+.rd-stat-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--rd-space-3); }
+.rd-stat-sub { background: var(--rd-bg-2); border-radius: var(--rd-r-md); padding: var(--rd-space-3); text-align: center; }
+.rd-stat-sub-num { font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); margin-top: 2px; }
+/* 成就行（最活跃的一天 / 最常读的书 …） */
+.rd-achv { display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-3); padding: var(--rd-space-3) 0; font-size: var(--rd-fs-md); }
+.rd-achv + .rd-achv { border-top: 1px solid var(--rd-rule); }
+.rd-achv-cap { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-achv-val { color: var(--rd-accent); flex: 0 0 auto; font-size: var(--rd-fs-sm); }
 
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }

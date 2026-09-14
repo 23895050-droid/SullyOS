@@ -20,7 +20,7 @@ import {
     useReaderPrefs, type ShelfLayout, type ShelfSort,
 } from '../readerPrefs';
 import ImportSheet from '../ImportSheet';
-import ReaderCover from '../ReaderCover';
+import ReaderCover, { shrinkCoverImage } from '../ReaderCover';
 
 interface Props {
     onOpenBook: (bookId: string) => void;
@@ -68,28 +68,6 @@ const chapterPercent = (b: RdBook, p?: RdProgress | null): number => {
     const within = (p.percent ?? 0) * (b.chapterCount / 100) - (p.chapterIdx ?? 0);
     return Math.max(0, Math.min(100, Math.round(within * 100)));
 };
-
-/** 封面图压一压再进 blob 仓（长边 720、jpeg；本来就小的原样用） */
-const shrinkImage = (file: File, maxEdge: number): Promise<Blob> =>
-    new Promise((resolve) => {
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => {
-            URL.revokeObjectURL(url);
-            const longest = Math.max(img.naturalWidth, img.naturalHeight);
-            if (longest <= maxEdge) { resolve(file); return; }
-            const k = maxEdge / longest;
-            const c = document.createElement('canvas');
-            c.width = Math.max(1, Math.round(img.naturalWidth * k));
-            c.height = Math.max(1, Math.round(img.naturalHeight * k));
-            const ctx = c.getContext('2d');
-            if (!ctx) { resolve(file); return; }
-            ctx.drawImage(img, 0, 0, c.width, c.height);
-            c.toBlob((b) => resolve(b ?? file), 'image/jpeg', 0.86);
-        };
-        img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
-        img.src = url;
-    });
 
 const pctOf = (p?: RdProgress | null) => Math.round(p?.percent ?? 0);
 const kbOf = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
@@ -503,7 +481,7 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
             void (async () => {
                 try {
                     const { putImageBlob } = await import('../../../utils/blobRef');
-                    const ref = await putImageBlob(await shrinkImage(f, 720));
+                    const ref = await putImageBlob(await shrinkCoverImage(f));
                     await patchBook(book.id, { coverRef: ref, updatedAt: new Date().toISOString() });
                     notify('封面换好了');
                     await reload();

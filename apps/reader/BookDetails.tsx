@@ -15,7 +15,7 @@ import {
 } from '../../utils/reader/readerDb';
 import { readingModeFor, setBookMode, setHighlightSlot, useReaderPrefs } from './readerPrefs';
 import { HIGHLIGHT_SLOTS } from './readerSkinPresets';
-import ReaderCover from './ReaderCover';
+import ReaderCover, { shrinkCoverImage } from './ReaderCover';
 
 interface Props {
     bookId: string;
@@ -88,6 +88,28 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
         void patchBook(bookId, { rating: n }).then((b) => setBook(b));
     };
 
+    /** 换封面：挑一张图，压到 720 进 blob 仓，写回 book.coverRef */
+    const pickCover = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = () => {
+            const f = input.files?.[0];
+            if (!f) return;
+            void (async () => {
+                try {
+                    const { putImageBlob } = await import('../../utils/blobRef');
+                    const ref = await putImageBlob(await shrinkCoverImage(f));
+                    setBook(await patchBook(bookId, { coverRef: ref, updatedAt: new Date().toISOString() }));
+                    notify('封面换好了');
+                } catch {
+                    notify('这张图读不出来，换一张试试');
+                }
+            })();
+        };
+        input.click();
+    };
+
     const saveEdit = async () => {
         const b = await patchBook(bookId, {
             title: draft.title.trim() || book.title,
@@ -131,9 +153,10 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                 </div>
 
                 <div className="rd-detail-hero">
-                    <div className="rd-detail-cover">
+                    <button className="rd-detail-cover" onClick={pickCover} aria-label="换封面">
                         <ReaderCover coverRef={book.coverRef} title={book.title} />
-                    </div>
+                        <span className="rd-cover-edit">换封面</span>
+                    </button>
                     <div className="rd-detail-main">
                         <div className="rd-detail-title">{book.title}</div>
                         <div className="rd-detail-sub">{book.category || '未分类'}</div>
@@ -294,6 +317,15 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                         <div className="rd-sheet-grip" />
                         <div className="rd-sheet-title">编辑资料</div>
                         <div className="rd-sheet-body">
+                            <div className="rd-opt">
+                                <span className="rd-opt-label">封面</span>
+                                <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', gap: 'var(--rd-space-3)' }}>
+                                    <div className="rd-note-cover">
+                                        <ReaderCover coverRef={book.coverRef} title={book.title} compact />
+                                    </div>
+                                    <button className="rd-btn" onClick={pickCover}>换一张</button>
+                                </div>
+                            </div>
                             <input className="rd-field" placeholder="书名" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
                             <input className="rd-field" placeholder="作者" value={draft.author} onChange={(e) => setDraft({ ...draft, author: e.target.value })} />
                             <input className="rd-field" placeholder="分类（如：小说）" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} />

@@ -1,35 +1,61 @@
-// 读书模块 · 设置页（2026-09-15 UI 轮重写）
+// 读书模块 · 设置页（2026-09-15 UI 轮重写 / v4 照竞品分页）
 //
-// 参考图版式：分组卡 + 「左边标签 / 右边当前值 / 箭头」行 + iOS 开关；值点开是一张底部弹卡。
-// 分两组：阅读偏好（字号 / 字体 / 背景色 / 夜间模式 / 行距那几根滑杆）与应用设置
-// （书架版式 / 划线配色 / 自定义 CSS）。
+// 参考图（图 10「Mine」/ 图 11「Read Settings」/ 图 9「Appearance Setting」）的做法是
+// **设置首页 + 两张子页**，不是一长条。所以这里也拆三层：
+//   首页   分组卡 + 「彩图标 + 标题 + 右箭头」行（图 10）
+//   阅读设置 LAYOUT / APPEARANCE / INTERACTION 三组（图 11）
+//   外观设置 SHELF / THEME / APPEARANCE 三组，主题直接嵌色卡网格（图 9）
 //
 // 共读模式**不在这里**——它是单书设置，住那本书信息页右上角的小设置（v3 §4.6，
 // 见 apps/reader/BookDetails.tsx）。大设置页只放全局的。
 //
 // 自定义 CSS 是皮肤层的最后一层：先注入的骨架层同权重会被它盖掉，
-// 所以这里贴的规则永远不需要 !important（v3 的 V5）。小助手写 CSS 的入口在第三批接。
+// 所以这里贴的规则永远不需要 !important（v3 的 V5）。
 
 import { useState, type ReactNode } from 'react';
+import { ArrowLeft, BookOpen, PaintBrush, Pen, Code, TextAa } from '@phosphor-icons/react';
 import {
-    DEFAULT_TYPOGRAPHY, setCssGlobal, setHighlightSlot, setShelfLayout, setTheme, setTypography, useReaderPrefs,
+    DEFAULT_TYPOGRAPHY, setCssGlobal, setHighlightSlot, setShelfAsc, setShelfGrouped, setShelfLayout,
+    setTheme, setTypography, useReaderPrefs, type ShelfLayout,
 } from '../readerPrefs';
 import { HIGHLIGHT_SLOTS, READER_SKINS } from '../readerSkinPresets';
 
-type Sheet = null | 'size' | 'font' | 'bg' | 'layout' | 'hl' | 'css';
+type Sheet = null | 'size' | 'font' | 'lineHeight' | 'paraGap' | 'indent' | 'margin' | 'layout' | 'hl' | 'css';
+type Page = 'root' | 'read' | 'look';
+
+const LAYOUT_OPTS: Array<{ key: ShelfLayout; label: string }> = [
+    { key: 'grid', label: '封面网格' },
+    { key: 'list', label: '纯文字列表' },
+    { key: 'thumb', label: '缩略图列表' },
+    { key: 'detail', label: '详情列表' },
+];
 
 /** 一行：「左标签 / 右当前值 / 箭头」 */
-function Row({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
+function Row({ label, value, onClick, icon }: { label: string; value?: string; onClick: () => void; icon?: ReactNode }) {
     return (
         <button className="rd-item" onClick={onClick}>
+            {icon}
             <span className="rd-item-label">{label}</span>
-            <span className="rd-item-value">{value}</span>
+            {value !== undefined && <span className="rd-item-value">{value}</span>}
             <span className="rd-item-chev">›</span>
         </button>
     );
 }
 
-/** 一行带滑杆（值就在标签右边，不用再弹一层） */
+/** 一行带开关 */
+function SwitchRow({ label, on, onToggle, icon }: { label: string; on: boolean; onToggle: () => void; icon?: ReactNode }) {
+    return (
+        <div className="rd-item">
+            {icon}
+            <span className="rd-item-label">{label}</span>
+            <button className={`rd-switch${on ? ' rd-switch-on' : ''}`} aria-label={label} onClick={onToggle}>
+                <span className="rd-switch-knob" />
+            </button>
+        </div>
+    );
+}
+
+/** 一行带滑杆（值就在标签右边） */
 function SliderRow({ label, value, children }: { label: string; value: string; children: ReactNode }) {
     return (
         <div className="rd-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
@@ -39,15 +65,129 @@ function SliderRow({ label, value, children }: { label: string; value: string; c
     );
 }
 
+const ico = (n: 1 | 2 | 3 | 4, node: ReactNode) => (
+    <span className={`rd-row-ico${n > 1 ? ` rd-row-ico-${n}` : ''}`}>{node}</span>
+);
+
 export default function ReaderSettings() {
     const prefs = useReaderPrefs();
+    const [page, setPage] = useState<Page>('root');
     const [sheet, setSheet] = useState<Sheet>(null);
     const [cssDraft, setCssDraft] = useState<string | null>(null);
     const t = prefs.typography;
-    const night = prefs.themeId === 'night';
-    const skin = READER_SKINS.find((s) => s.id === prefs.themeId) ?? READER_SKINS[0];
-    const slot = prefs.highlightStyles.user ?? 1;
+    const night = prefs.themeId.startsWith('night');
+    const slotLabel = HIGHLIGHT_SLOTS.find((s) => s.slot === (prefs.highlightStyles.user ?? 1))?.label ?? '琥珀';
 
+    const head = (title: string, sub: string) => (
+        <div className="rd-headbar">
+            <button className="rd-back" onClick={() => setPage('root')}><ArrowLeft size={18} />设置</button>
+            <div className="rd-headbar-title">{title}</div>
+            <span style={{ width: 44 }} />
+        </div>
+    );
+
+    // ── 子页 · 阅读设置（图 11 的 LAYOUT / APPEARANCE / INTERACTION）──
+    if (page === 'read') {
+        return (
+            <div className="rd-screen rd-screen-tight page-focus-once" data-rd-page="settings-read">
+                {head('阅读设置', '')}
+
+                <div className="rd-section-title">版式</div>
+                <div className="rd-card rd-card-flush">
+                    <div className="rd-list">
+                        <Row label="首行缩进" value={`${t.paragraphIndent} 字`} onClick={() => setSheet('indent')} />
+                        <Row label="行距" value={t.lineHeight.toFixed(1)} onClick={() => setSheet('lineHeight')} />
+                        <Row label="段间距" value={`${t.paragraphSpacing}px`} onClick={() => setSheet('paraGap')} />
+                        <Row label="页边距" value={`${t.margin}px`} onClick={() => setSheet('margin')} />
+                    </div>
+                </div>
+
+                <div className="rd-section-title">外观</div>
+                <div className="rd-card rd-card-flush">
+                    <div className="rd-list">
+                        <Row label="正文字号" value={`${t.fontSize}px`} onClick={() => setSheet('size')} icon={ico(4, <TextAa size={15} weight="bold" />)} />
+                        <Row label="字体" value={t.fontFamily === 'sans' ? '黑体' : '衬线体'} onClick={() => setSheet('font')} />
+                    </div>
+                </div>
+
+                <div className="rd-section-title">翻页</div>
+                <div className="rd-card rd-card-flush">
+                    <div className="rd-list">
+                        <Row label="翻页方式" value="横滑" onClick={() => setSheet('layout')} />
+                    </div>
+                </div>
+
+                <button className="rd-btn rd-btn-block" style={{ marginTop: 'var(--rd-space-4)' }} onClick={() => setTypography(DEFAULT_TYPOGRAPHY)}>
+                    排版恢复默认
+                </button>
+
+                <SheetHost sheet={sheet} setSheet={setSheet} t={t} prefs={prefs} cssDraft={cssDraft} setCssDraft={setCssDraft} />
+            </div>
+        );
+    }
+
+    // ── 子页 · 外观设置（图 9 的 SHELF / THEME / APPEARANCE）──
+    if (page === 'look') {
+        return (
+            <div className="rd-screen rd-screen-tight page-focus-once" data-rd-page="settings-look">
+                {head('外观设置', '')}
+
+                <div className="rd-section-title">书架</div>
+                <div className="rd-card rd-card-flush">
+                    <div className="rd-list">
+                        <Row
+                            label="书架版式"
+                            value={LAYOUT_OPTS.find((l) => l.key === prefs.shelfLayout)?.label ?? '封面网格'}
+                            onClick={() => setSheet('layout')}
+                        />
+                        <SwitchRow label="按分类分组" on={prefs.shelfGrouped} onToggle={() => setShelfGrouped(!prefs.shelfGrouped)} />
+                        <SwitchRow label="升序排列" on={prefs.shelfAsc} onToggle={() => setShelfAsc(!prefs.shelfAsc)} />
+                    </div>
+                </div>
+
+                <div className="rd-section-title">主题</div>
+                <div className="rd-card">
+                    <div className="rd-theme-grid">
+                        {READER_SKINS.map((s) => (
+                            <button
+                                key={s.id}
+                                className={`rd-theme-card${prefs.themeId === s.id ? ' rd-theme-card-on' : ''}`}
+                                onClick={() => setTheme(s.id)}
+                                style={{ background: s.vars['--rd-paper'], color: s.vars['--rd-ink'] }}
+                            >
+                                {s.label}
+                                {prefs.themeId === s.id && <span className="rd-theme-check">✓</span>}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="rd-muted" style={{ marginTop: 'var(--rd-space-3)' }}>
+                        皮肤只管颜色和纸纹，字号行距在「阅读设置」里调。想自己改颜色去下面那格自定义 CSS。
+                    </div>
+                </div>
+
+                <div className="rd-section-title">其它</div>
+                <div className="rd-card rd-card-flush">
+                    <div className="rd-list">
+                        <SwitchRow
+                            label="夜间模式"
+                            on={night}
+                            onToggle={() => setTheme(night ? 'paper' : 'night')}
+                        />
+                        <Row
+                            label="我的划线配色"
+                            value={slotLabel}
+                            onClick={() => setSheet('hl')}
+                        />
+                        <Row label="自定义 CSS" value={prefs.cssGlobal ? '已写' : '没写'} onClick={() => setSheet('css')} />
+                    </div>
+                </div>
+
+                <SheetHost sheet={sheet} setSheet={setSheet} t={t} prefs={prefs} cssDraft={cssDraft} setCssDraft={setCssDraft} />
+            </div>
+        );
+    }
+
+    // ── 首页（图 10 的排版：分组 + 彩图标 + 右箭头）──
     return (
         <div className="rd-screen" data-rd-page="settings">
             <div className="rd-head">
@@ -57,178 +197,142 @@ export default function ReaderSettings() {
                 </div>
             </div>
 
-            <div className="rd-section-title">阅读偏好</div>
+            <div className="rd-section-title">阅读</div>
             <div className="rd-card rd-card-flush">
                 <div className="rd-list">
-                    <Row label="字号" value={`${t.fontSize}px`} onClick={() => setSheet('size')} />
-                    <Row label="字体" value={t.fontFamily === 'sans' ? '黑体' : '衬线'} onClick={() => setSheet('font')} />
-                    <Row label="背景色" value={skin.label} onClick={() => setSheet('bg')} />
-                    <div className="rd-item">
-                        <span className="rd-item-label">夜间模式</span>
-                        <button
-                            className={`rd-switch${night ? ' rd-switch-on' : ''}`}
-                            aria-label="夜间模式"
-                            onClick={() => setTheme(night ? 'paper' : 'night')}
-                        >
-                            <span className="rd-switch-knob" />
-                        </button>
-                    </div>
-                    <SliderRow label="行高" value={t.lineHeight.toFixed(1)}>
-                        <input className="rd-slider" type="range" min={1.3} max={2.6} step={0.1} value={t.lineHeight}
-                            onChange={(e) => setTypography({ lineHeight: Number(e.target.value) })} />
-                    </SliderRow>
-                    <SliderRow label="段间距" value={`${t.paragraphSpacing}px`}>
-                        <input className="rd-slider" type="range" min={0} max={28} step={2} value={t.paragraphSpacing}
-                            onChange={(e) => setTypography({ paragraphSpacing: Number(e.target.value) })} />
-                    </SliderRow>
-                    <SliderRow label="首行缩进" value={`${t.paragraphIndent}em`}>
-                        <input className="rd-slider" type="range" min={0} max={3} step={0.5} value={t.paragraphIndent}
-                            onChange={(e) => setTypography({ paragraphIndent: Number(e.target.value) })} />
-                    </SliderRow>
-                    <SliderRow label="页边距" value={`${t.margin}px`}>
-                        <input className="rd-slider" type="range" min={10} max={44} step={2} value={t.margin}
-                            onChange={(e) => setTypography({ margin: Number(e.target.value) })} />
-                    </SliderRow>
-                    <button className="rd-item" onClick={() => setTypography(DEFAULT_TYPOGRAPHY)}>
-                        <span className="rd-item-label">排版恢复默认</span>
-                    </button>
-                </div>
-            </div>
-
-            <div className="rd-section-title">应用设置</div>
-            <div className="rd-card rd-card-flush">
-                <div className="rd-list">
-                    <Row
-                        label="书架版式"
-                        value={prefs.shelfLayout === 'list' ? '横向卡片' : '封面网格'}
-                        onClick={() => setSheet('layout')}
-                    />
-                    <Row
-                        label="我的划线配色"
-                        value={HIGHLIGHT_SLOTS.find((s) => s.slot === slot)?.label ?? '琥珀'}
-                        onClick={() => setSheet('hl')}
-                    />
-                    <Row label="自定义 CSS" value={prefs.cssGlobal ? '已写' : '没写'} onClick={() => setSheet('css')} />
+                    <Row label="阅读设置" value="字号 · 行距 · 边距" onClick={() => setPage('read')} icon={ico(1, <BookOpen size={16} weight="bold" />)} />
+                    <Row label="外观设置" value="皮肤 · 书架版式" onClick={() => setPage('look')} icon={ico(2, <PaintBrush size={16} weight="bold" />)} />
+                    <Row label="划线配色" value={slotLabel} onClick={() => setSheet('hl')} icon={ico(3, <Pen size={16} weight="bold" />)} />
+                    <Row label="自定义 CSS" value={prefs.cssGlobal ? '已写' : '没写'} onClick={() => setSheet('css')} icon={ico(4, <Code size={16} weight="bold" />)} />
                 </div>
             </div>
 
             <div className="rd-muted" style={{ marginTop: 'var(--rd-space-4)' }}>
-                共读模式（专注 / 随心）是**单书**设置，在那本书的信息页右上角 ⚙ 里改。
+                共读模式（专注 / 随心）是单书设置——在那本书的信息页右上角 ⚙ 里改。
             </div>
 
-            {/* ── 字号 ── */}
-            {sheet === 'size' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">字号</div>
-                        <SliderRow label="正文字号" value={`${t.fontSize}px`}>
-                            <input className="rd-slider" type="range" min={13} max={26} step={1} value={t.fontSize}
-                                onChange={(e) => setTypography({ fontSize: Number(e.target.value) })} />
-                        </SliderRow>
-                        <div className="rd-muted" style={{ marginTop: 8 }}>界面上的字会跟着一起缩放。</div>
+            <SheetHost sheet={sheet} setSheet={setSheet} t={t} prefs={prefs} cssDraft={cssDraft} setCssDraft={setCssDraft} />
+        </div>
+    );
+}
+
+/** 三张页共用的那几张底部弹卡 */
+function SheetHost({ sheet, setSheet, t, prefs, cssDraft, setCssDraft }: {
+    sheet: Sheet;
+    setSheet: (s: Sheet) => void;
+    t: ReturnType<typeof useReaderPrefs>['typography'];
+    prefs: ReturnType<typeof useReaderPrefs>;
+    cssDraft: string | null;
+    setCssDraft: (v: string | null) => void;
+}) {
+    const slot = prefs.highlightStyles.user ?? 1;
+    const close = () => setSheet(null);
+    if (!sheet) return null;
+
+    const sliderSheet = (title: string, label: string, value: string, min: number, max: number, step: number, cur: number, apply: (v: number) => void, hint?: string) => (
+        <div className="rd-sheet-mask" onClick={close}>
+            <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                <div className="rd-sheet-grip" />
+                <div className="rd-sheet-title">{title}</div>
+                <SliderRow label={label} value={value}>
+                    <input className="rd-slider" type="range" min={min} max={max} step={step} value={cur}
+                        onChange={(e) => apply(Number(e.target.value))} />
+                </SliderRow>
+                {hint && <div className="rd-muted" style={{ marginTop: 8 }}>{hint}</div>}
+            </div>
+        </div>
+    );
+
+    if (sheet === 'size') return sliderSheet('正文字号', '字号', `${t.fontSize}px`, 13, 26, 1, t.fontSize, (v) => setTypography({ fontSize: v }), '界面上的字会跟着一起缩放。');
+    if (sheet === 'lineHeight') return sliderSheet('行距', '行距', t.lineHeight.toFixed(1), 1.3, 2.6, 0.1, t.lineHeight, (v) => setTypography({ lineHeight: v }));
+    if (sheet === 'paraGap') return sliderSheet('段间距', '段间距', `${t.paragraphSpacing}px`, 0, 28, 2, t.paragraphSpacing, (v) => setTypography({ paragraphSpacing: v }));
+    if (sheet === 'indent') return sliderSheet('首行缩进', '缩进', `${t.paragraphIndent} 字`, 0, 3, 0.5, t.paragraphIndent, (v) => setTypography({ paragraphIndent: v }));
+    if (sheet === 'margin') return sliderSheet('页边距', '左右边距', `${t.margin}px`, 10, 44, 2, t.margin, (v) => setTypography({ margin: v }));
+
+    if (sheet === 'font') {
+        return (
+            <div className="rd-sheet-mask" onClick={close}>
+                <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                    <div className="rd-sheet-grip" />
+                    <div className="rd-sheet-title">字体</div>
+                    <div className="rd-btn-row">
+                        <button className={t.fontFamily === 'sans' ? 'rd-btn' : 'rd-btn rd-btn-primary'} onClick={() => { setTypography({ fontFamily: 'serif' }); close(); }}>衬线体</button>
+                        <button className={t.fontFamily === 'sans' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => { setTypography({ fontFamily: 'sans' }); close(); }}>黑体</button>
                     </div>
                 </div>
-            )}
+            </div>
+        );
+    }
 
-            {/* ── 字体 ── */}
-            {sheet === 'font' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">字体</div>
-                        <div className="rd-btn-row">
-                            <button className={t.fontFamily === 'sans' ? 'rd-btn' : 'rd-btn rd-btn-primary'} onClick={() => { setTypography({ fontFamily: 'serif' }); setSheet(null); }}>衬线</button>
-                            <button className={t.fontFamily === 'sans' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => { setTypography({ fontFamily: 'sans' }); setSheet(null); }}>黑体</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ── 背景色 ── */}
-            {sheet === 'bg' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">背景色</div>
-                        <div className="rd-btn-row">
-                            {READER_SKINS.map((s) => (
-                                <button
-                                    key={s.id}
-                                    className={prefs.themeId === s.id ? 'rd-btn rd-btn-primary' : 'rd-btn'}
-                                    onClick={() => { setTheme(s.id); setSheet(null); }}
-                                >
-                                    {s.label}
+    if (sheet === 'layout') {
+        return (
+            <div className="rd-sheet-mask" onClick={close}>
+                <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                    <div className="rd-sheet-grip" />
+                    <div className="rd-sheet-title">书架版式</div>
+                    <div className="rd-card rd-card-flush">
+                        <div className="rd-list">
+                            {LAYOUT_OPTS.map((l) => (
+                                <button key={l.key} className="rd-item" onClick={() => { setShelfLayout(l.key); close(); }}>
+                                    <span className="rd-item-label">{l.label}</span>
+                                    {prefs.shelfLayout === l.key && <span className="rd-check">✓</span>}
                                 </button>
                             ))}
                         </div>
                     </div>
+                    <div className="rd-muted" style={{ marginTop: 8 }}>切了立刻生效。</div>
                 </div>
-            )}
+            </div>
+        );
+    }
 
-            {/* ── 书架版式 ── */}
-            {sheet === 'layout' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">书架版式</div>
+    if (sheet === 'hl') {
+        return (
+            <div className="rd-sheet-mask" onClick={close}>
+                <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                    <div className="rd-sheet-grip" />
+                    <div className="rd-sheet-title">划线配色</div>
+                    <div className="rd-row">
+                        <span className="rd-row-label">我</span>
                         <div className="rd-btn-row">
-                            <button className={prefs.shelfLayout === 'grid' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => { setShelfLayout('grid'); setSheet(null); }}>封面网格</button>
-                            <button className={prefs.shelfLayout === 'list' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => { setShelfLayout('list'); setSheet(null); }}>横向卡片</button>
+                            {HIGHLIGHT_SLOTS.map((s) => (
+                                <button
+                                    key={s.slot}
+                                    aria-label={s.label}
+                                    className={`rd-swatch${slot === s.slot ? ' rd-swatch-on' : ''}`}
+                                    onClick={() => setHighlightSlot('user', s.slot)}
+                                    style={{ background: `rgb(var(--rd-hl-${s.slot}-rgb))` }}
+                                />
+                            ))}
                         </div>
-                        <div className="rd-muted" style={{ marginTop: 8 }}>切了立刻生效。</div>
                     </div>
+                    <div className="rd-muted" style={{ marginTop: 8 }}>角色的槽位跟着书库页的开关走，第二批接上。</div>
                 </div>
-            )}
+            </div>
+        );
+    }
 
-            {/* ── 划线配色 ── */}
-            {sheet === 'hl' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">划线配色</div>
-                        <div className="rd-row">
-                            <span className="rd-row-label">我</span>
-                            <div className="rd-btn-row">
-                                {HIGHLIGHT_SLOTS.map((s) => (
-                                    <button
-                                        key={s.slot}
-                                        aria-label={s.label}
-                                        className={`rd-swatch${slot === s.slot ? ' rd-swatch-on' : ''}`}
-                                        onClick={() => setHighlightSlot('user', s.slot)}
-                                        style={{ background: `rgb(var(--rd-hl-${s.slot}-rgb))` }}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                        <div className="rd-muted" style={{ marginTop: 8 }}>角色的槽位跟着书库页的开关走，第二批接上。</div>
-                    </div>
+    // css
+    return (
+        <div className="rd-sheet-mask" onClick={close}>
+            <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                <div className="rd-sheet-grip" />
+                <div className="rd-sheet-title">自定义 CSS（皮肤层）</div>
+                <textarea
+                    className="rd-field"
+                    rows={6}
+                    placeholder={'.rd-para { letter-spacing: 0.02em; }'}
+                    value={cssDraft ?? prefs.cssGlobal}
+                    onChange={(e) => setCssDraft(e.target.value)}
+                />
+                <div className="rd-btn-row" style={{ marginTop: 8 }}>
+                    <button className="rd-btn rd-btn-primary" onClick={() => { setCssGlobal(cssDraft ?? prefs.cssGlobal); setCssDraft(null); }}>保存</button>
+                    <button className="rd-btn" onClick={() => { setCssGlobal(''); setCssDraft(''); }}>清空</button>
                 </div>
-            )}
-
-            {/* ── 自定义 CSS ── */}
-            {sheet === 'css' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">自定义 CSS（皮肤层）</div>
-                        <textarea
-                            className="rd-field"
-                            rows={6}
-                            placeholder={'.rd-para { letter-spacing: 0.02em; }'}
-                            value={cssDraft ?? prefs.cssGlobal}
-                            onChange={(e) => setCssDraft(e.target.value)}
-                        />
-                        <div className="rd-btn-row" style={{ marginTop: 8 }}>
-                            <button className="rd-btn rd-btn-primary" onClick={() => { setCssGlobal(cssDraft ?? prefs.cssGlobal); setCssDraft(null); }}>保存</button>
-                            <button className="rd-btn" onClick={() => { setCssGlobal(''); setCssDraft(''); }}>清空</button>
-                        </div>
-                        <div className="rd-muted" style={{ marginTop: 6 }}>
-                            这里写的规则挂在骨架层之后，同权重时你的生效——不用写 !important。类名见骨架层注释。
-                        </div>
-                    </div>
+                <div className="rd-muted" style={{ marginTop: 6 }}>
+                    这里写的规则挂在骨架层之后，同权重时你的生效——不用写 !important。类名见骨架层注释。
                 </div>
-            )}
+            </div>
         </div>
     );
 }
