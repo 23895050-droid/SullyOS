@@ -13,6 +13,7 @@ import { useBlobRefUrl } from '../../utils/blobRef';
 import { loadCoupleBeauty, buildTheme } from './CoupleBeauty';
 import CoupleBelow from './CoupleBelow';
 import CoupleCalendar from './CoupleCalendar';
+import CoupleWeather from './CoupleWeather';
 import { useOS } from '../../context/OSContext';
 import { useMusic, musicApi, toHttps, loadMusicCfgStandalone } from '../../context/MusicContext';
 import { AppID } from '../../types';
@@ -696,7 +697,6 @@ const StubPage: React.FC<{ title: string; note: string; onBack: () => void }> = 
 type Route = 'first' | 'c1' | 'c2' | 'c4' | 'c4her' | 'c5' | 'c6' | 'c7' | 'c71' | 'c72' | 'c9';
 
 const STUB_COPY: Record<string, [string, string]> = {
-  c6: ['天气', '天气页施工中：逐小时预报、一周天气，后续文档接入'],
   c7: ['本地书架', '书架页施工中：正在读的书、书摘记录，后续文档接入'],
   c71: ['阅读详情', '阅读详情页施工中：共读进度、章节笔记，后续文档接入'],
   c72: ['书摘记录', '书摘页施工中：导入数据、批注记录，后续文档接入'],
@@ -774,6 +774,8 @@ const CoupleSpace: React.FC = () => {
               <CoupleDiary initialOwner="me" onBack={() => setPage('first')} />
             ) : p === 'c4her' ? (
               <CoupleDiary initialOwner="her" onBack={() => setPage('first')} />
+            ) : p === 'c6' ? (
+              <CoupleWeather onBack={() => setPage('first')} />
             ) : p === 'c9' ? (
               <CoupleTogether initialTab="memories" onBack={() => setPage('first')} />
             ) : (
