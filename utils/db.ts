@@ -28,7 +28,7 @@ const DB_NAME = 'AetherOS_Data';
 // v70：剧场面具箱（原创人物面具）；角色面具仍只存 characterId，不复制神经链接资料。
 // v71：角色小红书伪主页；发帖归属与可删除的自由活动日志分离。
 // v72：image_receipts 近期接收 — 生图独立备份站（fork 自有 store，与聊天消息解耦）。
-const DB_VERSION = 72;
+const DB_VERSION = 73; // v73: 读书模块（fork 自建）新增 rd_* 五张表
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -476,6 +476,30 @@ export const openDB = (): Promise<IDBDatabase> => {
       if (!db.objectStoreNames.contains('pixel_home_layouts')) {
           const phlStore = db.createObjectStore('pixel_home_layouts', { keyPath: ['charId', 'roomId'] });
           phlStore.createIndex('charId', 'charId', { unique: false });
+      }
+
+      // ─── 读书模块（fork 自建，2026-09-14）v73 ──────────────────────
+      // 五张表分工与字段见 utils/reader/readerDb.ts 头注释（那边是唯一的语义出口）。
+      // 本块是追加式 diff：动它以外的地方 = 下次上游合并多一处冲突。
+      if (!db.objectStoreNames.contains('rd_books')) {
+          db.createObjectStore('rd_books', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('rd_chapters')) {
+          const rcStore = db.createObjectStore('rd_chapters', { keyPath: 'id' });
+          rcStore.createIndex('bookId', 'bookId', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('rd_annotations')) {
+          const raStore = db.createObjectStore('rd_annotations', { keyPath: 'id' });
+          raStore.createIndex('bookId', 'bookId', { unique: false });
+          raStore.createIndex('bookId_owner', ['bookId', 'ownerId'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains('rd_threads')) {
+          const rtStore = db.createObjectStore('rd_threads', { keyPath: 'id' });
+          rtStore.createIndex('bookId', 'bookId', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('rd_progress')) {
+          const rpStore = db.createObjectStore('rd_progress', { keyPath: ['bookId', 'ownerId'] });
+          rpStore.createIndex('bookId', 'bookId', { unique: false });
       }
     };
   });
@@ -3922,5 +3946,83 @@ export const DB = {
           data.bankState = undefined as any;
           data.bankDollhouse = undefined as any;
       }, (data.bankState ? 1 : 0) + (data.bankDollhouse ? 1 : 0));
-  }
+  },
+
+  // ─── 通用行助手（fork 自建，2026-09-14，读书模块用）────────────────────
+  // 沿用 getStoreRowsPage / countStoreRows / putStoreRows 的既有口径：
+  // 表名参数化、表不存在当空、错误一律抛出去。语义（这几张表是什么）归
+  // utils/reader/readerDb.ts，这里只是「按名字读一行 / 读一表 / 按索引读 / 删」。
+  getRow: async (storeName: string, key: IDBValidKey): Promise<unknown | null> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(storeName)) return null;
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(storeName, 'readonly');
+          const request = transaction.objectStore(storeName).get(key);
+          request.onsuccess = () => resolve(request.result ?? null);
+          request.onerror = () => reject(request.error);
+          transaction.onabort = () => reject(transaction.error || new Error(`getRow(${storeName}) aborted`));
+      });
+  },
+
+  getAllRows: async (storeName: string): Promise<unknown[]> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(storeName)) return [];
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(storeName, 'readonly');
+          const request = transaction.objectStore(storeName).getAll();
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () => reject(request.error);
+          transaction.onabort = () => reject(transaction.error || new Error(`getAllRows(${storeName}) aborted`));
+      });
+  },
+
+  getRowsByIndex: async (storeName: string, indexName: string, key: IDBValidKey | IDBKeyRange): Promise<unknown[]> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(storeName)) return [];
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(storeName, 'readonly');
+          const store = transaction.objectStore(storeName);
+          if (!store.indexNames.contains(indexName)) { resolve([]); return; }
+          const request = store.index(indexName).getAll(key);
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () => reject(request.error);
+          transaction.onabort = () => reject(transaction.error || new Error(`getRowsByIndex(${storeName}.${indexName}) aborted`));
+      });
+  },
+
+  deleteRow: async (storeName: string, key: IDBValidKey): Promise<void> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(storeName)) return;
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(storeName, 'readwrite');
+          transaction.objectStore(storeName).delete(key);
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () => reject(transaction.error || new Error(`deleteRow(${storeName}) aborted`));
+      });
+  },
+
+  /** 按索引批量删（如删一本书的全部章节）。一次事务，删完才算数。 */
+  deleteRowsByIndex: async (storeName: string, indexName: string, key: IDBValidKey | IDBKeyRange): Promise<number> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(storeName)) return 0;
+      return new Promise((resolve, reject) => {
+          const transaction = db.transaction(storeName, 'readwrite');
+          const store = transaction.objectStore(storeName);
+          if (!store.indexNames.contains(indexName)) { resolve(0); return; }
+          let deleted = 0;
+          const cursorReq = store.index(indexName).openKeyCursor(key);
+          cursorReq.onsuccess = () => {
+              const cursor = cursorReq.result;
+              if (!cursor) return;
+              store.delete(cursor.primaryKey);
+              deleted++;
+              cursor.continue();
+          };
+          cursorReq.onerror = () => reject(cursorReq.error);
+          transaction.oncomplete = () => resolve(deleted);
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () => reject(transaction.error || new Error(`deleteRowsByIndex(${storeName}.${indexName}) aborted`));
+      });
+  },
 };
