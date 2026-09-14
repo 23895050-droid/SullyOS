@@ -3,8 +3,8 @@
 // 数据 Open-Meteo（weatherApi）→ weatherStore 缓存：重进先用缓存秒开，超 30 分钟后台刷新；
 // 从没拉到过数据时才显示错误页。白天/夜晚两套主题照图（背景：渐变+合成云/星，实景素材以后可换）。
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, CalendarBlank } from '@phosphor-icons/react';
-import { fetchWeather } from './weatherApi';
+import { ArrowLeft, CalendarBlank, ListDashes, MapTrifold } from '@phosphor-icons/react';
+import { ensureFreshWeather } from './weatherApi';
 import { getWeatherStore, saveWeatherData, useWeatherStore, WEATHER_FRESH_MS } from './weatherStore';
 import type { WeatherData } from './weatherStore';
 import WeatherIcon from './WeatherIcon';
@@ -244,7 +244,7 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setBusy(true);
     setFailed(false);
     try {
-      saveWeatherData(await fetchWeather(getWeatherStore().city));
+      await ensureFreshWeather(getWeatherStore().city, 0); // 手动重试 = 强制拉
     } catch {
       setFailed(true);
     } finally {
@@ -330,9 +330,24 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           <HourlyCard data={data} isDay={isDay} />
           <TenDayCard data={data} isDay={isDay} />
         </div>
-        <div style={{ height: 'calc(var(--safe-bottom, 0px) + 120px)' }} />
+        <div style={{ height: 'calc(var(--safe-bottom, 0px) + 74px)' }} />
       </div>
       {backBtn}
+      {/* 底部工具栏（原版样式：通栏贴底；此页全局胶囊导航已隐藏） */}
+      <div
+        style={{
+          position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 30, pointerEvents: 'none',
+          height: 'calc(var(--safe-bottom, 0px) + 54px)', paddingBottom: 'var(--safe-bottom, 0px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          paddingLeft: 22, paddingRight: 22,
+          background: isDay ? 'rgba(255,255,255,0.08)' : 'rgba(14,20,38,0.25)',
+          backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)',
+        }}
+      >
+        <MapTrifold size={22} color="rgba(255,255,255,0.95)" />
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />
+        <ListDashes size={22} color="rgba(255,255,255,0.95)" />
+      </div>
     </div>
   );
 };

@@ -97,6 +97,8 @@ const NoxHomeApp: React.FC = () => {
   const { closeApp, addToast, openApp } = useOS();
   const [tab, setTab] = useState<'home' | 'couple' | 'feed' | 'settings'>('home');
   const [inner, setInner] = useState<string | null>(null); // b 页内页（diary = 日记页）
+  // 沉浸页（天气 c6）：藏掉底部胶囊导航全屏显示（她 2026-09-14 定；CoupleSpace 广播 couple-immersive 事件）
+  const [immersive, setImmersive] = useState(false);
   const [beauty, setBeauty] = useState(loadCoupleBeauty);
   // 活动卡文案 = 我的最近一条活动记录（她的/共同的不上我的家——她 2026-09-04 定；没记录时用占位文案）
   const activityStore = useActivityStore();
@@ -111,6 +113,11 @@ const NoxHomeApp: React.FC = () => {
       window.removeEventListener('couple-beauty-changed', reload);
       window.removeEventListener('storage', reload);
     };
+  }, []);
+  useEffect(() => {
+    const onImmersive = (e: Event) => setImmersive(Boolean((e as CustomEvent).detail));
+    window.addEventListener('couple-immersive', onImmersive);
+    return () => window.removeEventListener('couple-immersive', onImmersive);
   }, []);
   const noxAvatarUrl = useBlobRefUrl(beauty.avatarNox);
   const homeDiscUrl = useBlobRefUrl(beauty.homeDisc);
@@ -388,6 +395,9 @@ const NoxHomeApp: React.FC = () => {
         className="fixed left-1/2 -translate-x-1/2 flex items-center z-[70]"
         style={{
           bottom: 'calc(var(--safe-bottom, 0px) + 16px)',
+          opacity: immersive ? 0 : 1,
+          pointerEvents: immersive ? 'none' : undefined,
+          transition: 'opacity 0.25s ease',
           width: '68.75%', maxWidth: 300, height: 46,
           background: 'rgba(10,14,22,0.30)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
           border: '1px solid rgba(255,255,255,0.10)', borderRadius: 23,

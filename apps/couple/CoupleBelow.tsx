@@ -6,7 +6,7 @@
 // 路由：c6 天气 / c71 阅读详情 / c7 本地书架 / c72 书摘 / c2 饮食 / c1-period 经期(日历页月经模式) / c3 记账(复用 Sully Bank) / c4 日记 / c9 和 Ta
 // mock 数据：天气(上海) / 书《小王子》 / 饮食 860+1240 kcal / 黄体期 / 预算 ¥1000 / 事件记录，后续接真数据
 import React, { useEffect, useState } from 'react';
-import { MapPin, Sun, Cloud, CloudSun, Moon, MoonStars, Books, BookmarkSimple, Drop, CalendarCheck, Hourglass } from '@phosphor-icons/react';
+import { MapPin, Sun, Cloud, CloudSun, Moon, CloudMoon, CloudFog, CloudRain, CloudSnow, CloudLightning, MoonStars, Books, BookmarkSimple, Drop, CalendarCheck, Hourglass } from '@phosphor-icons/react';
 import { loadCoupleBeauty, buildTheme } from './CoupleBeauty';
 import { usePeriodStore } from './periodStore';
 import { getLocalDateKey } from '../../utils/localDate';
@@ -18,6 +18,9 @@ import { latestMemory, latestOpenPromise, useTogetherStore } from './togetherSto
 import { fmtDiaryMeta } from '../../utils/diaryMath';
 import { dayTotals, remainingKcal, type MealKey } from '../../utils/dietMath';
 import { useBlobRefUrl } from '../../utils/blobRef';
+import { useWeatherStore } from './weatherStore';
+import { ensureFreshWeather } from './weatherApi';
+import { wmoIcon, wmoText, type WeatherIconKind } from '../../utils/weatherMath';
 
 const DESIGN_W = 1290;
 const wPct = (n: number) => `${((n / DESIGN_W) * 100).toFixed(3)}%`;
@@ -73,42 +76,50 @@ const Bar: React.FC<{ hp: Pct; x: number; y: number; w: number; pct: number; h?:
 
 // ══════════════════════ 二屏（1290×2220）：四行 ══════════════════════
 
-// ── 天气卡（深色） ──
-const HOUR_ITEMS = (() => {
-  const now = new Date();
-  const list: { label: string; Icon: React.ElementType; temp: number }[] = [];
-  for (let i = 0; i < 8; i++) {
-    const d = new Date(now.getTime() + i * 3600000);
-    const h = d.getHours();
-    const Icon = i === 5 ? Cloud : h >= 6 && h < 18 ? Sun : h >= 18 && h < 20 ? CloudSun : Moon;
-    const temp = 26 + Math.round(Math.sin((i + 1) / 1.5) * 2);
-    list.push({ label: i === 0 ? 'Now' : `${h}时`, Icon, temp });
-  }
-  return list;
-})();
+// ── 天气卡（深色）——接 weatherStore 真数据（Open-Meteo；与天气页共享缓存，没数据时显示占位） ──
+const WEATHER_ICONS: Record<WeatherIconKind, React.ElementType> = {
+  sun: Sun, moon: Moon,
+  'cloud-sun': CloudSun, 'cloud-moon': CloudMoon,
+  cloud: Cloud, fog: CloudFog,
+  drizzle: CloudRain, rain: CloudRain,
+  snow: CloudSnow, thunder: CloudLightning,
+};
 
-const WeatherCard: React.FC<{ hp: Pct; onOpen: () => void }> = ({ hp, onOpen }) => (
-  <>
-    <div className="absolute" style={{ left: wPct(100), top: hp(20), width: wPct(1090), height: hp(400), zIndex: 10, background: DARK_WEATHER, borderRadius: cqw(36, 12), boxShadow: CARD_SHADOW }} />
-    <MapPin weight="fill" className="absolute pointer-events-none" style={{ left: wPct(136), top: hp(52), width: cqw(20, 12), height: cqw(20, 12), color: '#ffffff', zIndex: 11 }} />
-    {/* 文字整体下移（定位图标与逐小时条不动） */}
-    <Text hp={hp} x={168} y={54} w={200} h={36} size={20} min={12} color="#ffffff" weight={600}>上海</Text>
-    <Text hp={hp} x={136} y={122} w={280} h={120} size={64} min={24} color="#ffffff" weight={700}>26°</Text>
-    <Text hp={hp} x={136} y={262} w={300} h={28} size={16} min={10} color="rgba(255,255,255,0.82)">Mostly Cloudy</Text>
-    <Text hp={hp} x={136} y={302} w={300} h={26} size={13} min={9} color="rgba(255,255,255,0.55)">H:29°  L:19°</Text>
-    {/* 逐小时预报条 */}
-    <div className="absolute pointer-events-none flex items-stretch" style={{ left: wPct(560), top: hp(80), width: wPct(570), height: hp(240), zIndex: 11 }}>
-      {HOUR_ITEMS.map(({ label, Icon, temp }) => (
-        <div key={label} className="flex-1 flex flex-col items-center justify-center" style={{ gap: cqw(12, 4) }}>
-          <span style={{ fontSize: cqw(12, 8), color: 'rgba(255,255,255,0.6)' }}>{label}</span>
-          <Icon style={{ width: cqw(24, 14), height: cqw(24, 14), color: '#ffffff' }} weight="regular" />
-          <span style={{ fontSize: cqw(14, 9), color: '#ffffff', fontWeight: 600 }}>{temp}°</span>
-        </div>
-      ))}
-    </div>
-    <Hotspot hp={hp} x={100} y={20} w={1090} h={400} z={12} onTap={onOpen} />
-  </>
-);
+const WeatherCard: React.FC<{ hp: Pct; onOpen: () => void }> = ({ hp, onOpen }) => {
+  const { city, data } = useWeatherStore();
+  // 进「我们」就顺手补拉一次（30 分钟新鲜期内直接命中缓存；与天气页并发时共享同一个请求）
+  useEffect(() => {
+    void ensureFreshWeather(city).catch(() => {});
+  }, [city]);
+  const now = data?.now;
+  const today = data?.days?.[0];
+  const hours = (data?.hours ?? []).slice(0, 8);
+  return (
+    <>
+      <div className="absolute" style={{ left: wPct(100), top: hp(20), width: wPct(1090), height: hp(400), zIndex: 10, background: DARK_WEATHER, borderRadius: cqw(36, 12), boxShadow: CARD_SHADOW }} />
+      <MapPin weight="fill" className="absolute pointer-events-none" style={{ left: wPct(136), top: hp(52), width: cqw(20, 12), height: cqw(20, 12), color: '#ffffff', zIndex: 11 }} />
+      {/* 文字整体下移（定位图标与逐小时条不动） */}
+      <Text hp={hp} x={168} y={54} w={200} h={36} size={20} min={12} color="#ffffff" weight={600}>{city.name}</Text>
+      <Text hp={hp} x={136} y={122} w={280} h={120} size={64} min={24} color="#ffffff" weight={700}>{now ? `${Math.round(now.temp)}°` : '--°'}</Text>
+      <Text hp={hp} x={136} y={262} w={300} h={28} size={16} min={10} color="rgba(255,255,255,0.82)">{now ? wmoText(now.code) : '——'}</Text>
+      <Text hp={hp} x={136} y={302} w={300} h={26} size={13} min={9} color="rgba(255,255,255,0.55)">{today ? `H:${Math.round(today.max)}°  L:${Math.round(today.min)}°` : 'H:--°  L:--°'}</Text>
+      {/* 逐小时预报条 */}
+      <div className="absolute pointer-events-none flex items-stretch" style={{ left: wPct(560), top: hp(80), width: wPct(570), height: hp(240), zIndex: 11 }}>
+        {hours.map((h, i) => {
+          const Icon = WEATHER_ICONS[wmoIcon(h.code, h.isDay)];
+          return (
+            <div key={h.time} className="flex-1 flex flex-col items-center justify-center" style={{ gap: cqw(12, 4) }}>
+              <span style={{ fontSize: cqw(12, 8), color: 'rgba(255,255,255,0.6)' }}>{i === 0 ? 'Now' : `${parseInt(h.time.slice(11, 13), 10)}时`}</span>
+              <Icon style={{ width: cqw(24, 14), height: cqw(24, 14), color: '#ffffff' }} weight="regular" />
+              <span style={{ fontSize: cqw(14, 9), color: '#ffffff', fontWeight: 600 }}>{Math.round(i === 0 && now ? now.temp : h.temp)}°</span>
+            </div>
+          );
+        })}
+      </div>
+      <Hotspot hp={hp} x={100} y={20} w={1090} h={400} z={12} onTap={onOpen} />
+    </>
+  );
+};
 
 // ── 阅读区：左书卡 + 右侧深色双入口 ──
 const ReadingRow: React.FC<{ hp: Pct; onOpen: (r: string) => void }> = ({ hp, onOpen }) => (

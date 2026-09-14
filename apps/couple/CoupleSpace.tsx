@@ -730,6 +730,13 @@ const CoupleSpace: React.FC = () => {
       if (t && t.textContent === paletteCss) t.remove();
     };
   }, [paletteCss]);
+  // 沉浸页广播：天气页（c6）时藏 NoxHome 底部的胶囊导航，全屏照原版（她 2026-09-14 定）
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('couple-immersive', { detail: page === 'c6' }));
+  }, [page]);
+  useEffect(() => () => {
+    window.dispatchEvent(new CustomEvent('couple-immersive', { detail: false }));
+  }, []);
   const open = (route: string) => {
     if (route === 'c1-period') { setC1Mode('period'); setPage('c1'); return; }
     if (route === 'c1') { setC1Mode('daily'); setPage('c1'); return; } // 日历卡：按文档口径默认日常

@@ -2,6 +2,7 @@
 // 主数据（实时/逐小时/10 天）与空气质量并行拉；空气质量失败不影响主数据（aqi 记 null）。
 // 超时 12 秒；返回结构直接映射成 weatherStore 的 WeatherData。
 import type { WeatherAqi, WeatherCity, WeatherData, WeatherDay, WeatherHour } from './weatherStore';
+import { getWeatherStore, saveWeatherData, WEATHER_FRESH_MS } from './weatherStore';
 
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const AIR_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
@@ -16,6 +17,26 @@ async function getJson(url: string, timeoutMs = 12000): Promise<any> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+let inflight: Promise<void> | null = null;
+
+/**
+ * 需要才拉：缓存新鲜就直接返回；并发调用（天气页 / 首屏以下入口卡同时挂载）共享同一个请求。
+ * 失败会抛出，交给调用方决定展示（inflight 由 finally 清掉，不影响下次重试）。
+ */
+export function ensureFreshWeather(city: WeatherCity, maxAgeMs: number = WEATHER_FRESH_MS): Promise<void> {
+  const cur = getWeatherStore().data;
+  if (cur && Date.now() - new Date(cur.fetchedAt).getTime() <= maxAgeMs) return Promise.resolve();
+  if (inflight) return inflight;
+  inflight = fetchWeather(city)
+    .then((d) => {
+      saveWeatherData(d);
+    })
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
 }
 
 /** 拉一个城市的天气：实时 + 未来 24 小时 + 10 天 + 空气质量 */
