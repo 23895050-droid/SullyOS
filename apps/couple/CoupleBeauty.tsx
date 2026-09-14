@@ -13,6 +13,7 @@ import DataBackupPanel from './DataBackupPanel';
 import { deleteBlobRef } from '../../utils/blobRef';
 import { updateDiaryApi, updateDiaryFont, useDiaryStore } from './diaryStore';
 import { useCouplePaletteStore, setCouplePalette, resetCouplePalette, saveCouplePreset, loadCouplePreset, deleteCouplePreset } from './couplePaletteStore';
+import { useAnnivStore, saveAnniv, togetherStartKey } from './annivStore';
 import { COUPLE_PALETTE_KEYS, COUPLE_PALETTE_DEFAULTS, CARD_ALPHA_DEFAULT } from './couplePalette';
 
 const BEAUTY_KEY = 'couple_beauty_v1';
@@ -129,6 +130,61 @@ const Slot: React.FC<{
       <button type="button" onClick={() => inputRef.current?.click()} className="border-0 cursor-pointer rounded-full" style={{ background: 'var(--cs-soft, #fce8f1)', color: 'var(--cs-deep, #c25a82)', fontSize: 12, padding: '6px 14px', fontWeight: 600 }}>更换</button>
       <button type="button" aria-label="恢复默认" onClick={onReset} className="border-0 bg-transparent cursor-pointer" style={{ color: '#b0909c' }}>
         <ArrowCounterClockwise style={{ width: 16, height: 16 }} />
+      </button>
+    </div>
+  );
+};
+
+// ── 在一起（2026-09-14 G1 她要求）：首屏那个「days」大字的日期在这里改，保存即生效 ──
+const TogetherSettings: React.FC = () => {
+  const { addToast } = useOS();
+  const store = useAnnivStore();
+  const [date, setDate] = useState(togetherStartKey(store.items) ?? '');
+  const ok = /^\d{4}-\d{2}-\d{2}$/.test(date);
+  // 预览：和首屏同一个口径（从起点到今天的整天数）
+  const preview = (() => {
+    if (!ok) return null;
+    const start = new Date(`${date}T00:00:00`);
+    if (Number.isNaN(start.getTime())) return null;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return Math.max(0, Math.floor((today - start.getTime()) / 86400000));
+  })();
+  const submit = () => {
+    if (!ok) { addToast('日期格式不对——照 2025-06-21 这样填', 'error'); return; }
+    const [y, m, d] = date.split('-');
+    const existing = store.items.find((a) => a.id === 'seed-together') ?? store.items.find((a) => a.title.includes('在一起'));
+    saveAnniv({
+      id: existing?.id,
+      title: existing?.title ?? '在一起',
+      emoji: existing?.emoji ?? '💙',
+      date: `${m}-${d}`,
+      note: `${date} 在一起`,
+      startYear: Number(y),
+      owner: existing?.owner ?? 'together',
+    });
+    addToast('已保存——首屏那个天数立刻就是新的了', 'success');
+  };
+  return (
+    <div className="rounded-2xl p-4 flex flex-col gap-2" style={{ background: '#fff', boxShadow: '0 6px 18px rgba(233,160,190,0.14)' }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#3a2a33' }}>在一起的日期</div>
+      <div style={{ fontSize: 11, color: '#9a7a8a', lineHeight: 1.6 }}>首屏「❤ 数字 days」就是按这个日子算的；这个日子同时也是「纪念日」里那个「在一起」（每年 6 月 21 日会出现在日历上）。</div>
+      <input
+        type="date"
+        value={ok ? date : ''}
+        onChange={(e) => setDate(e.target.value)}
+        style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, color: '#3a2a33', border: '1px solid #f2d3e0', borderRadius: 10, padding: '9px 10px', background: '#faf7f8', outline: 'none' }}
+      />
+      {preview !== null && (
+        <div style={{ fontSize: 11, color: '#9a7a8a' }}>按这个日子算，今天首屏会显示：{preview} days</div>
+      )}
+      <button
+        type="button"
+        onClick={submit}
+        className="border-0 cursor-pointer rounded-full"
+        style={{ padding: '9px 0', fontSize: 12, fontWeight: 700, color: '#fff', background: 'var(--cs-accent, #f0a8c0)' }}
+      >
+        保存
       </button>
     </div>
   );
@@ -429,6 +485,10 @@ const CoupleBeauty: React.FC = () => {
         {/* 每类折叠（2026-08-30 她要求：设置页点开再展开，别一长列） */}
         <BeautyFold title="数据备份">
           <DataBackupPanel scope="all" />
+        </BeautyFold>
+
+        <BeautyFold title="在一起（首屏天数）">
+          <TogetherSettings />
         </BeautyFold>
 
         <BeautyFold title="情侣空间 · 图片与皮肤色">

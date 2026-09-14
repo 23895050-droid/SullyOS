@@ -1348,7 +1348,7 @@ ${a2OutputMode === 'bubbles'
       {/* ═══ a2 给他看 — 全屏 PNG 镂空设计 ═══ */}
       {showA2Card && (
         <div
-          className="fixed inset-0 z-[300] bg-black/60 flex justify-center"
+          className="app-fade-in fixed inset-0 z-[300] bg-black/60 flex justify-center"
           onClick={() => { setShowA2Card(false); if (!a2HasStarted) setA2Messages([]); }}
         >
           <div

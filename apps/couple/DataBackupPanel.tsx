@@ -1,7 +1,7 @@
 // 我们的功能数据备份面板（2026-09-03 她定稿的第一件事）——全量/分功能共用的一个组件
 // 每个功能的导入导出入口都挂它，只是 scope 不同；与原版备份完全独立、互不影响。
 // 走法：点导出 → 一个格式化 JSON 文件直接下载；点导入 → 选文件 → 看备份信息确认 → 导入 → 逐项报告。
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   exportOurData, downloadOurBackup, importOurData, surveyOurData, surveyAllLocalStorage, readOurBackupFile, collectBlobTokens,
   OUR_FEATURE_SCOPES, type OurFeatureId, type OurBackupPayload, type OurBackupPayloadV1, type OurBackupPayloadAny,
@@ -124,6 +124,16 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
     }
   };
 
+  // 导入完成后自动重刷（2026-09-14 G2）：导入是直接写 localStorage/IndexedDB，那些只在模块加载时
+  // 读一次的缓存（美化区图片、音乐设置等）不重开页面不会变——导入完就重刷，省得她对着旧界面犯嘀咕。
+  const [reloadIn, setReloadIn] = useState<number | null>(null);
+  useEffect(() => {
+    if (reloadIn === null) return;
+    if (reloadIn <= 0) { window.location.reload(); return; }
+    const t = window.setTimeout(() => setReloadIn((n) => (n === null ? null : n - 1)), 1000);
+    return () => window.clearTimeout(t);
+  }, [reloadIn]);
+
   const doImport = async () => {
     if (status.kind !== 'picked') return;
     const { bundle } = status;
@@ -131,6 +141,7 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
     try {
       const report = await importOurData(bundle);
       setStatus({ kind: 'imported', report, payload: bundle.payload });
+      setReloadIn(3);
     } catch {
       setStatus({ kind: 'error', message: '导入失败，请重试' });
     }
@@ -195,8 +206,21 @@ const DataBackupPanel: React.FC<{ scope: OurFeatureId | 'all' }> = ({ scope }) =
             {status.report.blobsRestored > 0 || status.report.blobsSkipped > 0
               ? `、图片恢复 ${status.report.blobsRestored} 张${status.report.blobsSkipped > 0 ? `（跳过已存在的 ${status.report.blobsSkipped} 张）` : ''}`
               : ''}
-            。去各页面看看数据回来没有。
+            。
           </div>
+          {reloadIn !== null && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span style={{ fontSize: 11, color: '#2f7d54' }}>
+                {reloadIn > 0 ? `界面 ${reloadIn} 秒后自动刷新一下（有些卡片要重开页面才会重新长出来）` : '正在刷新…'}
+              </span>
+              <button type="button" style={{ ...softBtn, padding: '5px 10px', fontSize: 11 }} onClick={() => window.location.reload()}>
+                立即刷新
+              </button>
+              <button type="button" style={{ ...softBtn, padding: '5px 10px', fontSize: 11, color: '#9a7a8a', background: 'transparent' }} onClick={() => setReloadIn(null)}>
+                先不刷
+              </button>
+            </div>
+          )}
           {status.report.localStorageFailed.length > 0 && (
             <div style={{ ...muted, color: '#c25a82' }}>写失败：{status.report.localStorageFailed.join('、')}</div>
           )}

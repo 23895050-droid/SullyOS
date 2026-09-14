@@ -2,7 +2,7 @@
 // 设计稿比例：附录 JSON 1290×2796（坐标仅供结构参考，按文档第 3 节结构微调）
 // 图层（z）：宣告区背景占位(1) → 白色主卡(2) → 心电图(3) → 头像(4) → 气泡(5) → 胶囊条(5) → 内容(6) → 各卡片(10) → 便签(11) → 整卡热区(12) → 播放按钮(14) → 快捷卡(20) → 待办弹窗(100)
 // 自绘：粉色爱心(#ffe3ef) / 黑白播放按钮 / 心电图动画；素材：public/Couple/（定位图标 / 耳机 / 留白图 / 猫爪1 / 月亮）
-// 占位数据：COUPLE.startDate / birthday / location / songs，情侣设置页接入后改为可编辑；整屏背景 --couple-bg 默认 #ffe3ef
+// 占位数据：location / songs 等；「在一起天数」已接 annivStore（2026-09-14 G1），改日期在设置页「在一起」卡里
 import React, { useEffect, useState } from 'react';
 import QuickBankModal from './QuickBankModal';
 import CoupleDiet from './CoupleDiet';
@@ -17,7 +17,7 @@ import { useOS } from '../../context/OSContext';
 import { useMusic, musicApi, toHttps, loadMusicCfgStandalone } from '../../context/MusicContext';
 import { AppID } from '../../types';
 import { useTodoStore, fixedTodos, shortTodosOn, toggleTodo as toggleTodoStore, addTodo as addTodoStore } from './todoStore';
-import { useAnnivStore, daysUntilAnniv } from './annivStore';
+import { useAnnivStore, daysUntilAnniv, daysTogether } from './annivStore';
 import { getLocalDateKey } from '../../utils/localDate';
 import { useMusicStore, topCharTogetherSong, setMySongPick, importedSongById } from './musicStore';
 import { getMountConfig } from '../../utils/noxhomeMount';
@@ -37,7 +37,6 @@ const QUICK_SHADOW = 'var(--cs-shadow-strong, 0 22px 44px rgba(214,110,150,0.22)
 
 // ── 占位数据（等 Angelica 给真值 / 情侣设置页接入后改为可编辑） ──
 const COUPLE = {
-  startDate: '2024-01-01', // 在一起的日期（示例，改成你们的日子）
   names: ['Nox', 'Angelica'] as const,
   combined: 'Nox & Angel',
   status: 'In Love',
@@ -55,9 +54,6 @@ const PHRASES = [
 
 const WEEKDAY_EN = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 const WEEKDAY_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-
-const daysTogether = (now: Date) =>
-  Math.max(0, Math.floor((now.getTime() - new Date(COUPLE.startDate + 'T00:00:00').getTime()) / 86400000));
 
 // ── 定位文字（与 NoxHome 同款思路） ──
 const Text: React.FC<{
@@ -375,10 +371,11 @@ const CoupleFirstScreen: React.FC<{ onOpen: (route: string) => void }> = ({ onOp
   const hh = String(now.getHours()).padStart(2, '0');
   const mm = String(now.getMinutes()).padStart(2, '0');
   const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
-  const days = daysTogether(now);
   // 待办/纪念日真数据（2026-08-22 接通：与日历页同一份 store）
   const todoStore = useTodoStore();
   const annivStore = useAnnivStore();
+  // 在一起天数：从纪念日 store 的「在一起」读（没配就显示占位，不瞎算）
+  const days = daysTogether(annivStore.items, now);
   const todayKey = getLocalDateKey();
   const homeTodos = [...fixedTodos(todoStore.todos), ...shortTodosOn(todoStore.todos, todayKey)];
   const nearestAnniv = [...annivStore.items].sort((a, b) => daysUntilAnniv(a.date, now) - daysUntilAnniv(b.date, now))[0];
@@ -483,7 +480,7 @@ const CoupleFirstScreen: React.FC<{ onOpen: (route: string) => void }> = ({ onOp
         <Text x={575} y={722} w={140} h={34} size={14} min={8} color="#9a7a8a" align="center" z={6}>{COUPLE.status}</Text>
         <div className="absolute flex items-end justify-center" style={{ left: wPct(516), top: hPct(799), width: wPct(260), height: hPct(75), zIndex: 6 }}>
           <HeartSelf width={46} />
-          <span style={{ fontSize: cqw(46, 18), fontWeight: 700, color: 'var(--cp-text, #3a2a33)', lineHeight: 1, marginLeft: cqw(10, 4) }}>{days}</span>
+          <span style={{ fontSize: cqw(46, 18), fontWeight: 700, color: 'var(--cp-text, #3a2a33)', lineHeight: 1, marginLeft: cqw(10, 4) }}>{days ?? '—'}</span>
           <span style={{ fontSize: cqw(15, 9), color: 'var(--cp-muted, #9a7a8a)', fontWeight: 500, marginLeft: cqw(8, 3), paddingBottom: cqw(5, 2) }}>days</span>
         </div>
         <div className="absolute" style={{ left: wPct(562), top: hPct(900), width: wPct(44), height: hPct(60), zIndex: 6 }}>
@@ -741,6 +738,8 @@ const CoupleSpace: React.FC = () => {
   };
   return (
     <div className="cs-palette absolute inset-0 flex items-center justify-center overflow-hidden" style={coupleBgUrl ? { backgroundImage: `url(${coupleBgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: '#ffe3ef' }}>
+      {/* 切内页 / 回首屏淡入（2026-09-14 G3）：key 换 → 重挂载 → 200ms 只动 opacity 的淡入 */}
+      <div key={page} className="app-fade-in absolute inset-0 flex items-center justify-center">
       {page === 'first' ? (
         <CoupleFirstScreen onOpen={open} />
       ) : page === 'c1' ? (
@@ -756,6 +755,7 @@ const CoupleSpace: React.FC = () => {
       ) : (
         <StubPage title={STUB_COPY[page][0]} note={STUB_COPY[page][1]} onBack={() => setPage('first')} />
       )}
+      </div>
       {bankOpen && <QuickBankModal onClose={() => setBankOpen(false)} />}
     </div>
   );

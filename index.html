@@ -248,6 +248,11 @@
       .noxhome-tab-in {
         animation: noxhome-tab-in 200ms ease-out both;
       }
+      /* 通用「只动 opacity」淡入（2026-09-14 G3）：解锁进桌面 / 相机会话卡 / 相册内嵌页 /
+         情侣空间切内页 等局部过渡都复用它——口径与上面同款（200ms ease-out、key 重挂载触发）。 */
+      .app-fade-in {
+        animation: noxhome-tab-in 200ms ease-out both;
+      }
       /* 软键盘弹出时（iosStandalone 在 body 上挂 .ios-keyboard-open），收掉底部给 home 条留的 safe 间隙，
          让聊天输入栏直接贴住键盘：① 外壳容器不再把底边钉在 safe 上方，铺到可视区底；② 输入栏收掉自己的 pb-safe 白条。
          键盘收起后 class 移除，两者各自回到 safe 让位。app 高度跟随可视区由 utils/iosStandalone.ts 处理。

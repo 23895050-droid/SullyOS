@@ -25,6 +25,9 @@ const hPct = (n: number) => `${((n / DESIGN_H) * 100).toFixed(3)}%`;
 // 设计稿 px 字号/圆角 → 等比缩放（cqw），带最小值兜底
 const cqw = (designPx: number, minPx = 8) => `max(${minPx}px, ${((designPx / DESIGN_W) * 100).toFixed(3)}cqw)`;
 
+// 底图预解码的持有者（2026-09-14 G4）：被引用的 Image 解码缓存不会被浏览器丢掉
+const PRELOADED_HOME_IMAGES: HTMLImageElement[] = [];
+
 // ── 文案占位（美化设置接入后改为可编辑） ──
 const ROOM_TEXT = {
   status: '在窗边给你留了一盏灯', // 状态栏，最多十三个字
@@ -118,6 +121,19 @@ const NoxHomeApp: React.FC = () => {
   const topSong = useMemo(() => topCharTogetherSong(musicStore, getMountConfig().charId), [musicStore]);
   // 反馈1 A2：老数据 http 封面渲染前升级 https
   const topSongCover = useBlobRefUrl(toHttps(topSong?.albumPic));
+
+  // 底图/猫爪预解码（2026-09-14 G4）：页签切换会把这棵画布整个重挂载，<img> 每次都要重新解码
+  // 大图 → 回来瞬间白闪。提前 decode 一次进内存缓存；对象存模块级数组里别被回收，
+  // 缓存就一直在（页面重挂载也只是再挂一张已经解码好的图）。
+  useEffect(() => {
+    ['/Home/底图.png', '/Home/猫爪1.png'].forEach((src) => {
+      if (PRELOADED_HOME_IMAGES.some((im) => im.src.endsWith(src))) return;
+      const im = new Image();
+      im.src = src;
+      PRELOADED_HOME_IMAGES.push(im);
+      void im.decode?.().catch(() => {});
+    });
+  }, []);
   const now = new Date();
   const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
   const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
@@ -201,7 +217,8 @@ const NoxHomeApp: React.FC = () => {
           boxShadow: '0 3px 12px rgba(0,0,0,0.25)',
         }}>
           {topSongCover && (
-            <img src={topSongCover} alt="" draggable={false} decoding="async" className="w-full h-full object-cover pointer-events-none select-none" />
+            /* 专辑照片在页面很下方（y≈2134），懒加载：滚到附近再取图，首屏少一张 */
+            <img src={topSongCover} alt="" draggable={false} decoding="async" loading="lazy" className="w-full h-full object-cover pointer-events-none select-none" />
           )}
           {/* 唱片中心孔装饰：有真图时压暗一点，别挡封面 */}
           <div className="absolute rounded-full" style={{
@@ -244,6 +261,8 @@ const NoxHomeApp: React.FC = () => {
           src="/Home/底图.png"
           alt=""
           draggable={false}
+          decoding="async"
+          fetchPriority="high"
           className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
           style={{ zIndex: 30 }}
         />

@@ -901,7 +901,10 @@ const AlbumApp: React.FC = () => {
   return (
     <div className="h-full bg-slate-50 flex flex-col">
       {view.name === 'receipts' ? (
-        <ImageReceiptsApp embedded onEmbeddedBack={() => setView({ name: 'myAlbums' })} />
+        /* 内嵌页淡入（2026-09-14 G3）：口径同 PhoneShell 的 appEnterFade——只动 opacity */
+        <div className="app-fade-in h-full">
+          <ImageReceiptsApp embedded onEmbeddedBack={() => setView({ name: 'myAlbums' })} />
+        </div>
       ) : view.name === 'archives' ? (
         <ArchiveListSection
           title="我的留档"
