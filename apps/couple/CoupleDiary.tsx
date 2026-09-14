@@ -295,7 +295,7 @@ const WriteModal: React.FC<{
       style={{ zIndex: 120, background: 'rgba(58,32,50,0.35)', paddingBottom: 'calc(var(--safe-bottom, 0px) + 92px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="flex flex-col" style={{ width: 'min(100%, 560px)', background: '#fff', borderRadius: 24, padding: 16, gap: 12 }}>
+      <div className="flex flex-col" style={{ width: 'min(100%, 560px)', background: '#fff', borderRadius: 24, padding: 16, gap: 12, maxHeight: 'calc(100dvh - 150px)', overflowY: 'auto' }}>
         <div className="flex items-center justify-between">
           <span style={{ fontSize: 15, fontWeight: 700, color: '#3a2a33' }}>{owner === 'me' ? '写 Nox 的日记' : '写日记'}</span>
           <button type="button" onClick={onClose} aria-label="关闭" className="border-0 cursor-pointer rounded-full p-2" style={{ background: '#f4eee6' }}>
@@ -331,7 +331,7 @@ const WriteModal: React.FC<{
             color: p.ink, background: p.paper, border: '1px solid #e7dcc8', borderRadius: 14, padding: 14, outline: 'none', resize: 'none',
           }}
         />
-        {/* 照片（可选）：上传实拍；他的日记还可以在日记页点「配一张图」由 AI 生成 */}
+        {/* 照片（可选）：自己传实拍；他的日记配图由模型自己带（生成后自动画） */}
         <div className="flex items-center" style={{ gap: 10 }}>
           <input
             ref={fileRef}
@@ -342,14 +342,21 @@ const WriteModal: React.FC<{
           />
           {photoUrl ? (
             <>
-              <img src={photoUrl} alt="日记照片" style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 12, border: '1px solid #e7dcc8' }} />
-              <span style={{ fontSize: 11, color: '#9a8a76' }}>这篇日记配了照片</span>
-              <span className="flex-1" />
+              <img src={photoUrl} alt="日记照片" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 12, border: '1px solid #e7dcc8' }} />
+              <span className="flex-1" style={{ fontSize: 11, color: '#9a8a76' }}>这篇日记配了照片</span>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="border-0 cursor-pointer rounded-full shrink-0"
+                style={{ padding: '6px 12px', fontSize: 11, fontWeight: 600, color: '#6b5a4a', background: '#f4eee6' }}
+              >
+                换一张
+              </button>
               <button
                 type="button"
                 onClick={() => onPhoto(null)}
-                className="border-0 cursor-pointer rounded-full"
-                style={{ padding: '5px 12px', fontSize: 11, color: '#c26b6b', background: '#fdeef0' }}
+                className="border-0 cursor-pointer rounded-full shrink-0"
+                style={{ padding: '6px 12px', fontSize: 11, color: '#c26b6b', background: '#fdeef0' }}
               >
                 删掉照片
               </button>
@@ -358,10 +365,10 @@ const WriteModal: React.FC<{
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="border-0 cursor-pointer rounded-full"
-              style={{ padding: '7px 14px', fontSize: 11, fontWeight: 600, color: '#6b5a4a', background: '#f4eee6' }}
+              className="flex items-center justify-center cursor-pointer w-full"
+              style={{ gap: 8, padding: '12px 0', fontSize: 12, fontWeight: 600, color: '#8a7a64', background: '#faf6ee', border: '1.5px dashed #d9cbb4', borderRadius: 14 }}
             >
-              📷 配张照片
+              📷 给这篇日记配一张照片（可选）
             </button>
           )}
         </div>
