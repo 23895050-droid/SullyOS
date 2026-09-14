@@ -131,3 +131,47 @@ export function aqiPos(aqi: number): number {
 export function summaryText(code: number, gust: number): string {
   return `${wmoText(code)} conditions will continue for the rest of the day. Wind gusts are up to ${Math.round(gust)} km/h.`;
 }
+
+/** 城市当地时间「7:05 PM」（Open-Meteo 的 time 是当地时间的无时区字符串，直接切字符串，别过 Date） */
+export function fmtCityTime(iso: string): string {
+  const h = parseInt(iso.slice(11, 13), 10);
+  const m = parseInt(iso.slice(14, 16), 10);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return '';
+  const ap = h < 12 ? 'AM' : 'PM';
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${ap}`;
+}
+
+/** 列表卡缩略天空的星星场 [left%, top%, 直径px, 亮度]：同一种子每次长一样（城市坐标当种子） */
+export function starField(seed: string, count = 12): Array<[number, number, number, number]> {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let a = h >>> 0;
+  const rnd = () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out: Array<[number, number, number, number]> = [];
+  for (let i = 0; i < count; i++) {
+    const big = rnd() < 0.22;
+    out.push([
+      Math.round(3 + rnd() * 94),
+      Math.round(6 + rnd() * 84),
+      big ? 2 : 1.4,
+      Number((big ? 0.85 + rnd() * 0.15 : 0.45 + rnd() * 0.35).toFixed(2)),
+    ]);
+  }
+  return out;
+}
+
+/** 横滑切城市判定（松手时调用）：位移够远或甩得够快就翻页；dx>0（右滑）= 看上一座 */
+export function swipeStep(dx: number, ms: number, width: number): -1 | 0 | 1 {
+  const far = Math.abs(dx) >= Math.max(width * 0.18, 36);
+  const flick = Math.abs(dx) >= Math.max(width * 0.07, 20) && ms < 280;
+  if (!far && !flick) return 0;
+  return dx > 0 ? -1 : 1;
+}

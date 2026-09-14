@@ -18,7 +18,7 @@ import { latestMemory, latestOpenPromise, useTogetherStore } from './togetherSto
 import { fmtDiaryMeta } from '../../utils/diaryMath';
 import { dayTotals, remainingKcal, type MealKey } from '../../utils/dietMath';
 import { useBlobRefUrl } from '../../utils/blobRef';
-import { useWeatherStore } from './weatherStore';
+import { cityKey, currentCity, useWeatherStore } from './weatherStore';
 import { ensureFreshWeather } from './weatherApi';
 import { wmoIcon, wmoText, type WeatherIconKind } from '../../utils/weatherMath';
 
@@ -86,7 +86,9 @@ const WEATHER_ICONS: Record<WeatherIconKind, React.ElementType> = {
 };
 
 const WeatherCard: React.FC<{ hp: Pct; onOpen: () => void }> = ({ hp, onOpen }) => {
-  const { city, data } = useWeatherStore();
+  const ws = useWeatherStore();
+  const city = currentCity(ws); // 多城市：跟天气页当前在看的那座联动
+  const data = ws.datas[cityKey(city)] ?? null;
   // 进「我们」就顺手补拉一次（30 分钟新鲜期内直接命中缓存；与天气页并发时共享同一个请求）
   useEffect(() => {
     void ensureFreshWeather(city).catch(() => {});

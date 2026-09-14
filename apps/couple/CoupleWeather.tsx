@@ -1,39 +1,20 @@
-// 天气页 c6（2026-09-14 看图写 UI 练手批）——照 iOS 天气截图：
+// 天气页 c6（2026-09-14 看图写 UI 练手批；2026-09-15 城市列表批升级多城市）——照 iOS 天气截图：
 // 大字头（滚动收缩成紧凑标题吸顶）→ 空气质量卡 → 摘要+逐小时卡 → 10 天卡 → 底部工具栏。
+// 多城市：左右横滑切城市（跟手阻尼 + 松手判定，纯函数 swipeStep），工具栏圆点显示在第几座；
+// 工具栏右侧列表图标 → 城市列表页（CoupleCityList，本页内视图切换，沉浸保持）。
 // 数据 Open-Meteo（weatherApi）→ weatherStore 缓存：重进先用缓存秒开，超 30 分钟后台刷新；
-// 从没拉到过数据时才显示错误页。白天/夜晚两套主题照图（背景：渐变+合成云/星，实景素材以后可换）。
+// 从没拉到过数据时才显示错误页。白天/夜晚两套主题照图（背景见 WeatherSky，与列表卡共用）。
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, CalendarBlank, ListDashes, MapTrifold } from '@phosphor-icons/react';
 import { ensureFreshWeather } from './weatherApi';
-import { getWeatherStore, saveWeatherData, useWeatherStore, WEATHER_FRESH_MS } from './weatherStore';
+import { cityKey, currentCity, getWeatherStore, setCurrentCity, useWeatherStore, WEATHER_FRESH_MS } from './weatherStore';
 import type { WeatherData } from './weatherStore';
 import WeatherIcon from './WeatherIcon';
+import Sky, { DAY_CLOUDS, DAY_SKY, NIGHT_SKY } from './WeatherSky';
+import CoupleCityList from './CoupleCityList';
 import {
-  aqiLevel, aqiPos, dayLabel, fmtTemp, hourLabel, rangeBar, summaryText, tempColor, wmoIcon, wmoText,
+  aqiLevel, aqiPos, dayLabel, fmtTemp, hourLabel, rangeBar, summaryText, swipeStep, tempColor, wmoIcon, wmoText,
 } from '../../utils/weatherMath';
-
-// ── 主题 ──
-const DAY_SKY = 'linear-gradient(180deg, #a7c2da 0%, #8db0d3 30%, #6f9cc9 62%, #5b8ec2 100%)';
-const NIGHT_SKY = 'linear-gradient(180deg, #121a34 0%, #1a2340 40%, #222b4b 75%, #293256 100%)';
-const DAY_CLOUDS = [
-  'radial-gradient(78% 24% at 30% -1%, rgba(255,255,255,0.95), rgba(255,255,255,0) 100%)',
-  'radial-gradient(88% 26% at 62% 2%, rgba(255,255,255,0.85), rgba(255,255,255,0) 100%)',
-  'radial-gradient(56% 18% at 88% 10%, rgba(255,255,255,0.6), rgba(255,255,255,0) 100%)',
-  'radial-gradient(52% 20% at 8% 13%, rgba(255,255,255,0.62), rgba(255,255,255,0) 100%)',
-  'radial-gradient(46% 15% at 78% 20%, rgba(255,255,255,0.34), rgba(255,255,255,0) 100%)',
-  'radial-gradient(40% 14% at 20% 24%, rgba(255,255,255,0.3), rgba(255,255,255,0) 100%)',
-].join(', ');
-
-/** 夜空星星 [left%, top%, 直径px, 亮度] */
-const STARS: Array<[number, number, number, number]> = [
-  [8, 4, 2.2, 0.95], [15, 9, 1.5, 0.7], [22, 3, 1.8, 0.85], [31, 7, 1.4, 0.6], [38, 12, 2.2, 0.95], [45, 4, 1.6, 0.75],
-  [52, 9, 1.8, 0.85], [59, 2, 1.4, 0.6], [66, 11, 2.2, 0.95], [73, 6, 1.6, 0.75], [81, 9, 1.4, 0.6], [88, 3, 2, 0.9],
-  [93, 13, 1.5, 0.7], [11, 17, 1.4, 0.6], [26, 21, 1.7, 0.8], [35, 16, 1.4, 0.6], [48, 19, 1.6, 0.75], [57, 24, 1.4, 0.6],
-  [70, 18, 1.8, 0.85], [79, 23, 1.4, 0.6], [86, 17, 1.6, 0.75], [18, 29, 1.5, 0.65], [42, 31, 1.7, 0.8], [64, 33, 1.4, 0.6],
-  [90, 28, 1.6, 0.75], [6, 24, 1.5, 0.65], [29, 36, 1.4, 0.6], [55, 39, 1.6, 0.7],
-  [3, 11, 1.3, 0.55], [35, 26, 1.3, 0.55], [75, 13, 1.3, 0.55], [97, 21, 1.3, 0.55],
-  [23, 14, 1.3, 0.55], [61, 16, 1.3, 0.55], [44, 24, 1.3, 0.55], [13, 33, 1.3, 0.55],
-];
 
 const cardStyle = (isDay: boolean): React.CSSProperties => ({
   borderRadius: 22,
@@ -43,27 +24,6 @@ const cardStyle = (isDay: boolean): React.CSSProperties => ({
   WebkitBackdropFilter: 'blur(24px) saturate(150%)',
   border: isDay ? '0.5px solid rgba(255,255,255,0.35)' : '0.5px solid rgba(255,255,255,0.14)',
 });
-
-// ── 背景：渐变天幕 + 云/星 ──
-const Backdrop = React.memo(({ isDay }: { isDay: boolean }) => (
-  <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-    <div style={{ position: 'absolute', inset: 0, background: isDay ? DAY_SKY : NIGHT_SKY }} />
-    {isDay ? (
-      <div style={{ position: 'absolute', inset: 0, background: DAY_CLOUDS }} />
-    ) : (
-      STARS.map(([x, y, s, o], i) => (
-        <span
-          key={i}
-          style={{
-            position: 'absolute', left: `${x}%`, top: `${y}%`, width: s, height: s,
-            borderRadius: '50%', background: `rgba(255,255,255,${o})`,
-            boxShadow: s >= 1.8 ? '0 0 6px 1.5px rgba(255,255,255,0.45)' : undefined,
-          }}
-        />
-      ))
-    )}
-  </div>
-));
 
 // ── 大字头：滚动收缩成紧凑标题（sticky 吸顶，两态交叉淡化） ──
 const Head = React.memo(({ t, city, now, todayMin, todayMax, isDay }: {
@@ -233,18 +193,29 @@ const TenDayCard = React.memo(({ data, isDay }: { data: WeatherData; isDay: bool
 // ── 页面 ──
 const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const store = useWeatherStore();
-  const data = store.data;
+  const cities = store.cities;
+  const curCity = currentCity(store);
+  const curKey = cityKey(curCity);
+  const data = store.datas[curKey] ?? null;
+  const idx = Math.max(cities.findIndex((c) => cityKey(c) === curKey), 0);
   const isDay = data?.now.isDay ?? true;
+
+  const [view, setView] = useState<'detail' | 'list'>('detail');
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [t, setT] = useState(0);
   const tRef = useRef(0);
+  // 横滑：drag = 跟手位移；enter = 切城市后内容从哪侧轻轻滑入（±1）
+  const [drag, setDrag] = useState(0);
+  const [enter, setEnter] = useState(0);
+  const dragRef = useRef({ x: 0, y: 0, dx: 0, t: 0, axis: null as null | 'x' | 'y', active: false });
+  const width = typeof window !== 'undefined' ? window.innerWidth : 430;
 
   const refresh = useCallback(async () => {
     setBusy(true);
     setFailed(false);
     try {
-      await ensureFreshWeather(getWeatherStore().city, 0); // 手动重试 = 强制拉
+      await ensureFreshWeather(currentCity(), 0); // 手动重试 / 过期刷新 = 强制拉，现读当前城市
     } catch {
       setFailed(true);
     } finally {
@@ -253,10 +224,55 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   }, []);
 
   useEffect(() => {
-    const d = getWeatherStore().data;
-    const stale = !d || Date.now() - new Date(d.fetchedAt).getTime() > WEATHER_FRESH_MS;
-    if (stale) void refresh();
-  }, [refresh]);
+    if (view !== 'detail') return;
+    const d = getWeatherStore().datas[curKey];
+    if (!d || Date.now() - new Date(d.fetchedAt).getTime() > WEATHER_FRESH_MS) void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [curKey, view, refresh]);
+
+  // 换城市：滚动容器重挂载回顶部，大字头状态也归零
+  useEffect(() => {
+    tRef.current = 0;
+    setT(0);
+  }, [curKey]);
+
+  const goCity = (next: number, dir: number) => {
+    if (next < 0 || next >= cities.length) return;
+    setEnter(dir); // 新内容先带偏移，下一帧归位 → 轻轻滑入
+    setCurrentCity(cityKey(cities[next]));
+    requestAnimationFrame(() => requestAnimationFrame(() => setEnter(0)));
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    const p = e.touches[0];
+    dragRef.current = { x: p.clientX, y: p.clientY, dx: 0, t: Date.now(), axis: null, active: true };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const st = dragRef.current;
+    if (!st.active) return;
+    const p = e.touches[0];
+    const dx = p.clientX - st.x;
+    const dy = p.clientY - st.y;
+    if (st.axis === null) {
+      if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+      st.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    }
+    if (st.axis !== 'x') return;
+    st.dx = dx;
+    const edge = (dx > 0 && idx === 0) || (dx < 0 && idx === cities.length - 1); // 到头了阻尼更重
+    setDrag(edge ? dx * 0.16 : dx * 0.55);
+  };
+  const onTouchEnd = () => {
+    const st = dragRef.current;
+    st.active = false;
+    if (st.axis !== 'x') {
+      setDrag(0);
+      return;
+    }
+    const step = swipeStep(st.dx, Date.now() - st.t, width);
+    setDrag(0);
+    if (step !== 0) goCity(idx + step, step > 0 ? 1 : -1);
+  };
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const next = Math.min(e.currentTarget.scrollTop / 150, 1);
@@ -280,11 +296,24 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     </button>
   );
 
+  // 城市列表视图（本页内切换，沉浸保持）
+  if (view === 'list') {
+    return (
+      <CoupleCityList
+        onBack={() => setView('detail')}
+        onPick={(k) => {
+          setCurrentCity(k);
+          setView('detail');
+        }}
+      />
+    );
+  }
+
   // 从没拉到过数据：转圈 / 失败重试
   if (!data) {
     return (
       <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-        <Backdrop isDay />
+        <Sky isDay />
         {backBtn}
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}>
           {failed ? (
@@ -314,29 +343,44 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   const todayMin = data.days[0]?.min ?? data.now.temp;
   const todayMax = data.days[0]?.max ?? data.now.temp;
+  const enterStyle: React.CSSProperties = enter !== 0
+    ? { transform: `translateX(${enter * 26}px)`, opacity: 0.35, transition: 'none' }
+    : { transform: 'translateX(0px)', opacity: 1, transition: 'transform 0.22s ease, opacity 0.22s ease' };
 
   return (
     <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-      <Backdrop isDay={isDay} />
-      {/* 内容滚动层 */}
+      {/* 横滑层（touch-action: pan-y → 纵向还给滚动，横向归我们） */}
       <div
-        className="[&::-webkit-scrollbar]:hidden"
-        onScroll={handleScroll}
-        style={{ position: 'absolute', inset: 0, overflowY: 'auto', scrollbarWidth: 'none', zIndex: 5 }}
+        style={{ position: 'absolute', inset: 0, touchAction: 'pan-y', transform: drag ? `translateX(${drag}px)` : undefined }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
       >
-        <Head t={t} city={store.city.name} now={data.now} todayMin={todayMin} todayMax={todayMax} isDay={isDay} />
-        <div style={{ position: 'relative', zIndex: 3, padding: '0 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {data.aqi && <AqiCard aqi={data.aqi.aqi} isDay={isDay} />}
-          <HourlyCard data={data} isDay={isDay} />
-          <TenDayCard data={data} isDay={isDay} />
+        <div style={{ position: 'absolute', inset: 0, ...enterStyle }}>
+          <Sky isDay={isDay} />
+          {/* 内容滚动层（key=城市：换城市回到顶部 + 重置大字头状态） */}
+          <div
+            key={curKey}
+            className="[&::-webkit-scrollbar]:hidden"
+            onScroll={handleScroll}
+            style={{ position: 'absolute', inset: 0, overflowY: 'auto', scrollbarWidth: 'none', zIndex: 5 }}
+          >
+            <Head t={t} city={curCity.name} now={data.now} todayMin={todayMin} todayMax={todayMax} isDay={isDay} />
+            <div style={{ position: 'relative', zIndex: 3, padding: '0 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {data.aqi && <AqiCard aqi={data.aqi.aqi} isDay={isDay} />}
+              <HourlyCard data={data} isDay={isDay} />
+              <TenDayCard data={data} isDay={isDay} />
+            </div>
+            <div style={{ height: 'calc(var(--safe-bottom, 0px) + 74px)' }} />
+          </div>
+          {backBtn}
         </div>
-        <div style={{ height: 'calc(var(--safe-bottom, 0px) + 74px)' }} />
       </div>
-      {backBtn}
       {/* 底部工具栏（原版样式：通栏贴底；此页全局胶囊导航已隐藏） */}
       <div
         style={{
-          position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 30, pointerEvents: 'none',
+          position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 30,
           height: 'calc(var(--safe-bottom, 0px) + 54px)', paddingBottom: 'var(--safe-bottom, 0px)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           paddingLeft: 22, paddingRight: 22,
@@ -345,8 +389,26 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         }}
       >
         <MapTrifold size={22} color="rgba(255,255,255,0.95)" />
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />
-        <ListDashes size={22} color="rgba(255,255,255,0.95)" />
+        {/* 城市圆点：当前那座亮着（原版底部分页点） */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {cities.map((c, i) => (
+            <span
+              key={cityKey(c)}
+              style={{
+                width: i === idx ? 7 : 5, height: i === idx ? 7 : 5, borderRadius: '50%',
+                background: i === idx ? '#fff' : 'rgba(255,255,255,0.42)',
+                transition: 'background 0.2s, width 0.2s, height 0.2s',
+              }}
+            />
+          ))}
+        </div>
+        <button
+          onClick={() => setView('list')}
+          aria-label="城市列表"
+          style={{ background: 'none', border: 'none', padding: 4, display: 'flex', alignItems: 'center' }}
+        >
+          <ListDashes size={22} color="rgba(255,255,255,0.95)" />
+        </button>
       </div>
     </div>
   );

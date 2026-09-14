@@ -1,11 +1,12 @@
-// 天气数据拉取（2026-09-14 c6）——Open-Meteo 免费接口，无需 key：
+// 天气数据拉取（2026-09-14 c6；2026-09-15 多城市）——Open-Meteo 免费接口，无需 key：
 // 主数据（实时/逐小时/10 天）与空气质量并行拉；空气质量失败不影响主数据（aqi 记 null）。
-// 超时 12 秒；返回结构直接映射成 weatherStore 的 WeatherData。
+// 超时 12 秒；返回结构直接映射成 weatherStore 的 WeatherData。城市搜索用 geocoding 接口。
 import type { WeatherAqi, WeatherCity, WeatherData, WeatherDay, WeatherHour } from './weatherStore';
-import { getWeatherStore, saveWeatherData, WEATHER_FRESH_MS } from './weatherStore';
+import { cityKey, getWeatherStore, saveWeatherData, WEATHER_FRESH_MS } from './weatherStore';
 
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const AIR_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
+const GEO_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 
 async function getJson(url: string, timeoutMs = 12000): Promise<any> {
   const ctrl = new AbortController();
@@ -19,24 +20,33 @@ async function getJson(url: string, timeoutMs = 12000): Promise<any> {
   }
 }
 
-let inflight: Promise<void> | null = null;
+// 每座城市各自去重（天气页 / 首屏卡 / 列表页可能同时挂载）
+const inflight = new Map<string, Promise<void>>();
 
 /**
- * 需要才拉：缓存新鲜就直接返回；并发调用（天气页 / 首屏以下入口卡同时挂载）共享同一个请求。
+ * 需要才拉：该城市缓存新鲜就直接返回；并发调用共享同一个请求。
  * 失败会抛出，交给调用方决定展示（inflight 由 finally 清掉，不影响下次重试）。
  */
 export function ensureFreshWeather(city: WeatherCity, maxAgeMs: number = WEATHER_FRESH_MS): Promise<void> {
-  const cur = getWeatherStore().data;
+  const k = cityKey(city);
+  const cur = getWeatherStore().datas[k];
   if (cur && Date.now() - new Date(cur.fetchedAt).getTime() <= maxAgeMs) return Promise.resolve();
-  if (inflight) return inflight;
-  inflight = fetchWeather(city)
+  const running = inflight.get(k);
+  if (running) return running;
+  const p = fetchWeather(city)
     .then((d) => {
-      saveWeatherData(d);
+      saveWeatherData(city, d);
     })
     .finally(() => {
-      inflight = null;
+      inflight.delete(k);
     });
-  return inflight;
+  inflight.set(k, p);
+  return p;
+}
+
+/** 列表页：并发补齐多座城市（各自走缓存/去重；单城失败不拖累别的） */
+export function ensureCitiesWeather(cities: WeatherCity[]): Promise<void> {
+  return Promise.all(cities.map((c) => ensureFreshWeather(c).catch(() => {}))).then(() => undefined);
 }
 
 /** 拉一个城市的天气：实时 + 未来 24 小时 + 10 天 + 空气质量 */
@@ -85,6 +95,7 @@ export async function fetchWeather(city: WeatherCity): Promise<WeatherData> {
   return {
     fetchedAt: new Date().toISOString(),
     now: {
+      time: typeof c.time === 'string' ? c.time : (hours[0]?.time ?? ''),
       temp: c.temperature_2m,
       feels: typeof c.apparent_temperature === 'number' ? c.apparent_temperature : c.temperature_2m,
       isDay: c.is_day === 1,
@@ -95,4 +106,23 @@ export async function fetchWeather(city: WeatherCity): Promise<WeatherData> {
     days,
     aqi,
   };
+}
+
+// ── 城市搜索（列表页） ──
+
+export interface CityHit { name: string; region: string; lat: number; lon: number }
+
+/** 搜城市：中文名 + 省/国家一行小字；没结果给空数组 */
+export async function searchCity(query: string, count = 8): Promise<CityHit[]> {
+  const url = `${GEO_URL}?name=${encodeURIComponent(query)}&count=${count}&language=zh&format=json`;
+  const j = await getJson(url, 10000);
+  const results: any[] = Array.isArray(j?.results) ? j.results : [];
+  return results
+    .map((r) => ({
+      name: String(r?.name ?? '').trim(),
+      region: [r?.admin1, r?.country].filter((x) => typeof x === 'string' && x).join(' · '),
+      lat: Number(r?.latitude),
+      lon: Number(r?.longitude),
+    }))
+    .filter((r) => r.name && Number.isFinite(r.lat) && Number.isFinite(r.lon));
 }

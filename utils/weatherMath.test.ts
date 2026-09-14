@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   wmoText, wmoIcon, tempColor, rangeBar, hourLabel, dayLabel,
-  fmtTemp, aqiLevel, aqiPos, summaryText,
+  fmtTemp, aqiLevel, aqiPos, summaryText, fmtCityTime, starField, swipeStep,
 } from './weatherMath';
 
 describe('weatherMath · wmoText', () => {
@@ -134,5 +134,41 @@ describe('weatherMath · 其它', () => {
 
   it('summaryText 拼接句式', () => {
     expect(summaryText(0, 6.4)).toBe('Clear conditions will continue for the rest of the day. Wind gusts are up to 6 km/h.');
+  });
+});
+
+describe('weatherMath · 城市列表（2026-09-15）', () => {
+  it('fmtCityTime 当地 12 小时制', () => {
+    expect(fmtCityTime('2026-09-14T19:05')).toBe('7:05 PM');
+    expect(fmtCityTime('2026-09-14T00:00')).toBe('12:00 AM');
+    expect(fmtCityTime('2026-09-14T12:30')).toBe('12:30 PM');
+    expect(fmtCityTime('2026-09-14T09:07')).toBe('9:07 AM');
+    expect(fmtCityTime('bad')).toBe('');
+  });
+
+  it('starField 同种子稳定、异种子不同、坐标在卡内', () => {
+    const a = starField('31.2304,121.4737');
+    expect(a).toHaveLength(12);
+    expect(starField('31.2304,121.4737')).toEqual(a);
+    expect(starField('38.9140,121.6147')).not.toEqual(a);
+    for (const [x, y, s, o] of a) {
+      expect(x).toBeGreaterThanOrEqual(3);
+      expect(x).toBeLessThanOrEqual(98);
+      expect(y).toBeGreaterThanOrEqual(6);
+      expect(y).toBeLessThanOrEqual(91);
+      expect(s).toBeGreaterThan(0);
+      expect(o).toBeGreaterThan(0.4);
+      expect(o).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('swipeStep 位移/甩动阈值与方向', () => {
+    const W = 430;
+    expect(swipeStep(10, 600, W)).toBe(0);            // 太短太慢 → 不动
+    expect(swipeStep(100, 500, W)).toBe(-1);          // 右滑够远 → 上一座
+    expect(swipeStep(-100, 500, W)).toBe(1);          // 左滑够远 → 下一座
+    expect(swipeStep(-40, 140, W)).toBe(1);           // 快速甩动（左）→ 下一座
+    expect(swipeStep(40, 140, W)).toBe(-1);
+    expect(swipeStep(40, 600, W)).toBe(0);            // 小位移慢速 → 回弹
   });
 });
