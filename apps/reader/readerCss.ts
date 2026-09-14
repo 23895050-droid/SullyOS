@@ -101,8 +101,18 @@ export const READER_SKELETON_CSS = `
 .rd-screen-tight { padding-top: calc(var(--chrome-top, 0px) + 6px); }
 
 /* 带返回键的窄顶栏（书详情用；阅读页那根在下面 .rd-reader-bar） */
-.rd-headbar { display: flex; align-items: center; gap: 2px; margin-bottom: var(--rd-space-4); }
-.rd-headbar-title { flex: 1 1 auto; min-width: 0; text-align: center; font-size: var(--rd-fs-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-headbar { position: relative; display: flex; align-items: center; gap: 2px; margin-bottom: var(--rd-space-4); }
+/* 标题按**整条**居中，不是按「左右两堆按钮剩下的中间」——左边一个返回、右边两个图标的话，
+   右边宽 36px，居中点就被推左 18px（她报的「顶部字歪了」就是这个）。
+   所以标题脱离流、绝对压在 50% 上，两边的按钮爱多宽多宽。 */
+.rd-headbar-title {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  max-width: 58%; pointer-events: none;
+  font-size: var(--rd-fs-md); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 标题脱流之后，它后面那串按钮没了推力——第一个自己贴右边，后面的跟着 */
+.rd-headbar-title + * { margin-left: auto; }
 .rd-back {
   border: 0; background: transparent; color: var(--rd-accent);
   display: inline-flex; align-items: center; gap: 2px; padding: 4px 2px;
@@ -292,11 +302,19 @@ export const READER_SKELETON_CSS = `
   color: var(--rd-ink);
 }
 .rd-reader-bar {
+  position: relative;
   flex: 0 0 auto; display: flex; align-items: center; gap: 2px;
   padding: 5px var(--rd-space-2) 2px;
 }
-.rd-reader-bar-tools { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
-.rd-reader-bar-title { flex: 1 1 auto; min-width: 0; text-align: center; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 标题脱流之后这排按钮没了推力，得自己贴右边 */
+.rd-reader-bar-tools { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
+/* 同上：按整条居中。左边一个返回、右边「目录 + 更多」两个，差 36px */
+.rd-reader-bar-title {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  max-width: 58%; pointer-events: none;
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .rd-reader-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 /* 按「这一页的内容高度」裁切：视口通常比一页的内容高一点，不裁的话下一页的第一行
    会在底部露出半个字的边（书页本来就该在页边界处切断，不露下一页的字头）。 */
@@ -481,9 +499,10 @@ export const READER_SKELETON_CSS = `
 
 /* ── 书架 · 顶部（分类选择 + 菜单）、搜索胶囊、四种版式 ──
    参考图 2/3/4/5：顶部一行「All ⌄ …… ···」、大标题、搜索胶囊、四种版式、搜索页、分类页。 */
-.rd-shelf-top { display: flex; align-items: center; gap: var(--rd-space-2); margin-bottom: 2px; }
+.rd-shelf-top { position: relative; display: flex; align-items: center; gap: var(--rd-space-2); margin-bottom: 2px; }
 .rd-shelf-top-spacer { flex: 1 1 auto; }
 .rd-shelf-cat {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);   /* 同上：按整条居中 */
   display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent;
   color: var(--rd-ink); font-family: var(--rd-font-body); font-size: var(--rd-fs-lg); font-weight: 600;
   padding: 2px 8px; border-radius: var(--rd-r-sm);
