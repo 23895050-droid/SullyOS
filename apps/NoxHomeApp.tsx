@@ -146,15 +146,16 @@ const NoxHomeApp: React.FC = () => {
   // 现在照这条：访问过的页面**留在树上**（懒挂载、不卸载），切页只切显示/隐藏 + 淡入淡出。
   const pageKey = `${tab}:${inner ?? 'root'}`;
   const [mounted, setMounted] = useState<string[]>([pageKey]);
-  const [leavingKey, setLeavingKey] = useState<string | null>(null);
+  // enteringKey = 本次「切进来」的那一层：给它跑一次 200ms 内容淡入，跑完把类摘掉
+  // （摘掉后才能在下一次切回来时重新触发）。旧页不做淡出——两拍会在中间露出空底。
+  const [enteringKey, setEnteringKey] = useState<string | null>(null);
   const lastPageRef = useRef(pageKey);
   useEffect(() => {
     if (lastPageRef.current === pageKey) return;
-    const leaving = lastPageRef.current;
     lastPageRef.current = pageKey;
     setMounted((m) => (m.includes(pageKey) ? m : [...m, pageKey]));
-    setLeavingKey(leaving);
-    const t = window.setTimeout(() => setLeavingKey(null), 200);
+    setEnteringKey(pageKey);
+    const t = window.setTimeout(() => setEnteringKey(null), 240);
     return () => window.clearTimeout(t);
   }, [pageKey]);
 
@@ -360,18 +361,17 @@ const NoxHomeApp: React.FC = () => {
       className="h-full w-full relative overflow-hidden select-none"
       style={bgFor(tab)}
     >
-      {/* 页面层：每层自己滚、自带背景；访问过的都留着（display:none 不重建），
-          只有「当前页」和「正在淡出的上一页」可见 */}
+      {/* 页面层：每层自己滚、自带背景；访问过的都留着（display:none 不重建），同一时刻只有当前页可见。
+          切页 = 旧页瞬间让位 + 新页内容 200ms 淡入（上游 App 入场同款口径）。 */}
       {mounted.map((k) => {
         const [layerTab, layerInnerRaw] = k.split(':');
         const layerInner = layerInnerRaw === 'root' ? null : layerInnerRaw;
         const isActive = k === pageKey;
-        const isLeaving = k === leavingKey;
         return (
           <div
             key={k}
-            className={`absolute inset-0 overflow-y-auto${isActive ? ' page-enter' : isLeaving ? ' app-fade-out' : ''}`}
-            style={{ ...bgFor(layerTab), zIndex: isActive ? 10 : 5, display: isActive || isLeaving ? undefined : 'none' }}
+            className={`absolute inset-0 overflow-y-auto${isActive && enteringKey === k ? ' page-enter' : ''}`}
+            style={{ ...bgFor(layerTab), display: isActive ? undefined : 'none' }}
           >
             {renderPage(layerTab, layerInner)}
           </div>
