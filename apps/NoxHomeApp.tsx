@@ -138,29 +138,41 @@ const NoxHomeApp: React.FC = () => {
   const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][now.getDay()];
   const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
 
-  // ── 页面切换过渡（2026-09-14，二版：两拍淡出→淡入）─────────────────
-  // 一版是「新页直接盖在旧页上淡入」——两页内容半透明叠着（文字压文字）看着糊，她反馈违和。
-  // 现在拆成两拍：旧页内容先 180ms 淡出（旧页自己的背景留着当过渡色，不露白/露底色），
-  // 新页随后 300ms 淡入——像点进 App 那种柔和劲儿。两层都只动 opacity。
+  // ── 页面常驻 + 切换过渡（2026-09-14 二版）────────────────────────
+  // 一版是 key 变化 → 整棵树卸载重建：每点一下都要重建整棵页面、图片 objectURL 全被
+  // revoke 再重新读一遍（整屏背景先空一帧 = 闪，重建本身 = 卡）。上游 App 内部不这么干：
+  // 组件不卸载，图片就一直挂着，内存由「离开 App 整棵卸载」兜住（她的原话：上游保住了
+  // 内存也保住了流畅，别动它的管线）。
+  // 现在照这条：访问过的页面**留在树上**（懒挂载、不卸载），切页只切显示/隐藏 + 淡入淡出。
   const pageKey = `${tab}:${inner ?? 'root'}`;
-  const [ghost, setGhost] = useState<{ key: string; tab: string; inner: string | null } | null>(null);
-  const lastPageRef = useRef({ key: pageKey, tab: tab as string, inner: inner as string | null });
-  const liveScrollRef = useRef(0);   // 当前页的滚动位置（旧页拿它还原，别跳回顶部）
-  const ghostTopRef = useRef(0);
+  const [mounted, setMounted] = useState<string[]>([pageKey]);
+  const [leavingKey, setLeavingKey] = useState<string | null>(null);
+  const lastPageRef = useRef(pageKey);
   useEffect(() => {
-    const last = lastPageRef.current;
-    if (last.key === pageKey) return;
-    lastPageRef.current = { key: pageKey, tab: tab as string, inner: inner as string | null };
-    ghostTopRef.current = liveScrollRef.current;
-    setGhost(last);
-    const t = window.setTimeout(() => setGhost(null), 480);
+    if (lastPageRef.current === pageKey) return;
+    const leaving = lastPageRef.current;
+    lastPageRef.current = pageKey;
+    setMounted((m) => (m.includes(pageKey) ? m : [...m, pageKey]));
+    setLeavingKey(leaving);
+    const t = window.setTimeout(() => setLeavingKey(null), 200);
     return () => window.clearTimeout(t);
-  }, [pageKey, tab, inner]);
+  }, [pageKey]);
 
-  const setGhostNode = (el: HTMLDivElement | null) => {
-    if (el) el.scrollTop = ghostTopRef.current;   // 提交期设好，首帧就在原位置（不闪顶部）
-  };
-
+  // 空闲预热（2026-09-14）：首屏落定后、浏览器空闲时把「我们」「设置」两页先在后台挂上
+  // （隐藏）——图片那时就解析好了，第一次切过去也不会有图慢半拍。上游也是这么预热 App 的；
+  // 放空闲时段是为了别跟首屏抢时间（手机上首屏那一下最金贵）。
+  useEffect(() => {
+    const warm = () => {
+      setMounted((m) => ['couple:root', 'settings:root'].reduce((acc, k) => (acc.includes(k) ? acc : [...acc, k]), m));
+    };
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+    if (typeof ric === 'function') {
+      const id = ric(warm, { timeout: 4000 });
+      return () => (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id);
+    }
+    const t = window.setTimeout(warm, 2500);
+    return () => window.clearTimeout(t);
+  }, []);
   const navTap = (key: string) => {
     if (key === 'home') { setTab('home'); return; }
     if (key === 'couple') { setTab('couple'); return; }
@@ -348,28 +360,24 @@ const NoxHomeApp: React.FC = () => {
       className="h-full w-full relative overflow-hidden select-none"
       style={bgFor(tab)}
     >
-      {/* 旧页层：过渡期间当底，不接事件；滚动位置在 setGhostNode 里还原 */}
-      {ghost && (
-        <div
-          key={`ghost:${ghost.key}`}
-          ref={setGhostNode}
-          className="absolute inset-0 overflow-y-auto pointer-events-none"
-          style={{ ...bgFor(ghost.tab), zIndex: 5 }}
-        >
-          {/* 只淡出内容：这一层的背景继续当过渡色，两拍之间不露白底 */}
-          <div className="app-fade-out">{renderPage(ghost.tab, ghost.inner)}</div>
-        </div>
-      )}
+      {/* 页面层：每层自己滚、自带背景；访问过的都留着（display:none 不重建），
+          只有「当前页」和「正在淡出的上一页」可见 */}
+      {mounted.map((k) => {
+        const [layerTab, layerInnerRaw] = k.split(':');
+        const layerInner = layerInnerRaw === 'root' ? null : layerInnerRaw;
+        const isActive = k === pageKey;
+        const isLeaving = k === leavingKey;
+        return (
+          <div
+            key={k}
+            className={`absolute inset-0 overflow-y-auto${isActive ? ' page-enter' : isLeaving ? ' app-fade-out' : ''}`}
+            style={{ ...bgFor(layerTab), zIndex: isActive ? 10 : 5, display: isActive || isLeaving ? undefined : 'none' }}
+          >
+            {renderPage(layerTab, layerInner)}
+          </div>
+        );
+      })}
 
-      {/* 当前页层：自己滚、自带背景；等旧页内容淡出后（140ms 延迟）再柔和淡入 */}
-      <div
-        key={pageKey}
-        className="page-enter absolute inset-0 overflow-y-auto"
-        style={{ ...bgFor(tab), zIndex: 10 }}
-        onScroll={(e) => { liveScrollRef.current = e.currentTarget.scrollTop; }}
-      >
-        {renderPage(tab, inner)}
-      </div>
       {/* ── 底部胶囊导航（固定悬浮） ── */}
       <div
         className="fixed left-1/2 -translate-x-1/2 flex items-center z-[70]"

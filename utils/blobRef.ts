@@ -13,8 +13,7 @@
 //     换取单个 JSON 文件的可移植性。
 //
 // 通用部分已提炼为 @rei-standard/blob-store（store 单例见 ./blobStore.ts），本文件是
-// 薄壳（导出名与签名不变，逐个委托 SDK，React hook 见下方 useBlobRefUrl——2026-09-14 起
-// 自己带常驻 objectURL 缓存，不再逐次委托 SDK 的 useBlobUrl，原因写在那个函数上面）
+// 薄壳（导出名与签名不变，逐个委托 SDK，React hook 委托 react 子路径的 useBlobUrl）
 // + SullyOS 特有逻辑（引用扫描删除、外观预设迁移、hook 里的内置样板房分支）。
 // 新令牌的 id 是 SDK 生成的 `b_` 前缀；存量 `img_` 令牌照常读取，无需迁移。
 //
@@ -22,7 +21,7 @@
 // 的可移植令牌会按当前部署 BASE_URL 解开，避免备份跨域/跨壳恢复后家具路径失效。
 // 惰性迁移由各消费方（壁纸加载、进入小屋）在读到 data: 时顺手 put 成 Blob 完成。
 
-import { useCachedBlobUrl } from './ourBlobUrlCache';
+import { useBlobUrl } from '@rei-standard/blob-store/react';
 import { dataUrlToBlob, blobToDataUrl, hashBlob } from '@rei-standard/blob-store';
 import { DB } from './db';
 import { blobStore } from './blobStore';
@@ -342,13 +341,15 @@ export async function resolveBlobRefsDeep(root: unknown): Promise<void> {
 
 /**
  * 把一个图片字段值解析成可直接用于 <img src>/CSS url() 的字符串。
- *   · builtin-room-asset 令牌 / 旧样板房绝对 URL → 当前部署下的内置资源 URL（上游逻辑，留在本文件）；
- *   · 其余（含 blobref 令牌）交给我们的常驻缓存 hook（./ourBlobUrlCache.ts）：
- *     首次解析完成前返回 undefined，之后同一令牌一直命中缓存、卸载不 revoke——切页面不再空一帧。
+ *   · blobref 令牌 → 交给 SDK 读 Blob 建 objectURL，组件卸载 / value 变化时 revoke，绝不泄漏；
+ *     解析完成前返回 undefined —— 首帧无图、令牌间切换时先空一帧再出新图，
+ *     绝不把上一个（已 revoke 的）objectURL 吐给渲染层；
+ *   · builtin-room-asset 令牌 / 旧样板房绝对 URL → 当前部署下的内置资源 URL；
+ *   · 其它（data: / http(s) / 渐变 / undefined）→ 渲染期直接透传，不等 effect、无一帧滞后。
  * 语义契约钉在 ./blobRefHook.contract.test.ts。
  */
 export function useBlobRefUrl(value: string | undefined | null): string | undefined {
-    // builtin 分支先解析；blobref 令牌直接进我们的缓存 hook。
+    // builtin 分支在 SDK 之前解析；blobref 令牌绕过它直接交给 SDK。
     const resolved = isBlobRef(value) ? value : resolveBuiltinRoomAssetUrl(value);
-    return useCachedBlobUrl(resolved);
+    return useBlobUrl(blobStore, resolved);
 }

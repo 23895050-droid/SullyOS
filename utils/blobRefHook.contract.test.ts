@@ -1,14 +1,10 @@
 // @vitest-environment jsdom
 
-// useBlobRefUrl 契约测试 —— 钉住这个 hook 的两条关键语义：
-//   1. 令牌 → 令牌切换期间返回 undefined，绝不把上一个 objectURL 吐给渲染层；
+// useBlobRefUrl 契约测试 —— 钉住委托 @rei-standard/blob-store/react 后的两条关键语义
+// （SDK 侧说好的行为测试随首个消费者落地，就是这份）：
+//   1. 令牌 → 令牌切换期间返回 undefined，绝不把上一个（已 revoke 的）objectURL 吐给渲染层；
 //   2. 非令牌值在渲染期直接透传，不等 effect、无一帧滞后（含 value 变化的那一帧）。
 // 外加第 3 条 SullyOS 特有分支：builtin-room-asset:// 令牌在首帧就解析成当前部署 URL。
-//
-// 2026-09-14 改：hook 不再逐次委托 SDK 的 useBlobUrl，改成自己带常驻 objectURL 缓存——
-// 卸载不再 revoke、同一令牌只建一次 URL、重挂载首帧同步命中（这就是「切页面不闪」的修法，
-// 见 utils/blobRef.ts 的说明）。本文件相应钉住新的生命周期：不 revoke、LRU 淘汰才 revoke、
-// 重挂载首帧就拿到同一个 URL。
 //
 // 环境说明：vitest 全局是 node 环境，本文件靠文件头指令单独跑 jsdom（React DOM 需要
 // document）；vitest.config.ts 的 include 只收 utils/**/*.test.ts，所以不写 JSX、
@@ -18,7 +14,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createElement, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useBlobRefUrl, putImageBlob, dataUrlToBlob } from './blobRef';
-import { __clearBlobUrlCacheForTest } from './ourBlobUrlCache';
 
 // React 18 下 createRoot + act 必须显式声明 act 环境，否则 act 直接告警且不聚合更新。
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -58,7 +53,6 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
-    __clearBlobUrlCacheForTest();   // 常驻缓存，用例之间必须清（否则「首帧就命中」会假阳性）
     createObjectURL.mockClear();
     revokeObjectURL.mockClear();
     container = document.createElement('div');
@@ -89,8 +83,8 @@ describe('useBlobRefUrl 契约（委托 SDK useBlobUrl 后的语义）', () => {
         act(() => root.render(createElement(Probe, { value: refB })));
         expect(frames[frames.length - 1]).toBeUndefined();
         expect(frames[frames.length - 1]).not.toBe(urlA);
-        // 2026-09-14 起：旧 URL 不再随切换 revoke（常驻缓存，重挂载首帧就能命中，所以切页不闪）。
-        expect(revokeObjectURL).not.toHaveBeenCalledWith(urlA);
+        // 旧 URL 在切换时就被 revoke（不泄漏，也正因如此绝不能再吐给渲染层）。
+        expect(revokeObjectURL).toHaveBeenCalledWith(urlA);
 
         // B 解析完成后拿到新的 objectURL_B。
         await flushUntil(() => frames[frames.length - 1] !== undefined);
@@ -125,59 +119,6 @@ describe('useBlobRefUrl 契约（委托 SDK useBlobUrl 后的语义）', () => {
         for (const frame of frames.slice(framesBeforeSwitch)) {
             expect(frame).toBe('https://example.com/a.png');
         }
-    });
-
-    it('重挂载（切页面）首帧就命中缓存：同一个令牌不再读第二次、URL 不变、无空窗', async () => {
-        const ref = await putImageBlob(dataUrlToBlob(TINY_PNG_A));
-        const { frames, Probe } = makeProbe();
-        act(() => root.render(createElement(Probe, { value: ref })));
-        await flushUntil(() => frames[frames.length - 1] !== undefined);
-        const url = frames[frames.length - 1]!;
-        const createCalls = createObjectURL.mock.calls.length;
-
-        // 模拟页签切换：整棵子树卸载 → 重新挂载（原来这一卸一挂要重新读 IDB、URL 空一帧 = 闪）
-        act(() => root.unmount());
-        const second = makeProbe();
-        root = createRoot(container);
-        act(() => root.render(createElement(second.Probe, { value: ref })));
-        // 首帧（第 0 项）就有图，且还是同一个 objectURL、没有新建第二个
-        expect(second.frames[0]).toBe(url);
-        expect(createObjectURL.mock.calls.length).toBe(createCalls);
-    });
-
-    it('并发挂多个组件共用同一个令牌：只读一次 Blob、只建一个 objectURL', async () => {
-        const ref = await putImageBlob(dataUrlToBlob(TINY_PNG_B));
-        const a = makeProbe();
-        const b = makeProbe();
-        const rootA = createRoot(document.createElement('div'));
-        const rootB = createRoot(document.createElement('div'));
-        act(() => {
-            rootA.render(createElement(a.Probe, { value: ref }));
-            rootB.render(createElement(b.Probe, { value: ref }));
-        });
-        await flushUntil(() => a.frames[a.frames.length - 1] !== undefined && b.frames[b.frames.length - 1] !== undefined);
-        expect(a.frames[a.frames.length - 1]).toBe(b.frames[b.frames.length - 1]);
-        expect(createObjectURL).toHaveBeenCalledTimes(1);
-        act(() => { rootA.unmount(); rootB.unmount(); });
-    });
-
-    it('缓存到上限后淘汰最旧的并 revoke 它（内存有界，只有淘汰会 revoke）', async () => {
-        const refs: string[] = [];
-        for (let i = 0; i < 300; i++) refs.push(await putImageBlob(dataUrlToBlob(TINY_PNG_A)));
-        const { frames, Probe } = makeProbe();
-        act(() => root.render(createElement(Probe, { value: refs[0] })));
-        await flushUntil(() => frames[frames.length - 1] !== undefined);
-        const firstUrl = frames[frames.length - 1]!;
-
-        // 再解析 300 个（超过上限 256）→ 最早那个被挤出缓存并 revoke
-        for (const ref of refs.slice(1)) {
-            const p = makeProbe();
-            const r = createRoot(document.createElement('div'));
-            act(() => r.render(createElement(p.Probe, { value: ref })));
-            await flushUntil(() => p.frames[p.frames.length - 1] !== undefined);
-            act(() => r.unmount());
-        }
-        expect(revokeObjectURL).toHaveBeenCalledWith(firstUrl);
     });
 
     it('builtin-room-asset:// 令牌首帧就解析成当前部署的内置资源 URL', () => {
