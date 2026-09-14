@@ -10,6 +10,7 @@ import CoupleBeauty, { loadCoupleBeauty } from './couple/CoupleBeauty';
 import CoupleDiary from './couple/CoupleDiary';
 import CoupleCalendar from './couple/CoupleCalendar';
 import { useActivityStore } from './couple/activityStore';
+import { openReaderAt } from './reader/readerDeepLink';
 import { useMusicStore, topCharTogetherSong } from './couple/musicStore';
 import { getMountConfig } from '../utils/noxhomeMount';
 import { useBlobRefUrl } from '../utils/blobRef';
@@ -331,7 +332,7 @@ const NoxHomeApp: React.FC = () => {
             key={i}
             type="button"
             aria-label={h.label}
-            onClick={() => (h.label === '日记页' ? setInner('diary') : h.label === '活动页' ? setInner('activity') : h.label === '歌曲页' ? openApp(AppID.Music) : addToast(`「${h.label}」建设中 🔨`, 'info'))}
+            onClick={() => (h.label === '日记页' ? setInner('diary') : h.label === '活动页' ? setInner('activity') : h.label === '歌曲页' ? openApp(AppID.Music) : h.label === '阅读页' ? (openReaderAt('library'), openApp(AppID.Reading)) : addToast(`「${h.label}」建设中 🔨`, 'info'))}
             className="absolute bg-transparent border-0 outline-none"
             style={{ left: wPct(h.x), top: hPct(h.y), width: wPct(h.w), height: hPct(h.h), zIndex: 50 }}
           />

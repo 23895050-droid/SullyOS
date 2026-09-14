@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import QuickBankModal from './QuickBankModal';
 import CoupleDiet from './CoupleDiet';
 import CoupleDiary from './CoupleDiary';
+import { openReaderAt } from '../reader/readerDeepLink';
 import CoupleTogether from './CoupleTogether';
 import { ArrowLeft, Plus, ForkKnife, Drop, PiggyBank, Gift } from '@phosphor-icons/react';
 import { useBlobRefUrl } from '../../utils/blobRef';
@@ -742,6 +743,11 @@ const CoupleSpace: React.FC = () => {
     if (route === 'c1') { setC1Mode('daily'); setPage('c1'); return; } // 日历卡：按文档口径默认日常
     if (route === 'c3') { setBankOpen(true); return; } // 记账：弹大卡片直接写 Sully 银行，不跳转
     if (route === 'c5') { openApp(AppID.Music); return; } // 音乐：入口打开原版音乐 App（我们在它上面加东西）
+    // 读书模块（2026-09-14）：阅读区的三个入口跳进「书房」App 的既有路由，不另做简化视图。
+    // c71 左卡（在读的书）→ 继续读；c7 右上 → 书架；c72 右下 → 笔记
+    if (route === 'c71') { openReaderAt('continue'); openApp(AppID.Reading); return; }
+    if (route === 'c7') { openReaderAt('shelf'); openApp(AppID.Reading); return; }
+    if (route === 'c72') { openReaderAt('notes'); openApp(AppID.Reading); return; }
     setPage(route as Route);
   };
   // 页面常驻 + 聚焦转场（2026-09-14 定稿规范）：访问过的内页留在树上（display:none 隐藏、不卸载），

@@ -42,6 +42,8 @@ export default function ReaderPage({ bookId, onBack }: Props) {
     const pendingRef = useRef<{ page?: number; anchor?: { paraIdx: number; charOffset: number } } | null>(null);
     /** 当前页覆盖的文本切片（V1 的数据口） */
     const currentSlicesRef = useRef<PageSlice[]>([]);
+    /** 上一页的锚点：重排（字体就绪/转屏）时用它回位，别跳回第一页 */
+    const lastAnchorRef = useRef<{ paraIdx: number; charOffset: number } | null>(null);
     const saveTimerRef = useRef<number | null>(null);
     const touchRef = useRef<{ x: number; y: number; t: number; locked: boolean } | null>(null);
     const restoringRef = useRef(true);
@@ -89,10 +91,24 @@ export default function ReaderPage({ bookId, onBack }: Props) {
         let idx = 0;
         if (pending?.anchor) idx = pageForAnchor(flow, next, pending.anchor.paraIdx, pending.anchor.charOffset);
         else if (typeof pending?.page === 'number') idx = Math.max(0, Math.min(pending.page, next.length - 1));
+        else if (lastAnchorRef.current) {
+            // 没有明确目标（比如字体就绪后补量）：回到「刚才读的那一页」，不是第一页
+            idx = pageForAnchor(flow, next, lastAnchorRef.current.paraIdx, lastAnchorRef.current.charOffset);
+        }
         pendingRef.current = null;
         setPageIdx(idx);
         restoringRef.current = false;
     }, [chapter, prefs.typography, layoutNonce]);
+
+    // 字体就绪后补量一次：首量可能发生在字体替换之前（行盒高度会变，页数跟着变）
+    useEffect(() => {
+        let cancelled = false;
+        const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
+        if (fonts?.ready) {
+            void fonts.ready.then(() => { if (!cancelled) setLayoutNonce((n) => n + 1); }).catch(() => { /* 老浏览器没有 fonts API */ });
+        }
+        return () => { cancelled = true; };
+    }, [chapter]);
 
     // ── 视口变化（转屏/键盘）：保住位置再重排 ──
     const anchorOfCurrentPage = useCallback((): { paraIdx: number; charOffset: number } | null => {
@@ -138,6 +154,7 @@ export default function ReaderPage({ bookId, onBack }: Props) {
     useEffect(() => {
         if (!book || !chapter || pages.length === 0) return;
         const anchor = anchorOfCurrentPage();
+        if (anchor) lastAnchorRef.current = anchor;
         const span = 100 / Math.max(1, book.chapterCount);
         const percent = Math.round((chapterIdx * span + ((pageIdx + 1) / pages.length) * span) * 10) / 10;
         if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
@@ -223,15 +240,17 @@ export default function ReaderPage({ bookId, onBack }: Props) {
                 onTouchMove={onTouchMove}
                 onTouchEnd={onTouchEnd}
             >
-                <div
-                    className="rd-reader-flow"
-                    ref={flowRef}
-                    style={{ transform: `translateY(${-top}px)`, transition: restoringRef.current ? 'none' : undefined }}
-                >
-                    {chapter && <div className="rd-chapter-title">{chapter.title}</div>}
-                    {chapter?.paras.map((p, i) => (
-                        <p className="rd-para" key={i} data-para-idx={i}>{p}</p>
-                    ))}
+                <div className="rd-reader-clip" style={{ height: pages[pageIdx]?.height ?? '100%' }}>
+                    <div
+                        className="rd-reader-flow"
+                        ref={flowRef}
+                        style={{ transform: `translateY(${-top}px)`, transition: restoringRef.current ? 'none' : undefined }}
+                    >
+                        {chapter && <div className="rd-chapter-title">{chapter.title}</div>}
+                        {chapter?.paras.map((p, i) => (
+                            <p className="rd-para" key={i} data-para-idx={i}>{p}</p>
+                        ))}
+                    </div>
                 </div>
             </div>
 

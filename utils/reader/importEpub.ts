@@ -12,7 +12,7 @@
 // 产出与 TXT 线共用 ImportedPayload：一章 = spine 里一个 XHTML 文档（EPUB 的惯例），
 // 章名优先取目录，其次取文档里第一个 h1-h6，最后兜底「第 N 节」。
 
-import { BlobReader, BlobWriter, TextWriter, ZipReader } from '@zip.js/zip.js';
+import { BlobReader, BlobWriter, TextWriter, ZipReader, type FileEntry } from '@zip.js/zip.js';
 import { contentRevOf, normalizeParagraphs, type RawChapter } from './normalize';
 import type { ImportedPayload } from './importTxt';
 
@@ -119,11 +119,16 @@ export async function parseEpub(
     const zip = new ZipReader(new BlobReader(file), { useWebWorkers: false });
     try {
         const entries = await zip.getEntries();
-        const byPath = new Map(entries.map((e) => [e.filename, e]));
+        // 目录条目没有 getData，只留文件条目（EPUB 的目录结构靠路径前缀就够了）。
+        // 注意：zip.js 的 FileEntry 只有类型没有运行时类（instanceof 会炸），用鸭子判定。
+        const byPath = new Map<string, FileEntry>();
+        for (const e of entries) {
+            if (typeof (e as { getData?: unknown }).getData === 'function') byPath.set(e.filename, e as FileEntry);
+        }
         const readText = async (path: string): Promise<string | null> => {
             const entry = byPath.get(path);
             if (!entry) return null;
-            const blob = await entry.getData!(new TextWriter('utf-8'));
+            const blob = await entry.getData(new TextWriter('utf-8'));
             return typeof blob === 'string' ? blob : String(blob);
         };
 
@@ -201,7 +206,7 @@ export async function parseEpub(
         if (coverItem) {
             const entry = byPath.get(resolvePath(opfPath, coverItem.href));
             if (entry) {
-                const blob = await entry.getData!(new BlobWriter(coverItem.mediaType || 'image/jpeg'));
+                const blob = await entry.getData(new BlobWriter(coverItem.mediaType || 'image/jpeg'));
                 cover = { bytes: await blob.arrayBuffer(), mime: coverItem.mediaType || blob.type || 'image/jpeg' };
             }
         }

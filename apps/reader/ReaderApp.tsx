@@ -17,8 +17,9 @@ import ReaderStats from './tabs/ReaderStats';
 import ReaderSettings from './tabs/ReaderSettings';
 import { useReaderPrefs, setLastBook } from './readerPrefs';
 import { sweepStaleImports } from '../../utils/reader/readerDb';
+import { consumeReaderDeepLink, READER_DEEPLINK_KEY, type ReaderDeepLink } from './readerDeepLink';
 
-export const READER_DEEPLINK_KEY = 'sully_reader_open';
+export { READER_DEEPLINK_KEY, openReaderAt } from './readerDeepLink';
 
 type TabKey = 'shelf' | 'notes' | 'library' | 'stats' | 'settings';
 
@@ -29,11 +30,6 @@ const TABS: Array<{ key: TabKey; label: string; Icon: typeof BookOpen }> = [
     { key: 'stats', label: '统计', Icon: ChartBar },
     { key: 'settings', label: '设置', Icon: Gear },
 ];
-
-/** 别的页面跳进来时调它（情侣空间三卡 / NoxHome 阅读页）。 */
-export function openReaderAt(target: TabKey | `book:${string}`): void {
-    try { sessionStorage.setItem(READER_DEEPLINK_KEY, target); } catch { /* 无痕模式 */ }
-}
 
 interface Props {
     onBack?: () => void;
@@ -57,13 +53,13 @@ export default function ReaderApp({ onBack }: Props) {
 
     // 深链：跳进来直接落到该到的页
     useEffect(() => {
-        let target: string | null = null;
-        try {
-            target = sessionStorage.getItem(READER_DEEPLINK_KEY);
-            if (target) sessionStorage.removeItem(READER_DEEPLINK_KEY);
-        } catch { /* 无痕模式 */ }
-        if (!target) {
-            if (prefs.lastBookId) setTab('shelf');
+        const target: ReaderDeepLink | null = consumeReaderDeepLink();
+        if (!target) return;
+        if (target === 'continue') {
+            // 「在读的那本书」：继续上次读的；没有就落书架
+            const last = prefs.lastBookId;
+            if (last) setReading(last);
+            else setTab('shelf');
             return;
         }
         if (target.startsWith('book:')) setReading(target.slice(5));

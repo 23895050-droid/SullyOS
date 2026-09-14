@@ -94,8 +94,11 @@ export function paginateFlow(flowEl: HTMLElement, viewportHeight: number): RdPag
             const top = rect.top - flowTop;
             const bottom = rect.bottom - flowTop;
             if (!current) {
-                current = { index: 0, top, height: 0, fromPara: paraIdx, toPara: paraIdx };
-                pageTop = top;
+                // 第一页从**正文流顶部**起算，不能从第一行起算——章标题在段落之上，
+                // 从行高起算会把标题推到视口外（首屏就少个标题）。
+                const startTop = pages.length === 0 ? 0 : top;
+                current = { index: 0, top: startTop, height: 0, fromPara: paraIdx, toPara: paraIdx };
+                pageTop = startTop;
             }
             if (bottom - pageTop > viewportHeight + 0.5) {
                 // 这一行装不下：上一行收口，从这一行开新页

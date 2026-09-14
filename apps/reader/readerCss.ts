@@ -124,6 +124,9 @@ export const READER_SKELETON_CSS = `
 /* ── 阅读页 ── */
 .rd-reader { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--rd-paper); }
 .rd-reader-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+/* 按「这一页的内容高度」裁切：视口通常比一页的内容高一点，不裁的话下一页的第一行
+   会在底部露出半个字的边（书页本来就该在页边界处切断，不露下一页的字头）。 */
+.rd-reader-clip { position: absolute; left: 0; right: 0; top: 0; overflow: hidden; }
 .rd-reader-flow {
   position: absolute; left: var(--rd-page-gutter); right: var(--rd-page-gutter); top: 0;
   will-change: transform;
