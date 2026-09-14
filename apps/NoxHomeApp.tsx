@@ -94,7 +94,7 @@ const Text = ({ x, y, w, h, size, min, color, weight, align = 'left', opacity = 
 );
 
 const NoxHomeApp: React.FC = () => {
-  const { closeApp, addToast, openApp } = useOS();
+  const { closeApp, addToast, openApp, theme } = useOS();
   const [tab, setTab] = useState<'home' | 'couple' | 'feed' | 'settings'>('home');
   const [inner, setInner] = useState<string | null>(null); // b 页内页（diary = 日记页）
   const [beauty, setBeauty] = useState(loadCoupleBeauty);
@@ -163,11 +163,17 @@ const NoxHomeApp: React.FC = () => {
     return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
   }, [pageKey]);
 
-  // 幕布配色（抄上游那层「透明幕 + 柔光点」的观感）：跟目标页一个色系、留一点透——
-  // 底下加 14px 模糊，透过来的只是一片朦胧明暗（换页动作看不出来），比糊一层死色好看
-  const veilFor = (k: string) => (k.startsWith('home')
-    ? { background: 'rgba(20,24,40,0.72)' }
-    : { background: 'rgba(255,235,243,0.82)' });
+  // 幕布材料 = 壳那套转场底（打开 App 时你能看到的朦胧背景）：壁纸虚化 + 白色蒙版 + 柔光点。
+  // 为什么不能像上游那样直接透明：上游那层幕是透明的，因为它脚下有壳铺好的「虚化壁纸 + 白蒙版」
+  // 稳定底；Nox 的家是全屏的，把壳那层盖住了——直接透明就会透过幕布看见换页。所以把那个底
+  // 一起抄进来：底色天然统一（不再按页配色），观感跟打开 App 完全一套语言。
+  const veilWallpaper = useBlobRefUrl(theme?.wallpaper);
+  const veilBg = (() => {
+    const wp = veilWallpaper;
+    if (!wp) return 'linear-gradient(160deg, #f7e9f1 0%, #e9dfec 100%)';   // 没设壁纸时给一层中性柔光底
+    const isUrl = wp.startsWith('http') || wp.startsWith('data:') || wp.startsWith('blob:') || wp.startsWith('/');
+    return isUrl ? `url("${wp}")` : wp;
+  })();
 
   // 空闲预热（2026-09-14）：首屏落定后、浏览器空闲时把「我们」「设置」两页先在后台挂上
   // （隐藏）——图片那时就解析好了，第一次切过去幕布揭开就已经是完整页面。
@@ -391,19 +397,19 @@ const NoxHomeApp: React.FC = () => {
           幕布必须压过画布里所有 z-index 的元素，否则会有文字浮在幕布上面（她 2026-09-14 报的）。 */}
       {curtain && (
         <div
-          className={`absolute inset-0 flex items-center justify-center pointer-events-none ${curtain === 'in' ? 'veil-in' : 'veil-out'}`}
-          style={{
-            // 用目标页的色（不是当前展示页）：整屏先落到目标色，揭开就是同一色系的页面，不跳色
-            ...veilFor(pageKey),
-            zIndex: 65,
-            backdropFilter: 'blur(14px)',
-            WebkitBackdropFilter: 'blur(14px)',
-          }}
+          className={`absolute inset-0 pointer-events-none ${curtain === 'in' ? 'veil-in' : 'veil-out'}`}
+          style={{ zIndex: 65 }}
         >
-          {/* 柔光点（抄上游 AppLoadingFallback）：一次性静态光点，无持续动画 */}
-          <div className="relative" style={{ width: 72, height: 72 }}>
-            <div className="absolute inset-0" style={{ borderRadius: '9999px', filter: 'blur(8px)', background: 'radial-gradient(circle, hsla(var(--primary-hue),75%,72%,0.42) 0%, hsla(var(--primary-hue),70%,60%,0.10) 50%, transparent 70%)' }} />
-            <div className="absolute" style={{ left: '50%', top: '50%', width: 10, height: 10, transform: 'translate(-50%,-50%)', borderRadius: '9999px', background: 'radial-gradient(circle, #fff, hsla(var(--primary-hue),80%,75%,0.6) 60%, transparent)', boxShadow: '0 0 10px hsla(var(--primary-hue),80%,75%,0.6)' }} />
+          {/* ① 壁纸虚化（放大一点点，免得虚化把四边拉出透明描边） */}
+          <div className="absolute inset-0" style={{ backgroundImage: veilBg, backgroundSize: 'cover', backgroundPosition: 'center', filter: 'blur(12px)', transform: 'scale(1.06)' }} />
+          {/* ② 白色蒙版：和 PhoneShell 里开 App 时那层同款，负责「朦胧、看不清」 */}
+          <div className="absolute inset-0" style={{ background: 'rgba(255,255,255,0.55)' }} />
+          {/* ③ 柔光点（抄上游 AppLoadingFallback）：一次性静态光点，无持续动画 */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="relative" style={{ width: 72, height: 72 }}>
+              <div className="absolute inset-0" style={{ borderRadius: '9999px', filter: 'blur(8px)', background: 'radial-gradient(circle, hsla(var(--primary-hue),75%,72%,0.42) 0%, hsla(var(--primary-hue),70%,60%,0.10) 50%, transparent 70%)' }} />
+              <div className="absolute" style={{ left: '50%', top: '50%', width: 10, height: 10, transform: 'translate(-50%,-50%)', borderRadius: '9999px', background: 'radial-gradient(circle, #fff, hsla(var(--primary-hue),80%,75%,0.6) 60%, transparent)', boxShadow: '0 0 10px hsla(var(--primary-hue),80%,75%,0.6)' }} />
+            </div>
           </div>
         </div>
       )}
