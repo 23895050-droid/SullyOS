@@ -30,6 +30,9 @@ export interface ReaderStatsData {
 
 const EMPTY_DAY: DayStat = { sec: 0, pages: 0, chars: 0 };
 
+/** 见 loadStats 里的说明：这份账常驻内存，写的时候只改它 */
+let memo: ReaderStatsData | null = null;
+
 export function emptyStats(): ReaderStatsData {
     return { version: 1, updatedAt: new Date().toISOString(), days: {}, hours: new Array(24).fill(0) };
 }
@@ -129,26 +132,31 @@ export function fmtChars(n: number): { big: string; unit: string } {
 // ── 读写 ────────────────────────────────────────────────────────────────
 
 export function loadStats(): ReaderStatsData {
+    // 进程内缓存：翻页时每次都要记一笔，一年流水 JSON.parse 一遍再 stringify 回去
+    // 会卡手——第一遍读完就常驻内存，之后写入直接改缓存再落盘。
+    if (memo) return memo;
     try {
         const raw = localStorage.getItem(KEY);
-        if (!raw) return emptyStats();
+        if (!raw) { memo = emptyStats(); return memo; }
         const parsed = JSON.parse(raw) as Partial<ReaderStatsData>;
         const hours = Array.isArray(parsed.hours) ? parsed.hours.slice(0, 24) : [];
         while (hours.length < 24) hours.push(0);
-        return {
+        memo = {
             version: 1,
             updatedAt: parsed.updatedAt ?? new Date().toISOString(),
             days: parsed.days ?? {},
             hours,
         };
+        return memo;
     } catch {
-        return emptyStats();
+        memo = emptyStats();
+        return memo;
     }
 }
 
 /** 记一笔阅读流水（ReaderPage 调；本地日期 + 当前小时两个桶一起加） */
 export function recordReading(delta: Partial<DayStat>, at: Date = new Date()): void {
-    const s = loadStats();
-    const next = addReading(s, at, delta);
+    const next = addReading(loadStats(), at, delta);
+    memo = next;
     try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* 配额满了就算了，统计不是关键路径 */ }
 }
