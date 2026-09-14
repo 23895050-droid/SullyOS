@@ -2,15 +2,17 @@
 // 白天 = 渐变天幕 + 合成云；夜晚 = 深蓝渐变 + 星星（列表卡传种子生成的星场，每座城市长得不一样）。
 import React from 'react';
 
-export const DAY_SKY = 'linear-gradient(180deg, #a7c2da 0%, #8db0d3 30%, #6f9cc9 62%, #5b8ec2 100%)';
+export const DAY_SKY = 'linear-gradient(180deg, #a3bcd8 0%, #83a9d2 30%, #6396c8 62%, #4c83be 100%)';
 export const NIGHT_SKY = 'linear-gradient(180deg, #121a34 0%, #1a2340 40%, #222b4b 75%, #293256 100%)';
+// 云用灰白（2026-09-15 她指出白天可读性低）——纯白会把顶部整片刷白、白字压上去就糊；
+// 例图里的云是有层次的灰白（真实云层的中间调），白字 + 柔阴影在上面才清楚。
 export const DAY_CLOUDS = [
-  'radial-gradient(78% 24% at 30% -1%, rgba(255,255,255,0.95), rgba(255,255,255,0) 100%)',
-  'radial-gradient(88% 26% at 62% 2%, rgba(255,255,255,0.85), rgba(255,255,255,0) 100%)',
-  'radial-gradient(56% 18% at 88% 10%, rgba(255,255,255,0.6), rgba(255,255,255,0) 100%)',
-  'radial-gradient(52% 20% at 8% 13%, rgba(255,255,255,0.62), rgba(255,255,255,0) 100%)',
-  'radial-gradient(46% 15% at 78% 20%, rgba(255,255,255,0.34), rgba(255,255,255,0) 100%)',
-  'radial-gradient(40% 14% at 20% 24%, rgba(255,255,255,0.3), rgba(255,255,255,0) 100%)',
+  'radial-gradient(78% 24% at 30% -1%, rgba(228,235,245,0.92), rgba(228,235,245,0) 100%)',
+  'radial-gradient(88% 26% at 62% 2%, rgba(224,232,243,0.82), rgba(224,232,243,0) 100%)',
+  'radial-gradient(56% 18% at 88% 10%, rgba(222,231,242,0.58), rgba(222,231,242,0) 100%)',
+  'radial-gradient(52% 20% at 8% 13%, rgba(224,232,243,0.6), rgba(224,232,243,0) 100%)',
+  'radial-gradient(46% 15% at 78% 20%, rgba(220,230,242,0.34), rgba(220,230,242,0) 100%)',
+  'radial-gradient(40% 14% at 20% 24%, rgba(220,230,242,0.3), rgba(220,230,242,0) 100%)',
 ].join(', ');
 
 /** 天气页整屏夜空星星 [left%, top%, 直径px, 亮度] */

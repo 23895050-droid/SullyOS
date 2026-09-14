@@ -16,13 +16,18 @@ import {
   aqiLevel, aqiPos, dayLabel, fmtTemp, hourLabel, rangeBar, summaryText, swipeStep, tempColor, wmoIcon, wmoText,
 } from '../../utils/weatherMath';
 
+// 文字阴影（2026-09-15 她指出白天可读性低）——照例图：iOS 白字全带柔和暗晕，压在任何云上都清楚。
+// 白天给足，夜晚几乎不需要（深底白字对比本来就够，加了反而糊）。
+const TEXT_SHADOW_DAY = '0 1px 5px rgba(0,0,0,0.35), 0 0 2px rgba(0,0,0,0.18)';
+
 const cardStyle = (isDay: boolean): React.CSSProperties => ({
   borderRadius: 22,
   padding: '14px 16px',
-  background: isDay ? 'rgba(255,255,255,0.36)' : 'rgba(26,34,58,0.42)',
+  // 白天卡 = 蓝玻璃（照例图；以前是白玻璃，白字压白卡糊）；夜晚 = 深蓝玻璃
+  background: isDay ? 'rgba(56,104,170,0.45)' : 'rgba(26,34,58,0.42)',
   backdropFilter: 'blur(24px) saturate(150%)',
   WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-  border: isDay ? '0.5px solid rgba(255,255,255,0.35)' : '0.5px solid rgba(255,255,255,0.14)',
+  border: isDay ? '0.5px solid rgba(255,255,255,0.28)' : '0.5px solid rgba(255,255,255,0.14)',
 });
 
 // ── 大字头：滚动收缩成紧凑标题（sticky 吸顶，两态交叉淡化） ──
@@ -349,9 +354,13 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   return (
     <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-      {/* 横滑层（touch-action: pan-y → 纵向还给滚动，横向归我们） */}
+      {/* 横滑层（touch-action: pan-y → 纵向还给滚动，横向归我们）；白天文字整层继承柔阴影 */}
       <div
-        style={{ position: 'absolute', inset: 0, touchAction: 'pan-y', transform: drag ? `translateX(${drag}px)` : undefined }}
+        style={{
+          position: 'absolute', inset: 0, touchAction: 'pan-y',
+          transform: drag ? `translateX(${drag}px)` : undefined,
+          textShadow: isDay ? TEXT_SHADOW_DAY : undefined,
+        }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
