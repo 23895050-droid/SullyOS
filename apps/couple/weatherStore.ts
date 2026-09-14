@@ -80,6 +80,18 @@ export function addWeatherCity(city: WeatherCity): string {
   return k;
 }
 
+/** 把某座城市设为 My Location（移到列表第一位，home 标记跟着转移——原版的第一张就是当前位置） */
+export function setHomeCity(key: string): void {
+  store.set((s) => {
+    const target = s.cities.find((c) => cityKey(c) === key);
+    if (!target || target.home) return s;
+    const rest = s.cities
+      .filter((c) => cityKey(c) !== key)
+      .map((c) => (c.home ? { ...c, home: undefined } : c));
+    return { ...s, cities: [{ ...target, home: true }, ...rest], updatedAt: isoNow() };
+  });
+}
+
 /** 删城市（至少留一座；删的是当前城市就切回第一座） */
 export function removeWeatherCity(key: string): void {
   store.set((s) => {

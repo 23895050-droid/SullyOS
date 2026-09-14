@@ -128,7 +128,7 @@ const HourlyCard = React.memo(({ data, isDay }: { data: WeatherData; isDay: bool
       {summaryText(data.now.code, data.now.gust)}
     </div>
     <div style={{ height: 1, background: 'rgba(255,255,255,0.22)', margin: '13px 0 12px' }} />
-    <div className="[&::-webkit-scrollbar]:hidden" style={{ display: 'flex', overflowX: 'auto', scrollbarWidth: 'none' }}>
+    <div className="[&::-webkit-scrollbar]:hidden" data-hscroll style={{ display: 'flex', overflowX: 'auto', scrollbarWidth: 'none' }}>
       {data.hours.map((h, i) => (
         <div key={h.time} style={{ flex: '0 0 58px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9 }}>
           <span style={{ fontSize: 12.5, fontWeight: 600, color: 'rgba(255,255,255,0.92)' }}>{hourLabel(h.time, i === 0)}</span>
@@ -249,6 +249,9 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
+    dragRef.current.active = false;
+    // 横向滚动区（逐小时条等带 data-hscroll 的）里开始的滑动归它自己，不翻城市
+    if ((e.target as HTMLElement).closest?.('[data-hscroll]')) return;
     const p = e.touches[0];
     dragRef.current = { x: p.clientX, y: p.clientY, dx: 0, t: Date.now(), axis: null, active: true };
   };
@@ -354,6 +357,8 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   return (
     <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+      {/* 静止天空：横滑跟手时露出的就是它（不会漏出页面下面的壁纸）；背景不动、只有内容跟手 */}
+      <Sky isDay={isDay} />
       {/* 横滑层（touch-action: pan-y → 纵向还给滚动，横向归我们）；白天文字整层继承柔阴影 */}
       <div
         style={{
@@ -367,7 +372,6 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         onTouchCancel={onTouchEnd}
       >
         <div style={{ position: 'absolute', inset: 0, ...enterStyle }}>
-          <Sky isDay={isDay} />
           {/* 内容滚动层（key=城市：换城市回到顶部 + 重置大字头状态） */}
           <div
             key={curKey}

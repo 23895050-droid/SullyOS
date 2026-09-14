@@ -3,11 +3,11 @@
 // 点卡 → 切城市回天气页；长按 520ms → 确认删除；搜索（Open-Meteo geocoding，防抖 300ms）点结果 → 加进列表并打开。
 // ••• 是原版菜单入口（编辑列表/单位/通知），本轮做视觉、点了不动作。
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, DotsThree, House, MagnifyingGlass, Microphone } from '@phosphor-icons/react';
+import { ArrowLeft, Check, DotsThree, House, MagnifyingGlass, Microphone } from '@phosphor-icons/react';
 import ConfirmDialog from '../../components/os/ConfirmDialog';
 import Sky from './WeatherSky';
 import {
-  addWeatherCity, cityKey, currentCity, removeWeatherCity, useWeatherStore,
+  addWeatherCity, cityKey, currentCity, removeWeatherCity, setHomeCity, useWeatherStore,
 } from './weatherStore';
 import type { WeatherCity, WeatherData } from './weatherStore';
 import { ensureCitiesWeather, ensureFreshWeather, searchCity } from './weatherApi';
@@ -97,6 +97,7 @@ const CoupleCityList: React.FC<{ onBack: () => void; onPick: (key: string) => vo
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<CityHit[] | null>(null);
   const [confirmDel, setConfirmDel] = useState<WeatherCity | null>(null);
+  const [homeOpen, setHomeOpen] = useState(false);
   const pressRef = useRef<number | null>(null);
   const longFired = useRef(false);
 
@@ -160,7 +161,7 @@ const CoupleCityList: React.FC<{ onBack: () => void; onPick: (key: string) => vo
     width: 38, height: 38, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
     background: isDay ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.14)',
     border: isDay ? '0.5px solid rgba(0,0,0,0.12)' : '0.5px solid rgba(255,255,255,0.28)',
-    WebkitTapHighlightColor: 'transparent',
+    padding: 0, WebkitTapHighlightColor: 'transparent',
   };
 
   return (
@@ -171,10 +172,10 @@ const CoupleCityList: React.FC<{ onBack: () => void; onPick: (key: string) => vo
       <button onClick={onBack} aria-label="返回" style={{ ...ringStyle, left: 12 }}>
         <ArrowLeft size={20} color={fg} />
       </button>
-      {/* ••• 原版菜单入口（本轮视觉） */}
-      <div style={{ ...ringStyle, right: 12 }} aria-hidden>
+      {/* ••• 菜单：把哪座城市设为 My Location（原版这里是编辑列表/单位/通知） */}
+      <button onClick={() => setHomeOpen(true)} aria-label="设置我的位置" style={{ ...ringStyle, right: 12 }}>
         <DotsThree size={24} weight="bold" color={fg} />
-      </div>
+      </button>
 
       <div
         className="[&::-webkit-scrollbar]:hidden"
@@ -240,6 +241,55 @@ const CoupleCityList: React.FC<{ onBack: () => void; onPick: (key: string) => vo
           ))
         )}
       </div>
+
+      {/* My Location 设置弹层（点遮罩关闭） */}
+      {homeOpen && (
+        <div
+          onClick={() => setHomeOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 130, background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%', maxWidth: 330, borderRadius: 20, padding: '18px 18px 8px',
+              background: isDay ? '#ffffff' : '#1c2236', color: fg, boxShadow: '0 18px 50px rgba(0,0,0,0.35)',
+            }}
+          >
+            <div style={{ fontSize: 16.5, fontWeight: 700 }}>My Location</div>
+            <div style={{ fontSize: 12.5, opacity: 0.6, margin: '4px 0 8px' }}>选一座城市当你的位置，它会排到列表第一张</div>
+            {cities.map((c) => (
+              <button
+                key={cityKey(c)}
+                onClick={() => {
+                  setHomeCity(cityKey(c));
+                  setHomeOpen(false);
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
+                  padding: '13px 4px', background: 'transparent', border: 'none', color: fg, fontSize: 16,
+                  borderBottom: `0.5px solid ${isDay ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)'}`,
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                <span>{c.name}</span>
+                {c.home && <Check size={17} weight="bold" color="#3b82f6" />}
+              </button>
+            ))}
+            <button
+              onClick={() => setHomeOpen(false)}
+              style={{
+                width: '100%', padding: '14px 0 10px', background: 'transparent', border: 'none',
+                color: fg, fontSize: 15, opacity: 0.75, WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={!!confirmDel}
