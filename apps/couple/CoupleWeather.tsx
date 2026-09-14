@@ -3,7 +3,7 @@
 // 数据 Open-Meteo（weatherApi）→ weatherStore 缓存：重进先用缓存秒开，超 30 分钟后台刷新；
 // 从没拉到过数据时才显示错误页。白天/夜晚两套主题照图（背景：渐变+合成云/星，实景素材以后可换）。
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, CalendarBlank, ListDashes, MapTrifold } from '@phosphor-icons/react';
+import { ArrowLeft, CalendarBlank } from '@phosphor-icons/react';
 import { fetchWeather } from './weatherApi';
 import { getWeatherStore, saveWeatherData, useWeatherStore, WEATHER_FRESH_MS } from './weatherStore';
 import type { WeatherData } from './weatherStore';
@@ -66,12 +66,13 @@ const Backdrop = React.memo(({ isDay }: { isDay: boolean }) => (
 ));
 
 // ── 大字头：滚动收缩成紧凑标题（sticky 吸顶，两态交叉淡化） ──
-const Head = React.memo(({ t, city, now, todayMin, todayMax }: {
+const Head = React.memo(({ t, city, now, todayMin, todayMax, isDay }: {
   t: number;
   city: string;
   now: { temp: number; code: number };
   todayMin: number;
   todayMax: number;
+  isDay: boolean;
 }) => {
   const lerp = (a: number, b: number) => a + (b - a) * t;
   const bigOp = Math.max(1 - t / 0.55, 0);
@@ -84,16 +85,20 @@ const Head = React.memo(({ t, city, now, todayMin, todayMax }: {
         paddingTop: 'var(--chrome-top, 0px)',
       }}
     >
-      {/* 吸顶模糊背板：滚动后卡片从标题下穿过时被糊住（iOS 同款） */}
+      {/* 吸顶背板 = 背景顶部的实色副本（不用 backdrop-filter：手机上 mask+模糊会失效，文字会露出来）
+          穿行过来的卡片文字被它整块盖住；底边一小段渐隐收尾 */}
       <div
         style={{
-          position: 'absolute', inset: 0, opacity: smallOp, pointerEvents: 'none',
-          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-          background: 'linear-gradient(180deg, rgba(150,178,206,0.30), rgba(150,178,206,0.10))',
-          maskImage: 'linear-gradient(180deg, #000 58%, transparent)',
-          WebkitMaskImage: 'linear-gradient(180deg, #000 58%, transparent)',
+          position: 'absolute', left: 0, right: 0, top: 0,
+          height: `calc(var(--chrome-top, 0px) + ${lerp(218, 52) + 36}px)`,
+          opacity: smallOp, overflow: 'hidden', pointerEvents: 'none',
+          maskImage: 'linear-gradient(180deg, #000 84%, transparent)',
+          WebkitMaskImage: 'linear-gradient(180deg, #000 84%, transparent)',
         }}
-      />
+      >
+        <div style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100vh', background: isDay ? DAY_SKY : NIGHT_SKY }} />
+        {isDay && <div style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100vh', background: DAY_CLOUDS }} />}
+      </div>
       {/* 大字态 */}
       <div
         style={{
@@ -319,30 +324,15 @@ const CoupleWeather: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         onScroll={handleScroll}
         style={{ position: 'absolute', inset: 0, overflowY: 'auto', scrollbarWidth: 'none', zIndex: 5 }}
       >
-        <Head t={t} city={store.city.name} now={data.now} todayMin={todayMin} todayMax={todayMax} />
+        <Head t={t} city={store.city.name} now={data.now} todayMin={todayMin} todayMax={todayMax} isDay={isDay} />
         <div style={{ position: 'relative', zIndex: 3, padding: '0 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {data.aqi && <AqiCard aqi={data.aqi.aqi} isDay={isDay} />}
           <HourlyCard data={data} isDay={isDay} />
           <TenDayCard data={data} isDay={isDay} />
         </div>
-        <div style={{ height: 'calc(var(--safe-bottom, 0px) + 170px)' }} />
+        <div style={{ height: 'calc(var(--safe-bottom, 0px) + 120px)' }} />
       </div>
       {backBtn}
-      {/* 底部工具栏（浮在底部胶囊导航上方） */}
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom, 0px) + 92px)', zIndex: 30, padding: '0 14px', pointerEvents: 'none' }}>
-        <div
-          style={{
-            height: 50, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px',
-            background: isDay ? 'rgba(255,255,255,0.26)' : 'rgba(26,34,58,0.4)',
-            backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
-            border: isDay ? '0.5px solid rgba(255,255,255,0.35)' : '0.5px solid rgba(255,255,255,0.14)',
-          }}
-        >
-          <MapTrifold size={22} color="rgba(255,255,255,0.95)" />
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />
-          <ListDashes size={22} color="rgba(255,255,255,0.95)" />
-        </div>
-      </div>
     </div>
   );
 };
