@@ -340,7 +340,11 @@ export const READER_SKELETON_CSS = `
   color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.rd-reader-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.rd-reader-viewport {
+  position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden;
+  /* 横向手势归我们（翻页跟手），纵向留给浏览器（正文本来不滚，这样长按选字不打架） */
+  touch-action: pan-y;
+}
 /* 一屏一片：整章排进**多列流**里，一列就是一页，翻页 = 整列横向平移。
    视口只露一列宽，所以它才是「裁切」的那一层（横排后不再按页高裁，页高恒等于正文区高）。
    正文从标准上边距开始（不是从顶栏下面开始——顶栏是遮罩，压在上面），到标准下边距结束。 */
