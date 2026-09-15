@@ -75,9 +75,10 @@ interface HuntHit {
     pct: number;
 }
 
-/** 上下栏的本体高度（跟骨架层里的 --rd-bar-h / --rd-foot-h 一一对应，改一处要改两处） */
-const BAR_H = 46;
-const FOOT_H = 92;
+/** 上下栏的本体高度 + 正文的上下标准边距（跟骨架层里的 --rd-bar-h / --rd-foot-h /
+    --rd-page-top / --rd-page-bottom 一一对应，改一处要改两处） */
+const PAGE_TOP = 10;
+const PAGE_BOTTOM = 54;
 
 /** HSL → hex：调色盘两根条（色相 + 明度）就能调出任意一支笔，不用上取色器 */
 function hslHex(h: number, s: number, l: number): string {
@@ -270,7 +271,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
      * 翻页也不会跳（她 2026-09-15 说的「不是把内容顶来顶去」）。
      */
     const contentH = useCallback(
-        () => Math.max(40, (viewportRef.current?.clientHeight ?? 0) - BAR_H - FOOT_H),
+        () => Math.max(40, (viewportRef.current?.clientHeight ?? 0) - PAGE_TOP - PAGE_BOTTOM),
         [],
     );
 
@@ -685,10 +686,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 onTouchMove={onTouchMove}
                 onTouchEnd={onTouchEnd}
             >
-                <div
-                    className="rd-reader-clip"
-                    style={{ '--rd-page-h': `${pages[pageIdx]?.height ?? 9999}px` } as React.CSSProperties}
-                >
+                <div className="rd-reader-clip" style={{ height: pages[pageIdx]?.height ?? '100%' }}>
                     <div
                         className="rd-reader-flow"
                         ref={flowRef}

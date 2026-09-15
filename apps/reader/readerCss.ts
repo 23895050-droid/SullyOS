@@ -79,6 +79,11 @@ export const READER_SKELETON_CSS = `
      让开位置——所以沉浸开关不会让正文重排（ReaderPage 里的 BAR_H / FOOT_H 要跟这里一致）。 */
   --rd-bar-h: 46px;
   --rd-foot-h: 92px;
+  /* 正文的上下标准边距（照她 2026-09-15 给的参考图量的）：从安全区下 10px 开始，
+     到离屏幕底 88px 结束（= 安全区上 54px）。上下栏是遮罩，压在正文上——**不占位**，
+     所以正文该铺到哪就铺到哪，被盖住的那几行翻页后会从页顶露出来。 */
+  --rd-page-top: 10px;
+  --rd-page-bottom: 54px;
 
   /* 划线槽 1..6 的颜色由 readerSkinPresets.HIGHLIGHT_SLOTS 供给（见 ReaderSkinPreset） */
 
@@ -333,12 +338,10 @@ export const READER_SKELETON_CSS = `
 .rd-reader-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 /* 按「这一页的内容高度」裁切：视口通常比一页的内容高一点，不裁的话下一页的第一行
    会在底部露出半个字的边（书页本来就该在页边界处切断，不露下一页的字头）。 */
-/* 底部**不留白**：裁切区比一页多出一个底栏的高度，正文一直铺到屏幕底、由底栏盖住；
-   被盖住的那一截是「下一页的开头」，翻过去就从页顶露出来——一个字都不丢（她 2026-09-15 要的）。 */
-.rd-reader-clip {
-  position: absolute; left: 0; right: 0; top: var(--rd-bar-h); overflow: hidden;
-  height: calc(var(--rd-page-h, 0px) + var(--rd-foot-h) + max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px)));
-}
+/* 正文从标准上边距开始（不是从顶栏下面开始——顶栏是遮罩，压在上面），
+   到标准下边距结束；底栏那 92px 里有 38px 压在正文最后一行上，
+   翻页时那一行会从页顶升上来——**不占位、不丢字**。 */
+.rd-reader-clip { position: absolute; left: 0; right: 0; top: var(--rd-page-top); overflow: hidden; }
 .rd-reader-flow {
   position: absolute; left: var(--rd-page-gutter); right: var(--rd-page-gutter); top: 0;
   will-change: transform;
