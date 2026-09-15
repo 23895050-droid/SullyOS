@@ -14,7 +14,7 @@ import {
     deleteBookDeep, getBook, getProgress, listAnnotations, listBooks, patchBook,
     type RdAnnotation, type RdBook, type RdProgress,
 } from '../../utils/reader/readerDb';
-import { addCat, allCatNames } from './readerCats';
+import { addCat, addTag, allCatNames, loadTags } from './readerCats';
 import {
     readingModeFor, removeHighlightColor, setBookMode, setHighlightColor, useReaderPrefs,
 } from './readerPrefs';
@@ -50,12 +50,15 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
     const [prog, setProg] = useState<RdProgress | null>(null);
     const [anns, setAnns] = useState<RdAnnotation[]>([]);
     const [tab, setTab] = useState<Tab>('intro');
-    const [sheet, setSheet] = useState<null | 'book' | 'hl' | 'edit' | 'cat'>(null);
+    const [sheet, setSheet] = useState<null | 'book' | 'hl' | 'edit' | 'cat' | 'tag'>(null);
     /** 分类能选哪些：书上用过的 ∪ 名册里建的（添加分类在书架那张面板上，这里也能现打一个） */
     const [catNames, setCatNames] = useState<string[]>([]);
     const [newCat, setNewCat] = useState('');
+    /** 标签同理（她 09-15：标签块要有地方加标签） */
+    const [tagNames, setTagNames] = useState<string[]>([]);
+    const [newTag, setNewTag] = useState('');
     const [confirmDelete, setConfirmDelete] = useState(false);
-    const [draft, setDraft] = useState({ title: '', author: '', category: '', intro: '' });
+    const [draft, setDraft] = useState({ title: '', author: '', category: '', intro: '', tags: [] as string[] });
 
     const load = useCallback(async () => {
         const b = await getBook(bookId);
@@ -66,6 +69,7 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
             author: b.customAuthor ?? b.author ?? '',
             category: b.category ?? '',
             intro: b.customIntro ?? b.intro ?? '',
+            tags: b.tags ?? [],
         });
         setProg(await getProgress(bookId, 'user'));
         setAnns(await listAnnotations(bookId));
@@ -77,6 +81,12 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
             if (c) m.set(c, (m.get(c) ?? 0) + 1);
         }
         setCatNames(allCatNames(Array.from(m.entries()).sort((a, b) => b[1] - a[1])));
+        // 标签候选：所有书上用过的 + 名册里的
+        const tm = new Map<string, number>();
+        for (const x of all) for (const t of x.tags ?? []) tm.set(t, (tm.get(t) ?? 0) + 1);
+        const used = Array.from(tm.entries()).sort((a, b) => b[1] - a[1]).map(([n]) => n);
+        const roster = loadTags().map((t) => t.name);
+        setTagNames(Array.from(new Set([...used, ...roster])));
     }, [bookId]);
 
     useEffect(() => { void load(); }, [load]);
@@ -152,11 +162,13 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
 
     const saveEdit = async () => {
         if (draft.category.trim()) addCat(draft.category);
+        for (const t of draft.tags) addTag(t);
         const b = await patchBook(bookId, {
             title: draft.title.trim() || book.title,
             customAuthor: draft.author.trim(),
             category: draft.category.trim(),
             customIntro: draft.intro,
+            tags: draft.tags,
         });
         setBook(b);
         setSheet(null);
@@ -395,11 +407,80 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                                 <span className="rd-item-value">{draft.category.trim() || '未分类'}</span>
                                 <span className="rd-item-chev">›</span>
                             </button>
+                            <button className="rd-item" style={{ border: '1px solid var(--rd-rule)', borderRadius: 'var(--rd-r-md)', minHeight: 0, padding: '10px 14px' }} onClick={() => setSheet('tag')}>
+                                <span className="rd-item-label">标签</span>
+                                <span className="rd-item-value">{draft.tags.length > 0 ? draft.tags.map((t) => `#${t}`).join(' ') : '还没有'}</span>
+                                <span className="rd-item-chev">›</span>
+                            </button>
                             <textarea className="rd-field" rows={5} placeholder="简介" value={draft.intro} onChange={(e) => setDraft({ ...draft, intro: e.target.value })} />
                             <div className="rd-btn-row">
                                 <button className="rd-btn rd-btn-primary" onClick={() => void saveEdit()}>保存</button>
                                 <button className="rd-btn" onClick={() => setSheet(null)}>取消</button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 贴标签（多选，能现打一个新的；她 09-15：标签块没有添加标签的地方） ── */}
+            {sheet === 'tag' && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
+                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
+                        <div className="rd-sheet-title">标签</div>
+                        <div className="rd-card rd-card-flush">
+                            <div className="rd-list">
+                                {tagNames.length === 0 && <div className="rd-muted" style={{ padding: 'var(--rd-space-4)' }}>还没有标签，下面打一个。</div>}
+                                {tagNames.map((t) => (
+                                    <button
+                                        key={t}
+                                        className="rd-item"
+                                        onClick={() => setDraft({
+                                            ...draft,
+                                            tags: draft.tags.includes(t) ? draft.tags.filter((x) => x !== t) : [...draft.tags, t],
+                                        })}
+                                    >
+                                        <span className="rd-item-label">#{t}</span>
+                                        {draft.tags.includes(t) && <span className="rd-check">✓</span>}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="rd-muted" style={{ marginTop: 'var(--rd-space-3)' }}>
+                            点一下贴上，再点一下摘掉。新打的会进书架那张面板的「标签」栏。
+                        </div>
+                        <div className="rd-row" style={{ marginTop: 'var(--rd-space-2)' }}>
+                            <input
+                                className="rd-field"
+                                placeholder="新建一个标签"
+                                value={newTag}
+                                onChange={(e) => setNewTag(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return;
+                                    const n = newTag.trim();
+                                    if (!n) return;
+                                    addTag(n);
+                                    setTagNames((prev) => (prev.includes(n) ? prev : [...prev, n]));
+                                    setDraft((d) => ({ ...d, tags: d.tags.includes(n) ? d.tags : [...d.tags, n] }));
+                                    setNewTag('');
+                                }}
+                            />
+                            <button
+                                className="rd-btn"
+                                onClick={() => {
+                                    const n = newTag.trim();
+                                    if (!n) return;
+                                    addTag(n);
+                                    setTagNames((prev) => (prev.includes(n) ? prev : [...prev, n]));
+                                    setDraft((d) => ({ ...d, tags: d.tags.includes(n) ? d.tags : [...d.tags, n] }));
+                                    setNewTag('');
+                                }}
+                            >
+                                加上
+                            </button>
+                        </div>
+                        <div className="rd-btn-row" style={{ marginTop: 'var(--rd-space-3)' }}>
+                            <button className="rd-btn rd-btn-primary" onClick={() => setSheet('edit')}>好了</button>
                         </div>
                     </div>
                 </div>
