@@ -89,6 +89,9 @@ export const REF_SOURCE_STORES = [
     // 读书模块（fork 自建，2026-09-14）：rd_books 行里存着 fileRef / coverRef 两个
     // blobref 令牌（原书文件 + 封面）。不入清单 = 「孤儿图片清理」把每本书的文件当孤儿删光。
     'rd_books',
+    // 同一批（2026-09-15 加）：插图（EPUB 里的图）的令牌写在 rd_chapters.paras 的文本里——
+    // 漏了这条，那些图会被当孤儿删掉。
+    'rd_chapters',
 ] as const;
 
 // 每批读多少行。批间事务各自独立（见 DB.getStoreRowsPage 注释），内存峰值只有一批。
