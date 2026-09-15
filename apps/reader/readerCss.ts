@@ -330,9 +330,12 @@ export const READER_SKELETON_CSS = `
 }
 /* 标题脱流之后这排按钮没了推力，得自己贴右边 */
 .rd-reader-bar-tools { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
-/* 同上：按整条居中。左边一个返回、右边「目录 + 更多」两个，差 36px */
+/* 同上：按整条居中。左边一个返回、右边「目录 + 更多」两个，差 36px。
+   ⚠️ 竖向别用 top:50% —— 绝对定位是按**含安全区的整个条**算的，安全区越高标题越往上钻
+   （真机上就钻到灵动岛底下去了，她 2026-09-15 拍的图）。按「条高 − 上栏本体高度的一半」算，
+   正好落在按钮那一行的中线上。 */
 .rd-reader-bar-title {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  position: absolute; left: 50%; top: calc(100% - var(--rd-bar-h) / 2); transform: translate(-50%, -50%);
   max-width: 58%; pointer-events: none;
   color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
