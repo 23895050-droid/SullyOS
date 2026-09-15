@@ -68,6 +68,9 @@ export const READER_SKELETON_CSS = `
   --rd-r-lg: 18px;
   --rd-r-pill: 999px;
   --rd-radius-hl: 2px;
+  /* 波浪线用的正弦遮罩（16×6 一格，描边在竖直中间；颜色由 currentColor 铺，遮罩不带色） */
+  --rd-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='6'%3E%3Cpath d='M0 3.4 Q 4 0.2 8 3.4 T 16 3.4' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E");
+  --rd-wave-size: 16px 6px;
   --rd-space-1: 4px;
   --rd-space-2: 8px;
   --rd-space-3: 12px;
@@ -581,14 +584,19 @@ export const READER_SKELETON_CSS = `
    线条类的颜色走 currentColor（行内色），「一半」是一条 50% 的渐变，都在下面 */
 .rd-hl-rect-line { background: none; }
 .rd-hl-rect-underline { background: none; border-bottom: 2px solid currentColor; }
+/* 波浪线：两个斜渐变叠出来的「交叉网」是错的（看图一眼就看出来）。
+   改成一条正弦遮罩 + currentColor 铺色——遮罩本身不带颜色，颜色还是这一条的笔色 */
 .rd-hl-rect-wavy {
-  background: none;
-  background-image:
-    repeating-linear-gradient(-45deg, currentColor 0 1.4px, transparent 1.4px 3.6px),
-    repeating-linear-gradient(45deg, currentColor 0 1.4px, transparent 1.4px 3.6px);
-  background-size: 5.2px 5.2px;
-  background-position: bottom left;
-  background-repeat: repeat-x;
+  background-image: none;
+  background-color: currentColor;
+  -webkit-mask-image: var(--rd-wave);
+  mask-image: var(--rd-wave);
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+  -webkit-mask-position: bottom left;
+  mask-position: bottom left;
+  -webkit-mask-size: var(--rd-wave-size);
+  mask-size: var(--rd-wave-size);
 }
 .rd-hl-rect-tap { outline: 1px solid var(--rd-accent); outline-offset: 1px; }
 
@@ -637,12 +645,16 @@ export const READER_SKELETON_CSS = `
 }
 .rd-type-underline { border-bottom: 2px solid currentColor; }
 .rd-type-wavy {
-  background-image:
-    repeating-linear-gradient(-45deg, currentColor 0 1.4px, transparent 1.4px 3.6px),
-    repeating-linear-gradient(45deg, currentColor 0 1.4px, transparent 1.4px 3.6px);
-  background-size: 5.2px 5.2px;
-  background-position: bottom left;
-  background-repeat: repeat-x;
+  background-image: none;
+  background-color: currentColor;
+  -webkit-mask-image: var(--rd-wave);
+  mask-image: var(--rd-wave);
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+  -webkit-mask-position: bottom left;
+  mask-position: bottom left;
+  -webkit-mask-size: var(--rd-wave-size);
+  mask-size: var(--rd-wave-size);
 }
 .rd-type-half { background-image: linear-gradient(to bottom, transparent 50%, currentColor 50%); }
 .rd-type-full { background: currentColor; color: var(--rd-toolbar-bg); }
