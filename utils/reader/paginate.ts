@@ -53,8 +53,14 @@ function lineRects(node: Text, from: number, to: number): DOMRect[] {
     return Array.from(range.getClientRects());
 }
 
-/** 正文内容盒的左沿（= 第一列文字的左边）。流被 translateX 平移了也没关系——
- *  它和下面每个 rect 在同一个坐标系里，差值把平移抵消掉了。 */
+/** 正文内容盒的左上角（= 第一列文字的左边 / 流盒子的顶）。流被 translateX 平移了也没关系——
+ *  它和每个 rect 在同一个坐标系里，差值把平移抵消掉了。划线覆盖层的坐标就是按这个原点算的。 */
+export function flowOrigin(flowEl: HTMLElement): { x: number; y: number } {
+    const box = flowEl.getBoundingClientRect();
+    const pad = parseFloat(getComputedStyle(flowEl).paddingLeft) || 0;
+    return { x: box.left + pad, y: box.top };
+}
+
 function contentLeft(flowEl: HTMLElement): number {
     const box = flowEl.getBoundingClientRect();
     const pad = parseFloat(getComputedStyle(flowEl).paddingLeft) || 0;

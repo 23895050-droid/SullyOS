@@ -17,23 +17,46 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-    ArrowLeft, BookmarkSimple, CaretLeft, CaretRight, DotsThree, Lightbulb, ListBullets,
+    ArrowLeft, BookmarkSimple, CaretLeft, CaretRight, Copy, DotsThree, Lightbulb, ListBullets,
     MagnifyingGlass, TShirt, Trash, X,
 } from '@phosphor-icons/react';
 import {
     deleteAnnotation, getBook, getChapter, getProgress, listAnnotations, listChapters, putAnnotation,
-    putProgress, type RdAnnotation, type RdBook, type RdChapter, type RdProgress,
+    putProgress, type RdAnchor, type RdAnnotation, type RdBook, type RdChapter, type RdProgress,
 } from '../../utils/reader/readerDb';
 import ReaderCover from './ReaderCover';
 import {
-    columnCountOf, columnOfAnchor, slicesForColumn, type PageSlice,
+    columnCountOf, columnOfAnchor, flowOrigin, slicesForColumn, type PageSlice,
 } from '../../utils/reader/paginate';
 import {
     clearHuntHistory, DEFAULT_TYPOGRAPHY, pushHuntHistory, readingModeFor, removeHighlightColor,
     saveHighlightColor, setBookMode, setHighlightColor, setTheme, setTypography, useReaderPrefs,
 } from './readerPrefs';
-import { READER_SKINS } from './readerSkinPresets';
+import { hexTriple, READER_SKINS } from './readerSkinPresets';
 import { recordReading } from '../../utils/reader/readerStats';
+import { copyToClipboard } from '../../utils/clipboard';
+
+/** 正文里每个段落是一个 `[data-para-idx]` 的 <p>，里面只有一个文本节点——
+    选区/点击落点都能顺着它换回「段号 + 段内偏移」（我们的锚点只认这两个数）。 */
+function paraAt(flow: HTMLElement | null, node: Node | null): { el: HTMLElement; idx: number } | null {
+    let el: HTMLElement | null = node instanceof HTMLElement ? node : (node?.parentElement ?? null);
+    while (el && el.dataset.paraIdx === undefined) el = el.parentElement;
+    if (!el || !flow || !flow.contains(el)) return null;
+    return { el, idx: Number(el.dataset.paraIdx) };
+}
+
+/** 浏览器选区 → 我们的锚点（跨段也认：只记首尾两段 + 段内偏移）。 */
+function anchorFromRange(flow: HTMLElement, range: Range): RdAnchor | null {
+    const a = paraAt(flow, range.startContainer);
+    const b = paraAt(flow, range.endContainer);
+    if (!a || !b) return null;
+    const text = range.toString().replace(/\s+/g, ' ').trim();
+    if (!text) return null;
+    const [startPara, startOffset, endPara, endOffset] = a.idx < b.idx || (a.idx === b.idx && range.startOffset <= range.endOffset)
+        ? [a.idx, range.startOffset, b.idx, range.endOffset]
+        : [b.idx, range.endOffset, a.idx, range.startOffset];
+    return { startPara, startOffset, endPara, endOffset, text: text.slice(0, 200) };
+}
 
 const SAVE_DEBOUNCE = 900;
 /** 估「还要读多久」用的速度（字/秒）——按每分钟 400 字算 */
@@ -206,6 +229,17 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const [chromeOff, setChromeOff] = useState(false);
     /** 只为了让「阅读时长」每 20 秒自己走一格（值本身不用，读 Date.now 现算） */
     const [, setTick] = useState(0);
+    /** 选中文字后浮出来的小浮层（划线就在它上面挑颜色——她 09-15「调色板在何处」） */
+    const [sel, setSel] = useState<{ x: number; y: number; below: boolean; anchor: RdAnchor } | null>(null);
+    /** 小浮层的第二屏：现调一支颜色 */
+    const [selPalette, setSelPalette] = useState(false);
+    /** 点中的那条划线（改色 / 写批注 / 删掉） */
+    const [pickAnn, setPickAnn] = useState<RdAnnotation | null>(null);
+    const [pickAt, setPickAt] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+    const [pickPalette, setPickPalette] = useState(false);
+    const [noteDraft, setNoteDraft] = useState('');
+    /** 这一章里每条划线的行矩形（覆盖层就照这些矩形画） */
+    const [hlRects, setHlRects] = useState<Array<{ id: string; color: string; rects: Array<{ left: number; top: number; width: number; height: number }> }>>([]);
 
     const rootRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
@@ -586,6 +620,20 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         else setChapterIdx(ci);
     };
 
+    /** 这个点落在哪条划线上（用文本插入点反查段号+偏移，不做矩形命中） */
+    const hitAnnAt = useCallback((x: number, y: number): RdAnnotation | null => {
+        const flow = flowRef.current;
+        const caret = (document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null })
+            .caretRangeFromPoint?.(x, y);
+        if (!flow || !caret) return null;
+        const at = paraAt(flow, caret.startContainer);
+        if (!at) return null;
+        const off = caret.startOffset;
+        return anns.find((a) => (a.kind === 'highlight' || a.kind === 'note')
+            && (at.idx > a.anchor.startPara || (at.idx === a.anchor.startPara && off >= a.anchor.startOffset))
+            && (at.idx < a.anchor.endPara || (at.idx === a.anchor.endPara && off <= a.anchor.endOffset))) ?? null;
+    }, [anns]);
+
     /** 段号 → 第几章（老批注没记章节号，用书目里的段起点倒推） */
     const chapterOfPara = useCallback((para: number) => {
         const starts = book?.chapterStartPara ?? [];
@@ -605,6 +653,111 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const t = Math.max(0, Math.min(1, within));
         return Math.round((ci * span + t * span) * 10) / 10;
     }, [book]);
+
+    // ── 选中文字（正文的 user-select 在 readerCss 里放开）：松手浮出一排色卡 ──
+    useEffect(() => {
+        const onSelChange = () => {
+            const flow = flowRef.current;
+            const s = typeof window.getSelection === 'function' ? window.getSelection() : null;
+            if (!flow || !s || s.rangeCount === 0 || s.isCollapsed) { setSel(null); return; }
+            const range = s.getRangeAt(0);
+            if (!flow.contains(range.startContainer) || !flow.contains(range.endContainer)) { setSel(null); return; }
+            const anchor = anchorFromRange(flow, range);
+            if (!anchor) { setSel(null); return; }
+            const rect = range.getBoundingClientRect();
+            const vw = window.innerWidth;
+            const below = rect.top < 130;                      // 贴顶的选区：浮层翻到下面去
+            setSel({
+                x: Math.max(72, Math.min(vw - 72, rect.left + rect.width / 2)),
+                y: below ? rect.bottom + 10 : rect.top - 10,
+                below,
+                anchor,
+            });
+            setSelPalette(false);
+        };
+        document.addEventListener('selectionchange', onSelChange);
+        return () => document.removeEventListener('selectionchange', onSelChange);
+    }, [chapter]);
+
+    /** 划一条（颜色就是这一支） */
+    const makeHighlight = async (color: string) => {
+        if (!book || !sel) return;
+        const anchor = sel.anchor;
+        const now = new Date().toISOString();
+        await putAnnotation({
+            id: uid(), bookId, ownerId: 'user', anchor, kind: 'highlight',
+            styleSlot: 1, color, contentRev: book.contentRev, status: 'active',
+            chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount),
+            createdAt: now, updatedAt: now,
+        });
+        window.getSelection()?.removeAllRanges();
+        setSel(null);
+        setSelPalette(false);
+        await reloadAnns();
+        notify('划上了');
+    };
+
+    /** 点已有的划线：改色 / 写批注 / 删掉 */
+    const recolour = async (color: string) => {
+        if (!pickAnn) return;
+        await putAnnotation({ ...pickAnn, color, updatedAt: new Date().toISOString() });
+        setPickAnn(null);
+        setPickPalette(false);
+        await reloadAnns();
+    };
+
+    const saveNote = async () => {
+        if (!pickAnn) return;
+        const note = noteDraft.trim();
+        await putAnnotation({
+            ...pickAnn,
+            note: note || undefined,
+            kind: note ? 'note' : 'highlight',
+            updatedAt: new Date().toISOString(),
+        });
+        setPickAnn(null);
+        setPickPalette(false);
+        await reloadAnns();
+        notify(note ? '批注写上了' : '批注清掉了');
+    };
+
+    const dropAnn = async () => {
+        if (!pickAnn) return;
+        await deleteAnnotation(pickAnn.id);
+        setPickAnn(null);
+        setPickPalette(false);
+        await reloadAnns();
+        notify('这条划线删了');
+    };
+
+    // ── 划线覆盖层：按行矩形画（不包 <mark>，锚点就不会漂） ──
+    useLayoutEffect(() => {
+        const flow = flowRef.current;
+        const marks = anns.filter((a) => (a.kind === 'highlight' || a.kind === 'note') && a.anchor.startPara < Number.MAX_SAFE_INTEGER);
+        if (!flow || marks.length === 0) { setHlRects([]); return; }
+        const origin = flowOrigin(flow);
+        const out: Array<{ id: string; color: string; rects: Array<{ left: number; top: number; width: number; height: number }> }> = [];
+        for (const a of marks) {
+            const rects: Array<{ left: number; top: number; width: number; height: number }> = [];
+            for (let pi = a.anchor.startPara; pi <= a.anchor.endPara; pi++) {
+                const el = flow.querySelector<HTMLElement>(`[data-para-idx="${pi}"]`);
+                const node = el?.firstChild;
+                if (!node || node.nodeType !== Node.TEXT_NODE) continue;
+                const data = (node as Text).data;
+                const from = pi === a.anchor.startPara ? Math.min(a.anchor.startOffset, data.length) : 0;
+                const to = pi === a.anchor.endPara ? Math.min(a.anchor.endOffset, data.length) : data.length;
+                if (to <= from) continue;
+                const range = document.createRange();
+                range.setStart(node, from);
+                range.setEnd(node, to);
+                for (const r of Array.from(range.getClientRects())) {
+                    rects.push({ left: r.left - origin.x, top: r.top - origin.y, width: r.width, height: r.height });
+                }
+            }
+            if (rects.length > 0) out.push({ id: a.id, color: a.color || prefs.highlightColor, rects });
+        }
+        setHlRects(out);
+    }, [anns, chapter, step, layoutNonce, prefs.highlightColor]);
 
     // ── 书签：夹在当前这一页上，再点一次拿掉（参考图：夹上了右上角挂条红丝带） ──
     const markHere = useMemo(() => {
@@ -740,6 +893,18 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 onClick={(e) => {
                     // 选字那一下松手后浏览器会补一次点击：那不是在翻页
                     if (suppressTapRef.current) { suppressTapRef.current = false; return; }
+                    // 点在一条划线上：开它的浮层（改色 / 写批注 / 删），不翻页
+                    const hit = hitAnnAt(e.clientX, e.clientY);
+                    if (hit) {
+                        setPanel(null);
+                        setSel(null);
+                        setNoteDraft(hit.note ?? '');
+                        setPickPalette(false);
+                        setPickAt({ x: Math.max(96, Math.min(window.innerWidth - 96, e.clientX)), y: Math.max(140, e.clientY - 12) });
+                        setPickAnn(hit);
+                        return;
+                    }
+                    setPickAnn(null);
                     const rect = e.currentTarget.getBoundingClientRect();
                     const ratio = (e.clientX - rect.left) / rect.width;
                     if (ratio < 0.3) { setPanel(null); goPage(-1); }
@@ -768,6 +933,18 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                             {chapter?.paras.map((p, i) => (
                                 <p className="rd-para" key={i} data-para-idx={i}>{p}</p>
                             ))}
+                        </div>
+                        <div className="rd-hl-layer" aria-hidden>
+                            {hlRects.map((h) => h.rects.map((r, i) => (
+                                <div
+                                    key={`${h.id}-${i}`}
+                                    className={`rd-hl-rect${pickAnn?.id === h.id ? ' rd-hl-rect-tap' : ''}`}
+                                    style={{
+                                        left: r.left, top: r.top, width: r.width, height: r.height,
+                                        background: `rgba(${hexTriple(h.color)}, 0.32)`,
+                                    }}
+                                />
+                            )))}
                         </div>
                     </div>
                 </div>
@@ -1157,6 +1334,110 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         <div className="rd-muted" style={{ marginTop: 'var(--rd-space-4)' }}>
                             当前第 {pageIdx + 1} / {pageCount} 页 · 全书 {percent}%
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 选中文字：就在这儿挑颜色（她 09-15「调色板在何处」） ── */}
+            {sel && (
+                <div
+                    className="rd-selpop"
+                    data-rd-page="selpop"
+                    style={{
+                        left: sel.x, top: sel.y,
+                        transform: sel.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                >
+                    <div className="rd-selpop-quote">{sel.anchor.text.slice(0, 42)}</div>
+                    {!selPalette ? (
+                        <>
+                            <div className="rd-selpop-row">
+                                <div className="rd-hunt-hist">
+                                    {prefs.highlightPalette.map((c) => (
+                                        <button
+                                            key={c}
+                                            aria-label={c}
+                                            className={`rd-swatch${prefs.highlightColor === c ? ' rd-swatch-on' : ''}`}
+                                            style={{ background: c }}
+                                            onClick={() => void makeHighlight(c)}
+                                        />
+                                    ))}
+                                </div>
+                                <button className="rd-selpop-btn" onClick={() => setSelPalette(true)}>调色盘</button>
+                            </div>
+                            <div className="rd-selpop-row">
+                                <button className="rd-selpop-btn" onClick={() => void copyToClipboard(sel.anchor.text)}>
+                                    <Copy size={13} />复制
+                                </button>
+                                <span className="rd-selpop-hint">点一支就划上</span>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="rd-selpop-row">
+                                <span className="rd-hl-preview" style={{ background: hslHex(hue, 0.75, lum) }} />
+                                <button className="rd-selpop-btn" onClick={() => void makeHighlight(hslHex(hue, 0.75, lum))}>就用这支划</button>
+                                <button className="rd-selpop-btn" onClick={() => saveHighlightColor(hslHex(hue, 0.75, lum))}>存进我的笔</button>
+                            </div>
+                            <input
+                                className="rd-slider rd-slider-hue"
+                                type="range" min={0} max={360} step={1} value={hue}
+                                onChange={(e) => setHue(Number(e.target.value))}
+                                style={{ background: HUE_STRIP }}
+                            />
+                            <input
+                                className="rd-slider"
+                                type="range" min={20} max={90} step={1} value={Math.round(lum * 100)}
+                                onChange={(e) => setLum(Number(e.target.value) / 100)}
+                            />
+                        </>
+                    )}
+                </div>
+            )}
+
+            {/* ── 点中一条划线：改色 / 写批注 / 删掉 ── */}
+            {pickAnn && (
+                <div
+                    className="rd-selpop"
+                    data-rd-page="annpop"
+                    style={{ left: pickAt.x, top: pickAt.y, transform: 'translate(-50%, -100%)' }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                >
+                    <div className="rd-selpop-quote">{pickAnn.anchor.text.slice(0, 42)}</div>
+                    <div className="rd-selpop-row">
+                        <div className="rd-hunt-hist">
+                            {prefs.highlightPalette.map((c) => (
+                                <button
+                                    key={c}
+                                    aria-label={c}
+                                    className={`rd-swatch${(pickAnn.color || prefs.highlightColor) === c ? ' rd-swatch-on' : ''}`}
+                                    style={{ background: c }}
+                                    onClick={() => void recolour(c)}
+                                />
+                            ))}
+                        </div>
+                        <button className="rd-selpop-btn" onClick={() => setPickPalette((v) => !v)}>调色盘</button>
+                    </div>
+                    {pickPalette && (
+                        <div className="rd-selpop-row">
+                            <span className="rd-hl-preview" style={{ background: hslHex(hue, 0.75, lum) }} />
+                            <button className="rd-selpop-btn" onClick={() => void recolour(hslHex(hue, 0.75, lum))}>换这支</button>
+                            <button className="rd-selpop-btn" onClick={() => saveHighlightColor(hslHex(hue, 0.75, lum))}>存进我的笔</button>
+                        </div>
+                    )}
+                    <div className="rd-selpop-row">
+                        <input
+                            className="rd-field"
+                            style={{ minHeight: 0, padding: '6px 10px', flex: '1 1 auto' }}
+                            placeholder="写句批注…"
+                            value={noteDraft}
+                            onChange={(e) => setNoteDraft(e.target.value)}
+                        />
+                        <button className="rd-selpop-btn" onClick={() => void saveNote()}>记下</button>
+                        <button className="rd-selpop-btn rd-selpop-btn-danger" onClick={() => void dropAnn()}>删掉</button>
                     </div>
                 </div>
             )}

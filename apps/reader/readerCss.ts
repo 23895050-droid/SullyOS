@@ -581,6 +581,7 @@ export const READER_SKELETON_CSS = `
 .rd-selpop {
   position: fixed; z-index: 60; transform: translate(-50%, -100%);
   display: flex; flex-direction: column; gap: var(--rd-space-2);
+  max-width: min(320px, 92vw);
   padding: var(--rd-space-3); border: 1px solid var(--rd-rule); border-radius: var(--rd-r-lg);
   background: var(--rd-sheet-bg); box-shadow: var(--rd-shadow);
 }
@@ -591,9 +592,10 @@ export const READER_SKELETON_CSS = `
 }
 .rd-selpop-hint { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
 .rd-selpop-btn {
-  display: inline-flex; align-items: center; gap: 4px; border: 0;
+  display: inline-flex; align-items: center; gap: 4px; border: 0; flex: 0 0 auto;
   padding: var(--rd-space-1) var(--rd-space-3); border-radius: var(--rd-r-pill);
   background: var(--rd-chip-bg); color: var(--rd-ink); font-size: var(--rd-fs-sm);
+  white-space: nowrap;
 }
 .rd-selpop-btn-danger { color: var(--rd-danger); }
 
