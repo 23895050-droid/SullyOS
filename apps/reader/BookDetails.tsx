@@ -318,7 +318,7 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                                 <span className="rd-item-chev">›</span>
                             </button>
                             <button className="rd-item" onClick={() => setSheet('hl')}>
-                                <span className="rd-item-label">我的划线颜色</span>
+                                <span className="rd-item-label">划线设置</span>
                                 <span className="rd-item-value">{highlightColorOf(prefs, 'user')}</span>
                                 <span className="rd-item-chev">›</span>
                             </button>

@@ -235,8 +235,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
      * 两种情况共用这一条：选中一段话（划线/复制/写想法）、点中已有的划线（写想法/删掉）。
      */
     const [bar, setBar] = useState<{ x: number; y: number; text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
-    /** 工具栏右边那颗 › 展开的附加项 */
-    const [barMore, setBarMore] = useState(false);
     /** 工具栏换成写想法那一屏 */
     const [barNote, setBarNote] = useState(false);
     const [noteDraft, setNoteDraft] = useState('');
@@ -697,7 +695,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 rects: Array.from(range.getClientRects()).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom })),
             };
             setBar(null);
-            setBarMore(false);
         };
         document.addEventListener('selectionchange', onSelChange);
         return () => document.removeEventListener('selectionchange', onSelChange);
@@ -878,7 +875,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         { key: 'share', label: '分享', on: false, run: () => notify('转发卡片在第三批，先欠着') },
         { key: 'detail', label: '书本详情', on: true, run: () => { setSheet(null); onOpenDetails(bookId); } },
         { key: 'book', label: '总结设置', on: true, run: () => setSheet('book') },
-        { key: 'hl', label: '我的划线颜色', on: true, run: () => setSheet('hl') },
+        { key: 'hl', label: '划线设置', on: true, run: () => setSheet('hl') },
         { key: 'style', label: '排版设置', on: true, run: () => { setSheet(null); setPanel('style'); } },
         { key: 'theme', label: '背景主题', on: true, run: () => { setSheet(null); setPanel('theme'); } },
     ], [notify, onOpenDetails, onOpenStats, bookId]);
@@ -940,7 +937,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         && e.clientY >= r.t - 8 && e.clientY <= r.b + 8)) {
                         setPanel(null);
                         setNoteDraft('');
-                        setBarMore(false);
                         setBarNote(false);
                         setBar({ ...barAt(cached.rects), text: cached.anchor.text, anchor: cached.anchor });
                         return;
@@ -950,7 +946,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     if (hit) {
                         setPanel(null);
                         setNoteDraft(hit.note ?? '');
-                        setBarMore(false);
                         setBarNote(false);
                         const rects = hitRectsOf(hit);
                         const at = rects.length > 0 ? barAt(rects) : { x: Math.max(120, Math.min(window.innerWidth - 120, e.clientX)), y: Math.max(140, e.clientY - 12) };
@@ -1324,7 +1319,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-            {/* ── 我的划线颜色：跟书详情、设置页共用同一张弹卡 ── */}
+            {/* ── 划线设置：跟书详情、设置页共用同一张弹卡 ── */}
             {sheet === 'hl' && <HighlightColorSheet onClose={() => setSheet(null)} />}
 
             {/* ── 更多（参考图里那排胶囊） ── */}
@@ -1353,7 +1348,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
 
             {/* ── 悬浮工具栏（她 2026-09-15 的参考图）：选中后点那句话出它，
                 不在选中那一刻自己弹（会被 iOS 原生选区菜单挡住）。**不放色卡**——
-                笔的颜色去「更多 → 我的划线颜色」或者设置里改。 ── */}
+                笔的颜色去「更多 → 划线设置」改。 ── */}
             {bar && (
                 <div
                     className="rd-bar-tb"
@@ -1377,6 +1372,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         </div>
                     ) : (
                         <>
+                            {/* 六项一次出全（她 2026-09-15：别「先三个、点箭头再出三个」，
+                                留六个那一版就行）。选区上多一个「划线」，已有划线上多一个「删掉」。 */}
                             <button className="rd-bar-tb-item" onClick={() => void copyToClipboard(bar.text)}>
                                 <Copy size={17} weight="bold" /><span>复制</span>
                             </button>
@@ -1388,31 +1385,20 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                             <button className="rd-bar-tb-item" onClick={() => { setBarNote(true); setNoteDraft(bar.ann?.note ?? ''); }}>
                                 <PencilSimple size={17} weight="bold" /><span>{bar.ann?.note ? '改想法' : '写想法'}</span>
                             </button>
-                            {barMore && (
-                                <>
-                                    <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
-                                        <ShareNetwork size={17} weight="bold" /><span>分享书摘</span>
-                                    </button>
-                                    <button className="rd-bar-tb-item" onClick={() => notify('AI 问书在第二批')}>
-                                        <ChatCircleDots size={17} weight="bold" /><span>AI 问书</span>
-                                    </button>
-                                    <button className="rd-bar-tb-item" onClick={() => { setSheet('hl'); setBar(null); }}>
-                                        <Palette size={17} weight="bold" /><span>我的颜色</span>
-                                    </button>
-                                </>
-                            )}
+                            <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
+                                <ShareNetwork size={17} weight="bold" /><span>分享书摘</span>
+                            </button>
+                            <button className="rd-bar-tb-item" onClick={() => notify('讨论（不是问答）在下一批')}>
+                                <ChatCircleDots size={17} weight="bold" /><span>讨论</span>
+                            </button>
+                            <button className="rd-bar-tb-item" onClick={() => { setSheet('hl'); setBar(null); }}>
+                                <Palette size={17} weight="bold" /><span>划线设置</span>
+                            </button>
                             {bar.ann && (
                                 <button className="rd-bar-tb-item" onClick={() => void dropAnn()}>
                                     <Trash size={16} weight="bold" /><span>删掉</span>
                                 </button>
                             )}
-                            <button
-                                className="rd-bar-tb-item rd-bar-tb-arrow"
-                                aria-label="更多"
-                                onClick={() => setBarMore((v) => !v)}
-                            >
-                                <CaretRight size={16} weight="bold" />
-                            </button>
                         </>
                     )}
                 </div>

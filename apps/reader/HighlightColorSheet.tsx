@@ -1,10 +1,11 @@
-// 读书模块 · 「我的划线颜色」（2026-09-15）
+// 读书模块 · 划线设置（2026-09-15）
 //
 // 她那天说的是两件事：① 别在选中文字的浮层里摆一排色卡（「跟眼影盘一样」）——
 // 划线颜色去设置里改；② 划线颜色**四处都没打通**。
 //
 // 所以这里就是**唯一那一个**改颜色的地方，三处入口共用同一个弹卡：
-//   阅读页「更多 → 我的划线颜色」/ 书详情「划线颜色」/ 设置页「阅读设置 → 我的划线颜色」
+//   阅读页「更多 → 划线设置」/ 书详情「划线设置」/ 设置页「阅读设置 → 划线设置」
+// 名字一律叫「划线设置」（她 2026-09-15：「我的颜色是啥，划线设置就叫划线设置」）。
 //
 // 颜色模型也跟着收敛成一条：**谁划的 → 用谁那支笔**（prefs.highlightColors[ownerId]）。
 // 这个弹卡改的是她自己那支（'user'）；角色各自的笔等书库页做（那页会全改一遍）。
@@ -39,7 +40,7 @@ export default function HighlightColorSheet({ onClose }: { onClose: () => void }
         <div className="rd-sheet-mask" onClick={onClose}>
             <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
                 <div className="rd-sheet-grip" />
-                <div className="rd-sheet-title">我的划线颜色</div>
+                <div className="rd-sheet-title">划线设置</div>
 
                 <div className="rd-row">
                     <span className="rd-row-label">现在这支</span>

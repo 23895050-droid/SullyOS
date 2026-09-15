@@ -176,7 +176,7 @@ export default function ReaderSettings() {
                             onToggle={() => setTheme(night ? 'paper' : 'night')}
                         />
                         <Row
-                            label="我的划线颜色"
+                            label="划线设置"
                             value={highlightColorOf(prefs, 'user')}
                             onClick={() => setSheet('hl')}
                         />
@@ -204,7 +204,7 @@ export default function ReaderSettings() {
                 <div className="rd-list">
                     <Row label="阅读设置" value="字号 · 行距 · 边距" onClick={() => setPage('read')} icon={ico(1, <BookOpen size={16} weight="bold" />)} />
                     <Row label="外观设置" value="皮肤 · 书架版式" onClick={() => setPage('look')} icon={ico(2, <PaintBrush size={16} weight="bold" />)} />
-                    <Row label="我的划线颜色" value={highlightColorOf(prefs, 'user')} onClick={() => setSheet('hl')} icon={ico(3, <Pen size={16} weight="bold" />)} />
+                    <Row label="划线设置" value={highlightColorOf(prefs, 'user')} onClick={() => setSheet('hl')} icon={ico(3, <Pen size={16} weight="bold" />)} />
                     <Row label="自定义 CSS" value={prefs.cssGlobal ? '已写' : '没写'} onClick={() => setSheet('css')} icon={ico(4, <Code size={16} weight="bold" />)} />
                 </div>
             </div>
