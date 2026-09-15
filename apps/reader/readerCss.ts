@@ -577,29 +577,85 @@ export const READER_SKELETON_CSS = `
 }
 /* 兜底色是「现在这支笔」；每条划线自己的颜色由行内样式压上来（她：颜色要能一笔一笔挑） */
 .rd-hl-rect { position: absolute; border-radius: var(--rd-radius-hl); background: rgba(var(--rd-hl-rgb), 0.32); }
+/* 线条类型（她点的四种：下划线 / 波浪线 / 一半 / 完整）。
+   线条类的颜色走 currentColor（行内色），「一半」是一条 50% 的渐变，都在下面 */
+.rd-hl-rect-line { background: none; }
+.rd-hl-rect-underline { background: none; border-bottom: 2px solid currentColor; }
+.rd-hl-rect-wavy {
+  background: none;
+  background-image:
+    repeating-linear-gradient(-45deg, currentColor 0 1.4px, transparent 1.4px 3.6px),
+    repeating-linear-gradient(45deg, currentColor 0 1.4px, transparent 1.4px 3.6px);
+  background-size: 5.2px 5.2px;
+  background-position: bottom left;
+  background-repeat: repeat-x;
+}
 .rd-hl-rect-tap { outline: 1px solid var(--rd-accent); outline-offset: 1px; }
 
-.rd-edit-bar {
+/* ── 点中一条划线的工具条（她 09-16：回到深色六图标那版；「我的颜色」那格换成划线图标，
+   点它展开一条颜色排——改的是**这一条**的颜色，跟 Edit Note 那张参考图一个意思） ── */
+.rd-bar-wrap {
   position: fixed; z-index: 62; transform: translate(-50%, -100%);
-  min-width: 268px; padding: var(--rd-space-2);
-  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-md);
-  background: var(--rd-card); color: var(--rd-ink);
+  display: flex; flex-direction: column; align-items: center; gap: var(--rd-space-2);
+}
+.rd-bar-tb {
+  position: relative; display: flex; align-items: stretch; gap: 2px;
+  padding: var(--rd-space-2);
+  border-radius: var(--rd-r-md);
+  background: var(--rd-toolbar-bg); color: var(--rd-toolbar-ink);
   box-shadow: var(--rd-shadow);
 }
-.rd-edit-colors { display: flex; align-items: center; gap: var(--rd-space-2); padding: var(--rd-space-1) var(--rd-space-2) var(--rd-space-2); }
-.rd-edit-dot { width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: var(--rd-r-pill); }
-.rd-edit-dot-on { outline: 2px solid var(--rd-accent); outline-offset: 2px; }
-.rd-edit-more { margin-left: auto; border: 0; background: transparent; color: var(--rd-accent); white-space: nowrap; font-family: var(--rd-font-body); font-size: var(--rd-fs-sm); }
-.rd-edit-acts { display: flex; align-items: stretch; justify-content: space-between; gap: 2px; border-top: 1px solid var(--rd-rule); padding-top: var(--rd-space-2); }
-.rd-edit-act {
-  display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1 1 0; min-width: 48px;
-  border: 0; background: transparent; color: var(--rd-ink); white-space: nowrap;
+/* 底下那个小三角：指着被点中的那條线 */
+.rd-bar-tb::after {
+  content: ''; position: absolute; left: 50%; bottom: -5px; width: 12px; height: 12px;
+  margin-left: -6px; border-radius: var(--rd-radius-hl); transform: rotate(45deg);
+  background: var(--rd-toolbar-bg);
+}
+.rd-bar-tb-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-width: 54px; padding: var(--rd-space-2) 2px;
+  border: 0; background: transparent; color: inherit; white-space: nowrap;
   font-family: var(--rd-font-body); font-size: var(--rd-fs-tab);
 }
-.rd-edit-act:active { opacity: 0.6; }
-.rd-edit-act-danger { color: var(--rd-danger); }
+.rd-bar-tb-item:active { opacity: 0.6; }
+/* 颜色排 + 线条类型（点划线图标展开的那一条）：左边三个 A 是画法，右边是颜色 */
+.rd-bar-tb-styles {
+  display: flex; align-items: center; gap: var(--rd-space-1);
+  border-right: 1px solid var(--rd-toolbar-ink); padding-right: var(--rd-space-3);
+}
+.rd-bar-tb-type {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; flex: 0 0 auto;
+  border: 0; border-radius: var(--rd-r-sm);
+  background: transparent; color: var(--rd-toolbar-ink);
+}
+/* 那四个 A：下划线 / 波浪线 / 一半（下半块填色）/ 完整（整块填色） */
+.rd-type-glyph {
+  display: flex; align-items: flex-end; justify-content: center;
+  width: 20px; height: 20px; border-radius: var(--rd-r-sm);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm); font-weight: 600; line-height: 1.1;
+}
+.rd-type-underline { border-bottom: 2px solid currentColor; }
+.rd-type-wavy {
+  background-image:
+    repeating-linear-gradient(-45deg, currentColor 0 1.4px, transparent 1.4px 3.6px),
+    repeating-linear-gradient(45deg, currentColor 0 1.4px, transparent 1.4px 3.6px);
+  background-size: 5.2px 5.2px;
+  background-position: bottom left;
+  background-repeat: repeat-x;
+}
+.rd-type-half { background-image: linear-gradient(to bottom, transparent 50%, currentColor 50%); }
+.rd-type-full { background: currentColor; color: var(--rd-toolbar-bg); }
+.rd-bar-tb-type-on { background: var(--rd-toolbar-ink); color: var(--rd-toolbar-bg); }
+.rd-bar-tb-colors {
+  display: flex; align-items: center; gap: var(--rd-space-3);
+  padding: var(--rd-space-2) var(--rd-space-3);
+  border-radius: var(--rd-r-pill);
+  background: var(--rd-toolbar-bg); box-shadow: var(--rd-shadow);
+}
+.rd-bar-tb-dot { width: 24px; height: 24px; flex: 0 0 auto; border: 0; border-radius: var(--rd-r-pill); }
+.rd-bar-tb-dot-on { outline: 2px solid var(--rd-toolbar-ink); outline-offset: 2px; }
 
-/* ── 笔记面板（照她给的 Edit Note 参考图）：取消 / 笔记 / 存下 + 引文 + 文本框 ── */
 .rd-notepanel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
   display: flex; flex-direction: column; gap: var(--rd-space-3);

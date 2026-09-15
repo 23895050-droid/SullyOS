@@ -121,6 +121,9 @@ export interface RdChapter {
 
 export type RdAnnotationKind = 'highlight' | 'note' | 'bookmark';
 
+/** 划线的画法（她 09-16 点名四种：下划线 / 波浪线 / 一半 / 完整） */
+export type RdAnnotationStyle = 'underline' | 'wavy' | 'half' | 'full';
+
 export interface RdAnnotation {
     id: string;
     bookId: string;
@@ -131,6 +134,8 @@ export interface RdAnnotation {
     styleSlot: number;
     /** 这一条单独改过的颜色（划线编辑里改的）。没有就用「谁划的」那支笔（prefs.highlightColors） */
     color?: string;
+    /** 线条类型：下划线 / 波浪线 / 一半 / 完整（缺省 = 完整，就是普通的划色块） */
+    style?: RdAnnotationStyle;
     /** kind==='note' 时的批注文本 */
     note?: string;
     /** 锚点所属文本版本（= 导入时写入的 book.contentRev） */

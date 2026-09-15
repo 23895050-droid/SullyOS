@@ -21,6 +21,7 @@ import {
     Lightbulb, ListBullets, MagnifyingGlass, Palette, PencilSimple, ShareNetwork, TShirt, Trash, X,
 } from '@phosphor-icons/react';
 import { isImagePara } from '../../utils/reader/importEpub';
+import type { RdAnnotationStyle } from '../../utils/reader/readerDb';
 import {
     deleteAnnotation, getBook, getChapter, getProgress, listAnnotations, listChapters, putAnnotation,
     putProgress, type RdAnchor, type RdAnnotation, type RdBook, type RdChapter, type RdProgress,
@@ -242,13 +243,15 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
      * 两种情况共用这一条：选中一段话（划线/复制/写想法）、点中已有的划线（写想法/删掉）。
      */
     const [bar, setBar] = useState<{ x: number; y: number; text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
+    /** 工具条上那条颜色排展开着没有（点划线图标切换） */
+    const [barColors, setBarColors] = useState(false);
     /** 笔记面板开着没有（照 #24：取消 / 笔记 / 存下 + 引文 + 文本框） */
     const [noteOpen, setNoteOpen] = useState(false);
     /** 这条笔记写在哪儿：已有划线（ann）或刚选中的一段话 */
     const [noteTarget, setNoteTarget] = useState<{ text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
     const [noteDraft, setNoteDraft] = useState('');
     /** 这一章里每条划线的行矩形（覆盖层就照这些矩形画） */
-    const [hlRects, setHlRects] = useState<Array<{ id: string; color: string; rects: Array<{ left: number; top: number; width: number; height: number }> }>>([]);
+    const [hlRects, setHlRects] = useState<Array<{ id: string; color: string; style: string; rects: Array<{ left: number; top: number; width: number; height: number }> }>>([]);
 
     const rootRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
@@ -747,13 +750,14 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         };
     };
 
-    /** 划线编辑里改这一条的颜色（单条覆盖；没改过的还是 owner 那支笔） */
-    const recolourAnn = async (hex: string) => {
+    /** 划线编辑里改这一条（颜色 / 线条类型都走它；没改过的还是 owner 那支笔） */
+    const editAnn = async (patch: { color?: string; style?: RdAnnotationStyle }) => {
         if (!bar?.ann) return;
-        await putAnnotation({ ...bar.ann, color: hex, updatedAt: new Date().toISOString() });
+        await putAnnotation({ ...bar.ann, ...patch, updatedAt: new Date().toISOString() });
         await reloadAnns();
-        setBar({ ...bar, ann: { ...bar.ann, color: hex } });
+        setBar({ ...bar, ann: { ...bar.ann, ...patch } });
     };
+    const recolourAnn = (hex: string) => void editAnn({ color: hex });
 
     /** 写想法（划线上的批注：已有的那条改文本，选区的当场划一条再写） */
     const saveNote = async () => {
@@ -805,7 +809,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const marks = anns.filter((a) => (a.kind === 'highlight' || a.kind === 'note') && a.anchor.startPara < Number.MAX_SAFE_INTEGER);
         if (!flow || marks.length === 0) { setHlRects([]); return; }
         const origin = flowOrigin(flow);
-        const out: Array<{ id: string; color: string; rects: Array<{ left: number; top: number; width: number; height: number }> }> = [];
+        const out: Array<{ id: string; color: string; style: string; rects: Array<{ left: number; top: number; width: number; height: number }> }> = [];
         for (const a of marks) {
             const rects: Array<{ left: number; top: number; width: number; height: number }> = [];
             for (let pi = a.anchor.startPara; pi <= a.anchor.endPara; pi++) {
@@ -823,7 +827,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     rects.push({ left: r.left - origin.x, top: r.top - origin.y, width: r.width, height: r.height });
                 }
             }
-            if (rects.length > 0) out.push({ id: a.id, color: a.color ?? highlightColorOf(prefs, a.ownerId), rects });
+            if (rects.length > 0) out.push({ id: a.id, color: a.color ?? highlightColorOf(prefs, a.ownerId), style: a.style ?? 'full', rects });
         }
         setHlRects(out);
     }, [anns, chapter, step, layoutNonce, prefs.highlightColors]);
@@ -972,6 +976,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         const rects = hitRectsOf(hit);
                         const at = rects.length > 0 ? barAt(rects) : { x: Math.max(120, Math.min(window.innerWidth - 120, e.clientX)), y: Math.max(140, e.clientY - 12) };
                         setBar({ ...at, text: hit.anchor.text, anchor: hit.anchor, ann: hit });
+                        setBarColors(false);
                         return;
                     }
                     setBar(null);
@@ -1010,10 +1015,15 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                             {hlRects.map((h) => h.rects.map((r, i) => (
                                 <div
                                     key={`${h.id}-${i}`}
-                                    className={`rd-hl-rect${bar?.ann?.id === h.id ? ' rd-hl-rect-tap' : ''}`}
+                                    className={`rd-hl-rect${h.style === 'full' ? '' : ` rd-hl-rect-line rd-hl-rect-${h.style}`}${bar?.ann?.id === h.id ? ' rd-hl-rect-tap' : ''}`}
                                     style={{
                                         left: r.left, top: r.top, width: r.width, height: r.height,
-                                        background: `rgba(${hexTriple(h.color)}, 0.32)`,
+                                        color: h.color,
+                                        background: h.style === 'full'
+                                            ? `rgba(${hexTriple(h.color)}, 0.32)`
+                                            : (h.style === 'half'
+                                                ? `linear-gradient(to bottom, transparent 50%, rgba(${hexTriple(h.color)}, 0.32) 50%)`
+                                                : undefined),
                                     }}
                                 />
                             )))}
@@ -1367,52 +1377,70 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-                        {/* ── 点中一条已有的划线：**划线编辑**（照她给的参考图：上面一排颜色改这一条，
-                下面一排操作）。颜色改的是**这一条**（没改过的还是「谁划的」那支笔）。 ── */}
+                        {/* ── 点中一条划线的工具条（照 #27/#28：深色六格）。
+                「我的颜色」那格换成**划线图标**——点开是这个样子的颜色排（#29），
+                改的是**这一条**的颜色；不自带眼影盘，一眼就看得出它管什么。 ── */}
             {bar?.ann && (
                 <div
-                    className="rd-edit-bar"
+                    className="rd-bar-wrap"
                     data-rd-page="annedit"
                     style={{ left: bar.x, top: bar.y }}
                     onMouseDown={(e) => e.preventDefault()}
                     onTouchStart={(e) => e.stopPropagation()}
                 >
-                    <div className="rd-edit-colors">
-                        {prefs.highlightPalette.map((c) => (
-                            <button
-                                key={c}
-                                aria-label={c}
-                                className={`rd-edit-dot${(bar.ann!.color ?? highlightColorOf(prefs, 'user')) === c ? ' rd-edit-dot-on' : ''}`}
-                                style={{ background: c }}
-                                onClick={() => void recolourAnn(c)}
-                            />
-                        ))}
-                        <button className="rd-edit-more" onClick={() => { setSheet('hl'); setBar(null); }}>划线设置</button>
-                    </div>
-                    <div className="rd-edit-acts">
-                        <button className="rd-edit-act" onClick={() => void copyToClipboard(bar.text)}>
-                            <Copy size={17} weight="bold" /><span>复制</span>
+                    {barColors && (
+                        <div className="rd-bar-tb-colors">
+                            {/* 线条类型（她点的四种，顺序照她的参考图）：下划线 / 波浪线 / 一半 / 完整 */}
+                            <div className="rd-bar-tb-styles">
+                                {([['underline', '下划线'], ['wavy', '波浪线'], ['half', '一半'], ['full', '完整']] as Array<[RdAnnotationStyle, string]>).map(([k, label]) => (
+                                    <button
+                                        key={k}
+                                        aria-label={label}
+                                        className={`rd-bar-tb-type${(bar.ann!.style ?? 'full') === k ? ' rd-bar-tb-type-on' : ''}`}
+                                        onClick={() => void editAnn({ style: k })}
+                                    >
+                                        <span className={`rd-type-glyph rd-type-${k}`}>A</span>
+                                    </button>
+                                ))}
+                            </div>
+                            {prefs.highlightPalette.map((c) => (
+                                <button
+                                    key={c}
+                                    aria-label={c}
+                                    className={`rd-bar-tb-dot${(bar.ann!.color ?? highlightColorOf(prefs, 'user')) === c ? ' rd-bar-tb-dot-on' : ''}`}
+                                    style={{ background: c }}
+                                    onClick={() => void recolourAnn(c)}
+                                />
+                            ))}
+                        </div>
+                    )}
+                    <div className="rd-bar-tb">
+                        <button className="rd-bar-tb-item" onClick={() => void copyToClipboard(bar.text)}>
+                            <Copy size={18} weight="bold" /><span>复制</span>
                         </button>
-                        <button className="rd-edit-act" onClick={() => openNote({ text: bar.text, anchor: bar.anchor, ann: bar.ann })}>
-                            <PencilSimple size={17} weight="bold" /><span>{bar.ann.note ? '改笔记' : '笔记'}</span>
+                        <button className="rd-bar-tb-item" onClick={() => openNote({ text: bar.text, anchor: bar.anchor, ann: bar.ann })}>
+                            <PencilSimple size={18} weight="bold" /><span>{bar.ann.note ? '改想法' : '写想法'}</span>
+                        </button>
+                        <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
+                            <ShareNetwork size={18} weight="bold" /><span>分享书摘</span>
+                        </button>
+                        <button className="rd-bar-tb-item" onClick={() => notify('讨论（不是问答）在下一批')}>
+                            <ChatCircleDots size={18} weight="bold" /><span>讨论</span>
                         </button>
                         <button
-                            className="rd-edit-act"
-                            onClick={() => { setSheet('hunt'); setHuntWord(bar.text.slice(0, 12)); setHunt(null); setBar(null); }}
+                            className="rd-bar-tb-item"
+                            aria-label="划线颜色"
+                            onClick={() => setBarColors((v) => !v)}
                         >
-                            <MagnifyingGlass size={17} weight="bold" /><span>搜索</span>
+                            <Highlighter size={18} weight="bold" /><span>划线</span>
                         </button>
-                        <button className="rd-edit-act" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
-                            <ShareNetwork size={17} weight="bold" /><span>分享</span>
-                        </button>
-                        <button className="rd-edit-act rd-edit-act-danger" onClick={() => void dropAnn()}>
-                            <Trash size={17} weight="bold" /><span>删掉</span>
+                        <button className="rd-bar-tb-item" onClick={() => void dropAnn()}>
+                            <Trash size={18} weight="bold" /><span>删掉</span>
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* ── 选中一段话（还没划线）：六项操作条（她 09-15 批过的那版，一次出全） ── */}
             {/* ── 笔记面板（照她给的 Edit Note 参考图：取消 / 笔记 / 存下 + 引文 + 文本框） ── */}
             {noteOpen && noteTarget && (
                 <div className="rd-notepanel" data-rd-page="notepanel">
