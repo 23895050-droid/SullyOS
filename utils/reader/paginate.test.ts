@@ -1,29 +1,35 @@
-// 读书模块 · 分页纯函数单测（2026-09-14）
-// 只测不依赖布局的部分：页表查找与 layoutKey。真正的度量（行矩形切页）在浏览器里跑，
+// 读书模块 · 分页纯函数单测（2026-09-15 改横排后：列几何）
+// 只测不依赖布局的部分：x → 列号、layoutKey。真正的度量（列里有哪些字）在浏览器里跑，
 // 靠 .tmp-reader/ 的截图自检（见计划里的截图自检条目）。
 import { describe, expect, it } from 'vitest';
-import { layoutKeyOf, pageIndexAt, type RdPageBox } from './paginate';
+import { columnOfX, layoutKeyOf, type PageSlice } from './paginate';
 
-const pages: RdPageBox[] = [
-    { index: 0, top: 0, height: 600, fromPara: 0, toPara: 3 },
-    { index: 1, top: 600, height: 600, fromPara: 3, toPara: 7 },
-    { index: 2, top: 1200, height: 480, fromPara: 7, toPara: 9 },
-];
+const STEP = 430;   // 一页的横向跨度 = 列宽 + 列间距 = 视口宽
 
-describe('paginate · pageIndexAt', () => {
-    it('落在页中间/边界都能定位', () => {
-        expect(pageIndexAt(pages, 0)).toBe(0);
-        expect(pageIndexAt(pages, 599)).toBe(0);
-        expect(pageIndexAt(pages, 600)).toBe(1);
-        expect(pageIndexAt(pages, 900)).toBe(1);
-        expect(pageIndexAt(pages, 1200)).toBe(2);
-        expect(pageIndexAt(pages, 1679)).toBe(2);
+describe('paginate · columnOfX', () => {
+    it('落在列中间/边界都能定位', () => {
+        expect(columnOfX(0, STEP)).toBe(0);
+        expect(columnOfX(429, STEP)).toBe(0);
+        expect(columnOfX(430, STEP)).toBe(1);
+        expect(columnOfX(900, STEP)).toBe(2);
+        expect(columnOfX(1290, STEP)).toBe(3);
     });
 
-    it('越界夹到两端（进度恢复时锚点比页表靠后也不会崩）', () => {
-        expect(pageIndexAt(pages, -50)).toBe(0);
-        expect(pageIndexAt(pages, 99999)).toBe(2);
-        expect(pageIndexAt([], 100)).toBe(0);
+    it('越界夹到 0（锚点比正文靠前/负位移都不会算出负页）', () => {
+        expect(columnOfX(-50, STEP)).toBe(0);
+        expect(columnOfX(-0.4, STEP)).toBe(0);
+    });
+
+    it('步长非法时不炸（还没量出视口宽的第一次渲染）', () => {
+        expect(columnOfX(500, 0)).toBe(0);
+        expect(columnOfX(500, Number.NaN)).toBe(0);
+    });
+});
+
+describe('paginate · PageSlice 形状', () => {
+    it('图片段落用零长切片占位（字数不参与统计，但段号要能落在页里）', () => {
+        const s: PageSlice = { paraIdx: 7, startOffset: 0, endOffset: 0 };
+        expect(s.endOffset - s.startOffset).toBe(0);
     });
 });
 

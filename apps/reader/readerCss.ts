@@ -341,16 +341,31 @@ export const READER_SKELETON_CSS = `
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .rd-reader-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
-/* 按「这一页的内容高度」裁切：视口通常比一页的内容高一点，不裁的话下一页的第一行
-   会在底部露出半个字的边（书页本来就该在页边界处切断，不露下一页的字头）。 */
-/* 正文从标准上边距开始（不是从顶栏下面开始——顶栏是遮罩，压在上面），
-   到标准下边距结束；底栏那 92px 里有 38px 压在正文最后一行上，
-   翻页时那一行会从页顶升上来——**不占位、不丢字**。 */
+/* 一屏一片：整章排进**多列流**里，一列就是一页，翻页 = 整列横向平移。
+   视口只露一列宽，所以它才是「裁切」的那一层（横排后不再按页高裁，页高恒等于正文区高）。
+   正文从标准上边距开始（不是从顶栏下面开始——顶栏是遮罩，压在上面），到标准下边距结束。 */
 .rd-reader-clip { position: absolute; left: 0; right: 0; top: calc(var(--rd-page-top) + var(--rd-page-head)); overflow: hidden; }
-.rd-reader-flow {
-  position: absolute; left: var(--rd-page-gutter); right: var(--rd-page-gutter); top: 0;
+/* 跟手横滑 + 落位动画都改这一层的 transform（拖拽时 ReaderPage 直接改行内值，不走 React） */
+.rd-reader-track {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%;
   will-change: transform;
   transition: transform 260ms cubic-bezier(0.33, 0.7, 0.4, 1);
+}
+/* 列宽 / 列间距 / 高度 / 左右页边距全部由 ReaderPage 按视口写进行内样式——
+   关系必须守住：列宽 + 列间距 = 视口宽 = 一页的横向步长（见 utils/reader/paginate 顶部）。 */
+.rd-reader-flow {
+  position: absolute; left: 0; top: 0;
+  padding: 0 var(--rd-page-gutter);
+  column-fill: auto;
+  overflow: visible;
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* 插图（EPUB 里的图）：不跨列断开，顶端对齐当页 */
+.rd-figure {
+  display: block; margin: var(--rd-space-4) auto; max-width: 100%;
+  max-height: var(--rd-page-h, 60vh); width: auto; height: auto;
+  break-inside: avoid; -webkit-user-select: none; user-select: none;
 }
 /* 页眉：每页顶上那一行小字（参考图里的「第三章」）——定位在正文区上方，不跟着正文滚 */
 .rd-reader-head {
@@ -552,8 +567,35 @@ export const READER_SKELETON_CSS = `
 .rd-muted { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.6; }
 
 /* ── 划线覆盖层（第二批用；容器永远不给背景） ── */
-.rd-hl-layer { position: absolute; inset: 0; pointer-events: none; }
+/* 划线覆盖层：挂在 track 上（跟正文同一个坐标系），每一条矩形的坐标由 ReaderPage 按行算出来。
+   **别给它背景**——它是一层透明覆盖物，盖住的字还得能选中 */
+.rd-hl-layer {
+  position: absolute; left: var(--rd-page-gutter); top: 0; width: 100%; height: 100%;
+  pointer-events: none; overflow: visible;
+}
+/* 兜底色是「现在这支笔」；每条划线自己的颜色由行内样式压上来（她：颜色要能一笔一笔挑） */
 .rd-hl-rect { position: absolute; border-radius: var(--rd-radius-hl); background: rgba(var(--rd-hl-rgb), 0.32); }
+.rd-hl-rect-tap { outline: 1px solid var(--rd-accent); outline-offset: 1px; }
+
+/* 选中文字那一刻的小浮层：挑颜色就在这儿（她 2026-09-15「调色板在何处」） */
+.rd-selpop {
+  position: fixed; z-index: 60; transform: translate(-50%, -100%);
+  display: flex; flex-direction: column; gap: var(--rd-space-2);
+  padding: var(--rd-space-3); border: 1px solid var(--rd-rule); border-radius: var(--rd-r-lg);
+  background: var(--rd-sheet-bg); box-shadow: var(--rd-shadow);
+}
+.rd-selpop-row { display: flex; align-items: center; gap: var(--rd-space-2); }
+.rd-selpop-quote {
+  max-width: 220px; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rd-selpop-hint { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-selpop-btn {
+  display: inline-flex; align-items: center; gap: 4px; border: 0;
+  padding: var(--rd-space-1) var(--rd-space-3); border-radius: var(--rd-r-pill);
+  background: var(--rd-chip-bg); color: var(--rd-ink); font-size: var(--rd-fs-sm);
+}
+.rd-selpop-btn-danger { color: var(--rd-danger); }
 
 /* ── 书架 · 顶部（分类选择 + 菜单）、搜索胶囊、四种版式 ──
    参考图 2/3/4/5：顶部一行「All ⌄ …… ···」、大标题、搜索胶囊、四种版式、搜索页、分类页。 */

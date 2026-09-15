@@ -26,7 +26,7 @@ import {
 } from '../../utils/reader/readerDb';
 import ReaderCover from './ReaderCover';
 import {
-    pageForAnchor, paginateFlow, slicesForPage, type PageSlice, type RdPageBox,
+    columnCountOf, columnOfAnchor, slicesForColumn, type PageSlice,
 } from '../../utils/reader/paginate';
 import {
     clearHuntHistory, DEFAULT_TYPOGRAPHY, pushHuntHistory, readingModeFor, removeHighlightColor,
@@ -173,8 +173,10 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const [book, setBook] = useState<RdBook | null>(null);
     const [chapter, setChapter] = useState<RdChapter | null>(null);
     const [chapterIdx, setChapterIdx] = useState(0);
-    const [pages, setPages] = useState<RdPageBox[]>([]);
+    const [pageCount, setPageCount] = useState(0);
     const [pageIdx, setPageIdx] = useState(0);
+    /** 一页的横向步长（= 视口宽 = 列宽 + 列间距）；翻页位移就是它的整数倍 */
+    const [step, setStep] = useState(380);
     const [sheet, setSheet] = useState<Sheet>(null);
     const [panel, setPanel] = useState<Panel>(null);
     /** 主题面板的分组页签（参考图那条 Colors / Textures / Custom） */
@@ -207,7 +209,13 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
 
     const rootRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
+    const clipRef = useRef<HTMLDivElement>(null);
+    const trackRef = useRef<HTMLDivElement>(null);
     const flowRef = useRef<HTMLDivElement>(null);
+    /** 横滑跟手：拖拽期间直接改 track 的行内 transform（不走 React，免得整章重渲染） */
+    const draggingRef = useRef(false);
+    /** 这一下触摸是选字的手势：别翻页，也别让后面补的那次点击翻页 */
+    const suppressTapRef = useRef(false);
     /** 章节切换后要落在哪一页（页码 / 锚点 / 章的百分之几——拖进度条跨章时用最后那个） */
     const pendingRef = useRef<{ page?: number; anchor?: { paraIdx: number; charOffset: number }; ratio?: number } | null>(null);
     /** 当前页覆盖的文本切片（V1 的数据口） */
@@ -225,6 +233,10 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     /** 流水要记「读的是哪本书」，而 20 秒那跳的 effect deps 是空的——用 ref 取当前值 */
     const bookIdRef = useRef(bookId);
     bookIdRef.current = bookId;
+    /** 量列的 effect 只该在「章 / 排版 / 视口」变时跑；页码跟着变不能让它重跑
+        （重跑时 lastAnchorRef 还指着上一页，会把刚翻过去的页算回来） */
+    const pageIdxRef = useRef(pageIdx);
+    pageIdxRef.current = pageIdx;
 
     // ── 打开书：读书目 + 恢复进度 ──
     useEffect(() => {
@@ -277,33 +289,44 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         [],
     );
 
-    // ── 量页（章节/排版变化后重算，并落到该落的页）──
+    // ── 量列（章节/排版/视口变化后重排，并落到该落的那一列）──
+    // 横排之后「量页」这步轻多了：列由排版引擎切，我们只问「一共几列 + 锚点在第几列」。
+    // 列几何写进流元素的行内样式（宽/列宽/列间距/高），关系见 utils/reader/paginate 顶部。
     useLayoutEffect(() => {
         const viewport = viewportRef.current;
         const flow = flowRef.current;
         if (!chapter || !viewport || !flow) return;
         const height = contentH();
         if (height < 40) return;                       // 布局还没铺开，等下一次
-        const next = paginateFlow(flow, height);
-        if (next.length === 0) { setPages([]); return; }
-        setPages(next);
+        const w = Math.max(160, Math.round(viewport.clientWidth || 380));
+        const gutter = Math.max(0, Math.round(prefs.typography.margin));
+        const colW = Math.max(80, w - gutter * 2);
+        clipRef.current && (clipRef.current.style.height = `${height}px`);
+        flow.style.width = `${w}px`;
+        flow.style.height = `${height}px`;
+        flow.style.columnWidth = `${colW}px`;
+        flow.style.columnGap = `${gutter * 2}px`;
+
+        const count = Math.max(1, columnCountOf(flow, w));
+        setStep(w);
+        setPageCount(count);
         const pending = pendingRef.current;
         let idx = 0;
-        if (pending?.anchor) idx = pageForAnchor(flow, next, pending.anchor.paraIdx, pending.anchor.charOffset);
-        else if (typeof pending?.page === 'number') idx = Math.max(0, Math.min(pending.page, next.length - 1));
-        // 拖进度条跨章：那一章的页数得量完才知道，所以记的是「章的百分之几」
-        else if (typeof pending?.ratio === 'number') idx = Math.round(pending.ratio * Math.max(0, next.length - 1));
+        if (pending?.anchor) idx = columnOfAnchor(flow, pending.anchor.paraIdx, pending.anchor.charOffset, w);
+        else if (typeof pending?.page === 'number') idx = Math.max(0, Math.min(pending.page, count - 1));
+        // 拖进度条跨章：那一章有几页得排完才知道，所以记的是「章的百分之几」
+        else if (typeof pending?.ratio === 'number') idx = Math.round(pending.ratio * Math.max(0, count - 1));
         else if (lastAnchorRef.current) {
             // 没有明确目标（比如字体就绪后补量）：回到「刚才读的那一页」，不是第一页
-            idx = pageForAnchor(flow, next, lastAnchorRef.current.paraIdx, lastAnchorRef.current.charOffset);
+            idx = columnOfAnchor(flow, lastAnchorRef.current.paraIdx, lastAnchorRef.current.charOffset, w);
         } else {
             // 连锚点都没有：至少留在当前页码，绝不跳回第一页
-            idx = Math.max(0, Math.min(pageIdx, next.length - 1));
+            idx = Math.max(0, Math.min(pageIdxRef.current, count - 1));
         }
         pendingRef.current = null;
         // 量完立刻把「这一页的锚点」记下来——后面任何一次补量（字体/转屏）都靠它回位，
         // 不能等副作用跑完再记（那中间的补量会拿到 null 而跳回第一页）
-        const firstSlice = slicesForPage(flow, next[idx], height)[0];
+        const firstSlice = slicesForColumn(flow, idx, w)[0];
         lastAnchorRef.current = firstSlice
             ? { paraIdx: firstSlice.paraIdx, charOffset: firstSlice.startOffset }
             : null;
@@ -324,14 +347,12 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     // ── 视口变化（转屏/键盘）：保住位置再重排 ──
     const anchorOfCurrentPage = useCallback((): { paraIdx: number; charOffset: number } | null => {
         const flow = flowRef.current;
-        const viewport = viewportRef.current;
-        const page = pages[pageIdx];
-        if (!flow || !viewport || !page) return null;
-        const slices = slicesForPage(flow, page, contentH());
+        if (!flow || pageCount === 0) return null;
+        const slices = slicesForColumn(flow, pageIdx, step);
         currentSlicesRef.current = slices;
         const first = slices[0];
         return first ? { paraIdx: first.paraIdx, charOffset: first.startOffset } : null;
-    }, [pages, pageIdx, contentH]);
+    }, [pageCount, pageIdx, step]);
 
     /** 给观察器用的「当前页锚点」取值口：ref 保持最新，观察器就不用随翻页重建。 */
     const anchorGetterRef = useRef(anchorOfCurrentPage);
@@ -389,17 +410,18 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     );
 
     const goPage = useCallback((delta: number) => {
-        if (pages.length === 0) return;
+        if (pageCount === 0) return;
         recordReading({ pages: 1, chars: pageChars(), bookId });   // 翻过去 = 刚把这一页读完
         const next = pageIdx + delta;
-        if (next >= 0 && next < pages.length) { setPageIdx(next); return; }
+        if (next >= 0 && next < pageCount) { setPageIdx(next); return; }
         // 跨章
         if (!book) return;
         const nextChapter = chapterIdx + delta;
         if (nextChapter < 0 || nextChapter >= book.chapterCount) return;
         pendingRef.current = delta > 0 ? { page: 0 } : { page: Number.MAX_SAFE_INTEGER };
+        restoringRef.current = true;      // 换章别从左往右滑一遍，直接落位
         setChapterIdx(nextChapter);
-    }, [pages.length, pageIdx, book, chapterIdx, pageChars]);
+    }, [pageCount, pageIdx, book, chapterIdx, pageChars]);
 
     /** 全书进度：章节位置 + 章内页位置（页面上那两个百分比与存档都用它） */
     const bookPercent = useCallback((chIdx: number, pgIdx: number, pageCount: number, chapterCount: number) => {
@@ -417,7 +439,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     }, []);
 
     useEffect(() => {
-        if (!book || !chapter || pages.length === 0) return;
+        if (!book || !chapter || pageCount === 0) return;
         const anchor = anchorOfCurrentPage();
         if (anchor) lastAnchorRef.current = anchor;
         // 这一页压着哪些段（书签判定用）：切片是当下的，放在这里取就不会滞后
@@ -425,7 +447,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const from = slices[0]?.paraIdx;
         const to = slices[slices.length - 1]?.paraIdx;
         setPageRange((prev) => (prev && prev.from === from && prev.to === to ? prev : (from === undefined || to === undefined ? null : { from, to })));
-        const percent = bookPercent(chapterIdx, pageIdx, pages.length, book.chapterCount);
+        const percent = bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount);
         const elapsed = Math.round((Date.now() - sessionStartRef.current) / 1000);
         pendingSaveRef.current = {
             bookId: book.id,
@@ -441,7 +463,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = window.setTimeout(() => { void flushProgress(); }, SAVE_DEBOUNCE);
         return () => { if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current); };
-    }, [pageIdx, chapterIdx, pages.length, book, chapter, anchorOfCurrentPage, flushProgress, bookPercent]);
+    }, [pageIdx, chapterIdx, pageCount, book, chapter, anchorOfCurrentPage, flushProgress, bookPercent]);
 
     // 退出书房 / 切后台 / 组件卸载：立刻落盘（只靠防抖的话，退出去那次就丢了）
     useEffect(() => {
@@ -455,10 +477,25 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         };
     }, [flushProgress]);
 
-    // ── 触摸：左右滑翻页（纵向不管） ──
+    // ── 触摸：左右滑翻页（横排之后是真的横着走——内容跟手，松手落位） ──
+    /** 松手没翻页 / 纵向手势 / 触摸被打断：把这一层挪回当前页 */
+    const snapBack = useCallback(() => {
+        const track = trackRef.current;
+        if (!track) return;
+        track.style.transition = '';
+        track.style.transform = `translateX(${-pageIdx * step}px)`;
+    }, [pageIdx, step]);
+
     const onTouchStart = (e: React.TouchEvent) => {
         const t = e.touches[0];
-        touchRef.current = { x: t.clientX, y: t.clientY, t: Date.now(), locked: false };
+        const sel = typeof window.getSelection === 'function' ? window.getSelection() : null;
+        // 正在选字：这一下是选区的手势，不翻页，也别让 touchend 补的那次点击翻页
+        const selBusy = !!sel && !sel.isCollapsed;
+        suppressTapRef.current = selBusy;
+        touchRef.current = { x: t.clientX, y: t.clientY, t: Date.now(), locked: selBusy };
+        draggingRef.current = false;
+        const track = trackRef.current;
+        if (track && !selBusy) track.style.transition = 'none';
     };
     const onTouchMove = (e: React.TouchEvent) => {
         const start = touchRef.current;
@@ -466,24 +503,45 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const t = e.touches[0];
         const dx = t.clientX - start.x;
         const dy = t.clientY - start.y;
-        if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) start.locked = true;   // 纵向 = 别的意图
+        if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) {   // 纵向 = 别的意图
+            start.locked = true;
+            snapBack();
+            return;
+        }
+        const track = trackRef.current;
+        if (!track || Math.abs(dx) < 4) return;
+        const w = viewportRef.current?.clientWidth ?? 380;
+        const lastChapter = !!book && chapterIdx >= book.chapterCount - 1;
+        // 到头了还往外拖：阻尼 0.35，手感上「拉不动」（最后一章最后一页右边是空的）
+        const edge = (dx > 0 && pageIdx <= 0 && chapterIdx <= 0)
+            || (dx < 0 && pageIdx >= pageCount - 1 && lastChapter);
+        const x = Math.max(-w, Math.min(w, edge ? dx * 0.35 : dx));
+        draggingRef.current = true;
+        track.style.transform = `translateX(${-pageIdx * step + x}px)`;
     };
     const onTouchEnd = (e: React.TouchEvent) => {
         const start = touchRef.current;
+        const dragging = draggingRef.current;
         touchRef.current = null;
-        if (!start || start.locked) return;
+        draggingRef.current = false;
+        if (!start || start.locked || !dragging) return;
         const t = e.changedTouches[0];
         const dx = t.clientX - start.x;
         const dt = Date.now() - start.t;
         const w = viewportRef.current?.clientWidth ?? 380;
         const far = Math.abs(dx) > w * 0.18;
         const flick = dt < 300 && Math.abs(dx) > w * 0.07;
-        if (far || flick) { setPanel(null); goPage(dx < 0 ? 1 : -1); }
+        if (far || flick) { setPanel(null); goPage(dx < 0 ? 1 : -1); return; }
+        snapBack();
+    };
+    const onTouchCancel = () => {
+        touchRef.current = null;
+        draggingRef.current = false;
+        snapBack();
     };
 
-    const atEnd = book ? chapterIdx >= book.chapterCount - 1 && pageIdx >= pages.length - 1 : false;
-    const top = pages[pageIdx]?.top ?? 0;
-    const percent = book ? bookPercent(chapterIdx, pageIdx, pages.length, book.chapterCount) : 0;
+    const atEnd = book ? chapterIdx >= book.chapterCount - 1 && pageIdx >= pageCount - 1 : false;
+    const percent = book ? bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount) : 0;
     const elapsedTotal = baseSecondsRef.current + Math.round((Date.now() - sessionStartRef.current) / 1000);
     const remainSec = book
         ? Math.max(0, (book.totalChars * (1 - percent / 100)) / CHARS_PER_SEC)
@@ -511,8 +569,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const ci = Math.min(book.chapterCount - 1, Math.floor(pos));
         const within = pos - ci;
         setPanel(null);
-        if (ci === chapterIdx && pages.length > 0) {
-            const target = Math.min(pages.length - 1, Math.max(0, Math.round(within * (pages.length - 1))));
+        if (ci === chapterIdx && pageCount > 0) {
+            const target = Math.min(pageCount - 1, Math.max(0, Math.round(within * (pageCount - 1))));
             if (target !== pageIdx) setPageIdx(target);
             return;
         }
@@ -577,7 +635,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 text: quote.slice(0, 120),
             },
             kind: 'bookmark', styleSlot: 1, contentRev: book.contentRev, status: 'active',
-            chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pages.length, book.chapterCount),
+            chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount),
             createdAt: now, updatedAt: now,
         });
         notify('书签夹在这一页了');
@@ -680,6 +738,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 className="rd-reader-viewport"
                 ref={viewportRef}
                 onClick={(e) => {
+                    // 选字那一下松手后浏览器会补一次点击：那不是在翻页
+                    if (suppressTapRef.current) { suppressTapRef.current = false; return; }
                     const rect = e.currentTarget.getBoundingClientRect();
                     const ratio = (e.clientX - rect.left) / rect.width;
                     if (ratio < 0.3) { setPanel(null); goPage(-1); }
@@ -690,17 +750,25 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 onTouchStart={onTouchStart}
                 onTouchMove={onTouchMove}
                 onTouchEnd={onTouchEnd}
+                onTouchCancel={onTouchCancel}
             >
-                <div className="rd-reader-clip" style={{ height: pages[pageIdx]?.height ?? '100%' }}>
+                {/* 一屏一片：整章排进多列流，翻页 = 整列横向平移（拖拽时直接改 track 的
+                    transform，不走 React——整章几百个段落，每帧重渲染一次不划算） */}
+                <div className="rd-reader-clip" ref={clipRef}>
                     <div
-                        className="rd-reader-flow"
-                        ref={flowRef}
-                        style={{ transform: `translateY(${-top}px)`, transition: restoringRef.current ? 'none' : undefined }}
+                        className="rd-reader-track"
+                        ref={trackRef}
+                        style={{
+                            transform: `translateX(${-pageIdx * step}px)`,
+                            transition: restoringRef.current ? 'none' : undefined,
+                        }}
                     >
-                        {chapter && <div className="rd-reader-chapter">{chapter.title}</div>}
-                        {chapter?.paras.map((p, i) => (
-                            <p className="rd-para" key={i} data-para-idx={i}>{p}</p>
-                        ))}
+                        <div className="rd-reader-flow" ref={flowRef}>
+                            {chapter && <div className="rd-reader-chapter">{chapter.title}</div>}
+                            {chapter?.paras.map((p, i) => (
+                                <p className="rd-para" key={i} data-para-idx={i}>{p}</p>
+                            ))}
+                        </div>
                     </div>
                 </div>
                 {/* 页眉：每一页顶上那行小字（参考图里的「第三章」）——定位在正文区上方，不跟着滚 */}
@@ -712,7 +780,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 上下栏一亮就压在它上面（栏是遮罩） */}
             <div className="rd-reader-footnote">
                 <span>{clockText}</span>
-                <span>{pages.length > 0 ? `${pageIdx + 1} / ${pages.length}` : ''}</span>
+                <span>{pageCount > 0 ? `${pageIdx + 1} / ${pageCount}` : ''}</span>
             </div>
 
             {atEnd && (
@@ -1087,7 +1155,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                             ))}
                         </div>
                         <div className="rd-muted" style={{ marginTop: 'var(--rd-space-4)' }}>
-                            当前第 {pageIdx + 1} / {pages.length} 页 · 全书 {percent}%
+                            当前第 {pageIdx + 1} / {pageCount} 页 · 全书 {percent}%
                         </div>
                     </div>
                 </div>
