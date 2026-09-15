@@ -579,46 +579,6 @@ export const READER_SKELETON_CSS = `
 .rd-hl-rect { position: absolute; border-radius: var(--rd-radius-hl); background: rgba(var(--rd-hl-rgb), 0.32); }
 .rd-hl-rect-tap { outline: 1px solid var(--rd-accent); outline-offset: 1px; }
 
-/* 选中/点中划线后浮出来的**工具栏**（她 2026-09-15 给的参考图：深色圆角条 + 图标小字 + 右侧 ›）。
-   为什么不是「选中就弹」：那一层会被 iOS 原生的选区菜单压住（她报过）。
-   这里**故意不放色卡**——笔的颜色只有一个地方改（.rd-bar-tb 里的「我的颜色」只是入口）。 */
-.rd-bar-tb {
-  position: fixed; z-index: 62; transform: translate(-50%, -100%);
-  display: flex; align-items: stretch; gap: 2px;
-  padding: var(--rd-space-2);
-  border-radius: var(--rd-r-md);
-  background: var(--rd-toolbar-bg); color: var(--rd-toolbar-ink);
-  box-shadow: var(--rd-shadow);
-}
-/* 底下那个小三角：指着被选中的那段话（参考图里也有） */
-.rd-bar-tb::after {
-  content: ''; position: absolute; left: 50%; bottom: -5px; width: 12px; height: 12px;
-  margin-left: -6px; border-radius: var(--rd-radius-hl); transform: rotate(45deg);
-  background: var(--rd-toolbar-bg);
-}
-.rd-bar-tb-item {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  min-width: 54px; padding: var(--rd-space-2) 2px;
-  border: 0; background: transparent; color: inherit; white-space: nowrap;
-  font-family: var(--rd-font-body); font-size: var(--rd-fs-tab);
-}
-.rd-bar-tb-item:active { opacity: 0.6; }
-.rd-bar-tb-arrow { min-width: 26px; justify-content: center; }
-.rd-bar-tb-note { display: flex; align-items: center; gap: var(--rd-space-2); padding: 2px; }
-.rd-bar-tb-input {
-  width: 190px; border: 0; border-radius: var(--rd-r-pill);
-  padding: var(--rd-space-2) var(--rd-space-3);
-  background: var(--rd-toolbar-ink); color: var(--rd-ink);
-  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm);
-}
-.rd-bar-tb-text {
-  border: 0; background: transparent; color: inherit; white-space: nowrap;
-  padding: var(--rd-space-1) var(--rd-space-2);
-  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm);
-}
-
-/* ── 划线编辑（点中一条已有的划线）：上面一排颜色改**这一条**，下面一排操作 ──
-   浅色浮条（跟上面那条深色的「选中工具条」分工不同：这条是「编辑物件」，那条是「对选中文字做点事」） */
 .rd-edit-bar {
   position: fixed; z-index: 62; transform: translate(-50%, -100%);
   min-width: 268px; padding: var(--rd-space-2);

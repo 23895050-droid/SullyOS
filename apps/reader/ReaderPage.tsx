@@ -39,6 +39,13 @@ import { useBlobRefUrl } from '../../utils/blobRef';
 import { recordReading } from '../../utils/reader/readerStats';
 import { copyToClipboard } from '../../utils/clipboard';
 
+/** 两条锚点是不是压着同一段文字（选中即划线时防重复划线用）。 */
+function anchorsOverlap(a: RdAnchor, b: RdAnchor): boolean {
+    const start = (x: RdAnchor) => x.startPara * 1e6 + x.startOffset;
+    const end = (x: RdAnchor) => x.endPara * 1e6 + x.endOffset;
+    return start(a) < end(b) && start(b) < end(a);
+}
+
 /** 正文里每个段落是一个 `[data-para-idx]` 的 <p>，里面只有一个文本节点——
     选区/点击落点都能顺着它换回「段号 + 段内偏移」（我们的锚点只认这两个数）。 */
 function paraAt(flow: HTMLElement | null, node: Node | null): { el: HTMLElement; idx: number } | null {
@@ -240,8 +247,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     /** 这条笔记写在哪儿：已有划线（ann）或刚选中的一段话 */
     const [noteTarget, setNoteTarget] = useState<{ text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
     const [noteDraft, setNoteDraft] = useState('');
-    /** 最近一次选区（连行矩形一起记）：点选中的话那一刻，原生已经可能把选区收掉了，得靠这份缓存 */
-    const selCacheRef = useRef<{ rects: Array<{ l: number; t: number; r: number; b: number }>; anchor: RdAnchor } | null>(null);
     /** 这一章里每条划线的行矩形（覆盖层就照这些矩形画） */
     const [hlRects, setHlRects] = useState<Array<{ id: string; color: string; rects: Array<{ left: number; top: number; width: number; height: number }> }>>([]);
 
@@ -268,6 +273,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const saveTimerRef = useRef<number | null>(null);
     const touchRef = useRef<{ x: number; y: number; t: number; locked: boolean } | null>(null);
     const restoringRef = useRef(true);
+    /** 防抖回调里要读最新的批注（闭包会拿到旧数组） */
+    const annsRef = useRef<RdAnnotation[]>([]);
+    annsRef.current = anns;
     /** 流水要记「读的是哪本书」，而 20 秒那跳的 effect deps 是空的——用 ref 取当前值 */
     const bookIdRef = useRef(bookId);
     bookIdRef.current = bookId;
@@ -681,22 +689,47 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         return Math.round((ci * span + t * span) * 10) / 10;
     }, [book]);
 
-    // ── 选中文字（正文的 user-select 在 readerCss 里放开）──
-    // 只把选区和它的行矩形记下来；**浮层等用户点了那句话再出**（她的口径：选中就弹会被原生菜单挡）
+    /** 正在跟着选区走的那条线（拖动范围时改它，别新建） */
+    const liveRef = useRef<{ id: string; createdAt: string } | null>(null);
+    const liveTimerRef = useRef<number | null>(null);
+
+    /** 选中即划线：防抖 260ms（选区拖着走会连发很多次），落一条 highlight 并刷新覆盖层。
+     *  她 2026-09-16：**划线不该由点工具栏触发——选中哪句，哪句就划上**；
+     *  工具栏是给已经画好的线用的（点那条线才出）。 */
+    const scheduleLiveHighlight = (anchor: RdAnchor) => {
+        if (liveTimerRef.current) window.clearTimeout(liveTimerRef.current);
+        liveTimerRef.current = window.setTimeout(() => {
+            void (async () => {
+                if (!book) return;
+                const now = new Date().toISOString();
+                const live = liveRef.current;
+                const id = live?.id ?? uid();
+                // 已经压着一条旧线了就不重复划
+                if (!live && annsRef.current.some((a) => a.kind !== 'bookmark' && anchorsOverlap(a.anchor, anchor))) return;
+                liveRef.current = { id, createdAt: live?.createdAt ?? now };
+                await putAnnotation({
+                    id, bookId, ownerId: 'user', anchor, kind: 'highlight',
+                    styleSlot: 1, contentRev: book.contentRev, status: 'active',
+                    chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount),
+                    createdAt: live?.createdAt ?? now, updatedAt: now,
+                });
+                await reloadAnns();
+            })();
+        }, 260);
+    };
+
+    // ── 选中文字（正文的 user-select 在 readerCss 里放开）：选中即划线 ──
     useEffect(() => {
         const onSelChange = () => {
             const flow = flowRef.current;
             const s = typeof window.getSelection === 'function' ? window.getSelection() : null;
-            if (!flow || !s || s.rangeCount === 0 || s.isCollapsed) return;   // 收起来了：缓存留着（可能就是点工具栏那一下）
+            if (!flow || !s || s.rangeCount === 0 || s.isCollapsed) { liveRef.current = null; return; }
             const range = s.getRangeAt(0);
             if (!flow.contains(range.startContainer) || !flow.contains(range.endContainer)) return;
             const anchor = anchorFromRange(flow, range);
             if (!anchor) return;
-            selCacheRef.current = {
-                anchor,
-                rects: Array.from(range.getClientRects()).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom })),
-            };
             setBar(null);
+            scheduleLiveHighlight(anchor);
         };
         document.addEventListener('selectionchange', onSelChange);
         return () => document.removeEventListener('selectionchange', onSelChange);
@@ -712,24 +745,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             x: Math.max(120, Math.min(window.innerWidth - 120, mid)),
             y: below ? bottom + 14 : top - 10,
         };
-    };
-
-    /** 划一条：用的是**自己那支笔**的颜色（她：颜色去设置里改，别在浮层里挑） */
-    const makeHighlight = async () => {
-        if (!book || !bar?.anchor) return;
-        const anchor = bar.anchor;
-        const now = new Date().toISOString();
-        await putAnnotation({
-            id: uid(), bookId, ownerId: 'user', anchor, kind: 'highlight',
-            styleSlot: 1, contentRev: book.contentRev, status: 'active',
-            chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount),
-            createdAt: now, updatedAt: now,
-        });
-        window.getSelection()?.removeAllRanges();
-        selCacheRef.current = null;
-        setBar(null);
-        await reloadAnns();
-        notify('划上了');
     };
 
     /** 划线编辑里改这一条的颜色（单条覆盖；没改过的还是 owner 那支笔） */
@@ -762,7 +777,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             });
         }
         window.getSelection()?.removeAllRanges();
-        selCacheRef.current = null;
         setNoteOpen(false);
         setBar(null);
         await reloadAnns();
@@ -949,15 +963,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 onClick={(e) => {
                     // 选字那一下松手后浏览器会补一次点击：那不是在翻页
                     if (suppressTapRef.current) { suppressTapRef.current = false; return; }
-                    // 点在刚选中的那段话上：出工具栏（她：选中之后点那句话才有工具栏）
-                    const cached = selCacheRef.current;
-                    if (cached && cached.rects.some((r) => e.clientX >= r.l - 6 && e.clientX <= r.r + 6
-                        && e.clientY >= r.t - 8 && e.clientY <= r.b + 8)) {
-                        setPanel(null);
-                        setBar({ ...barAt(cached.rects), text: cached.anchor.text, anchor: cached.anchor });
-                        return;
-                    }
-                    // 点在一条已有的划线上：同一个工具栏（写想法 / 删掉）
+                    // 点在一条已有的划线上：出工具栏（复制 / 笔记 / 搜索 / 分享 / 删掉 + 改这条的颜色）
+                    window.getSelection()?.removeAllRanges();
+                    liveRef.current = null;
                     const hit = hitAnnAt(e.clientX, e.clientY);
                     if (hit) {
                         setPanel(null);
@@ -1405,35 +1413,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             )}
 
             {/* ── 选中一段话（还没划线）：六项操作条（她 09-15 批过的那版，一次出全） ── */}
-            {bar && !bar.ann && (
-                <div
-                    className="rd-bar-tb"
-                    data-rd-page="textbar"
-                    style={{ left: bar.x, top: bar.y }}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onTouchStart={(e) => e.stopPropagation()}
-                >
-                    <button className="rd-bar-tb-item" onClick={() => void copyToClipboard(bar.text)}>
-                        <Copy size={17} weight="bold" /><span>复制</span>
-                    </button>
-                    <button className="rd-bar-tb-item" onClick={() => void makeHighlight()}>
-                        <Highlighter size={17} weight="bold" /><span>划线</span>
-                    </button>
-                    <button className="rd-bar-tb-item" onClick={() => openNote({ text: bar.text, anchor: bar.anchor })}>
-                        <PencilSimple size={17} weight="bold" /><span>写笔记</span>
-                    </button>
-                    <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
-                        <ShareNetwork size={17} weight="bold" /><span>分享书摘</span>
-                    </button>
-                    <button className="rd-bar-tb-item" onClick={() => notify('讨论（不是问答）在下一批')}>
-                        <ChatCircleDots size={17} weight="bold" /><span>讨论</span>
-                    </button>
-                    <button className="rd-bar-tb-item" onClick={() => { setSheet('hl'); setBar(null); }}>
-                        <Palette size={17} weight="bold" /><span>划线设置</span>
-                    </button>
-                </div>
-            )}
-
             {/* ── 笔记面板（照她给的 Edit Note 参考图：取消 / 笔记 / 存下 + 引文 + 文本框） ── */}
             {noteOpen && noteTarget && (
                 <div className="rd-notepanel" data-rd-page="notepanel">
