@@ -127,11 +127,8 @@ export interface RdAnnotation {
     ownerId: RdOwnerId;
     anchor: RdAnchor;
     kind: RdAnnotationKind;
-    /** 1..6 → CSS 变量槽 --rd-hl-N（每 owner 各自配色，见 prefs.highlightStyles） */
+    /** 1..6 → CSS 变量槽 --rd-hl-N（历史字段，颜色现在按「谁划的」取，见 prefs.highlightColors） */
     styleSlot: number;
-    /** 这条划线自己的颜色（hex）。她 2026-09-15：颜色要一笔一笔挑，不要六个死配色。
-     *  没有时落回「现在这支笔」（prefs.highlightColor）——老批注不带这个字段，照样画得出来 */
-    color?: string;
     /** kind==='note' 时的批注文本 */
     note?: string;
     /** 锚点所属文本版本（= 导入时写入的 book.contentRev） */

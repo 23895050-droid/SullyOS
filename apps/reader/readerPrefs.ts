@@ -46,16 +46,15 @@ export interface ReaderPrefs {
     searchHistory: string[];
     /** 书内搜索的历史（跟书架的搜索分开记，参考图 11 那排胶囊） */
     huntHistory: string[];
-    /** 划线颜色：她自己调的一套预设（hex），可增可删——不要那六个死配色了 */
+    /** 她的颜色库（hex，可增可删）——「我的划线颜色」从这支库里挑 */
     highlightPalette: string[];
-    /** 现在用的那支笔的颜色 */
-    highlightColor: string;
+    /** **每支笔的颜色：ownerId → hex**。'user' 是她自己的；角色各自的等书库页做
+     *  （她 2026-09-15：只需要区分好用户的划线颜色和各角色划线颜色）。 */
+    highlightColors: Record<string, string>;
     /** 默认共读模式（没单独设过的书用它） */
     readingMode: ReadingMode;
     /** 单书共读模式：bookId → 'focus' | 'casual'（v3 §4.6 的单书设置） */
     bookModes: Record<string, ReadingMode>;
-    /** ownerId → 划线样式槽（1..6）。用户与每个角色各自独立配色 */
-    highlightStyles: Record<string, number>;
     /** 允许读书的角色（书库页只列开了开关的；V9 的多游标也按这个名单） */
     readingChars: string[];
     /** 皮肤层用户 CSS：全局 + 分页（页 key 用 'shelf' | 'reader' | 'notes' ...） */
@@ -89,10 +88,9 @@ export const DEFAULT_PREFS: ReaderPrefs = {
     searchHistory: [],
     huntHistory: [],
     highlightPalette: DEFAULT_HIGHLIGHT_PALETTE,
-    highlightColor: DEFAULT_HIGHLIGHT_PALETTE[0],
+    highlightColors: { user: DEFAULT_HIGHLIGHT_PALETTE[0] },
     readingMode: 'focus',
     bookModes: {},
-    highlightStyles: { user: 1 },
     readingChars: [],
     cssGlobal: '',
     cssPages: {},
@@ -102,7 +100,13 @@ const store = createCoupleStore<ReaderPrefs>('reader_prefs_v1', 1, DEFAULT_PREFS
     ...DEFAULT_PREFS,
     ...parsed,
     typography: { ...DEFAULT_TYPOGRAPHY, ...(parsed.typography || {}) },
-    highlightStyles: { ...DEFAULT_PREFS.highlightStyles, ...(parsed.highlightStyles || {}) },
+    // 老结构（全局一支 highlightColor）平滑搬进新结构；再老的结构给默认
+    highlightColors: {
+        ...DEFAULT_PREFS.highlightColors,
+        ...((parsed as { highlightColor?: string }).highlightColor
+            ? { user: (parsed as { highlightColor?: string }).highlightColor! } : {}),
+        ...(parsed.highlightColors || {}),
+    },
     cssPages: { ...(parsed.cssPages || {}) },
     bookModes: { ...(parsed.bookModes || {}) },
 }));
@@ -147,25 +151,37 @@ export function clearHuntHistory(): void {
     store.set((s) => ({ ...s, huntHistory: [] }));
 }
 
-/** 换一支笔 / 存一支新笔 / 删掉一支笔（调色盘） */
-export function setHighlightColor(hex: string): void {
-    store.set((s) => ({ ...s, highlightColor: hex }));
+/** 换一支笔（默认换自己的；角色那支等书库页） */
+export function setHighlightColor(hex: string, ownerId = 'user'): void {
+    store.set((s) => ({ ...s, highlightColors: { ...s.highlightColors, [ownerId]: hex } }));
 }
 
-export function saveHighlightColor(hex: string): void {
+/** 存一支新笔（进颜色库 + 立刻用它） */
+export function saveHighlightColor(hex: string, ownerId = 'user'): void {
     store.set((s) => ({
         ...s,
-        highlightColor: hex,
+        highlightColors: { ...s.highlightColors, [ownerId]: hex },
         highlightPalette: s.highlightPalette.includes(hex) ? s.highlightPalette : [...s.highlightPalette, hex],
     }));
 }
 
+/** 从颜色库里删一支（正在用它的那支笔换到库里剩下的第一支） */
 export function removeHighlightColor(hex: string): void {
-    store.set((s) => ({
-        ...s,
-        highlightPalette: s.highlightPalette.filter((c) => c !== hex),
-        highlightColor: s.highlightColor === hex ? (s.highlightPalette.find((c) => c !== hex) ?? s.highlightColor) : s.highlightColor,
-    }));
+    store.set((s) => {
+        const rest = s.highlightPalette.filter((c) => c !== hex);
+        const fallback = rest[0] ?? s.highlightPalette[0] ?? hex;
+        const colors: Record<string, string> = { ...s.highlightColors };
+        for (const [owner, c] of Object.entries(colors)) if (c === hex) colors[owner] = fallback;
+        return { ...s, highlightPalette: rest, highlightColors: colors };
+    });
+}
+
+/** 谁划的 → 用哪支笔。没设过的角色给一支默认色（书库页做好之前先有个区分度）。 */
+export const DEFAULT_CHAR_HIGHLIGHT = '#7fc8a9';
+
+export function highlightColorOf(prefs: ReaderPrefs, ownerId: string): string {
+    return prefs.highlightColors?.[ownerId]
+        ?? (ownerId === 'user' ? (prefs.highlightPalette[0] ?? DEFAULT_CHAR_HIGHLIGHT) : DEFAULT_CHAR_HIGHLIGHT);
 }
 
 /** 搜索历史：去重、新的在前、最多留 12 条。 */
@@ -195,10 +211,6 @@ export function readingModeFor(prefs: ReaderPrefs, bookId: string): ReadingMode 
 
 export function setLastBook(bookId: string | undefined): void {
     store.set((s) => ({ ...s, lastBookId: bookId }));
-}
-
-export function setHighlightSlot(ownerId: string, slot: number): void {
-    store.set((s) => ({ ...s, highlightStyles: { ...s.highlightStyles, [ownerId]: slot } }));
 }
 
 /** 角色读书开关（书库页）。默认关——开了才进书库、才能被喊来共读。 */

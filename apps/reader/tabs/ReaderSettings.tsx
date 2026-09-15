@@ -15,10 +15,12 @@
 import { useState, type ReactNode } from 'react';
 import { ArrowLeft, BookOpen, PaintBrush, Pen, Code, TextAa } from '@phosphor-icons/react';
 import {
-    DEFAULT_TYPOGRAPHY, setCssGlobal, setHighlightSlot, setShelfAsc, setShelfGrouped, setShelfLayout,
+    DEFAULT_TYPOGRAPHY, setCssGlobal, setShelfAsc, setShelfGrouped, setShelfLayout,
     setTheme, setTypography, useReaderPrefs, type ShelfLayout,
 } from '../readerPrefs';
-import { HIGHLIGHT_SLOTS, READER_SKINS } from '../readerSkinPresets';
+import { READER_SKINS } from '../readerSkinPresets';
+import HighlightColorSheet from '../HighlightColorSheet';
+import { highlightColorOf } from '../readerPrefs';
 
 type Sheet = null | 'size' | 'font' | 'lineHeight' | 'paraGap' | 'indent' | 'margin' | 'layout' | 'hl' | 'css';
 type Page = 'root' | 'read' | 'look';
@@ -76,7 +78,7 @@ export default function ReaderSettings() {
     const [cssDraft, setCssDraft] = useState<string | null>(null);
     const t = prefs.typography;
     const night = prefs.themeId.startsWith('night');
-    const slotLabel = HIGHLIGHT_SLOTS.find((s) => s.slot === (prefs.highlightStyles.user ?? 1))?.label ?? '琥珀';
+
 
     const head = (title: string, sub: string) => (
         <div className="rd-headbar">
@@ -174,8 +176,8 @@ export default function ReaderSettings() {
                             onToggle={() => setTheme(night ? 'paper' : 'night')}
                         />
                         <Row
-                            label="我的划线配色"
-                            value={slotLabel}
+                            label="我的划线颜色"
+                            value={highlightColorOf(prefs, 'user')}
                             onClick={() => setSheet('hl')}
                         />
                         <Row label="自定义 CSS" value={prefs.cssGlobal ? '已写' : '没写'} onClick={() => setSheet('css')} />
@@ -202,7 +204,7 @@ export default function ReaderSettings() {
                 <div className="rd-list">
                     <Row label="阅读设置" value="字号 · 行距 · 边距" onClick={() => setPage('read')} icon={ico(1, <BookOpen size={16} weight="bold" />)} />
                     <Row label="外观设置" value="皮肤 · 书架版式" onClick={() => setPage('look')} icon={ico(2, <PaintBrush size={16} weight="bold" />)} />
-                    <Row label="划线配色" value={slotLabel} onClick={() => setSheet('hl')} icon={ico(3, <Pen size={16} weight="bold" />)} />
+                    <Row label="我的划线颜色" value={highlightColorOf(prefs, 'user')} onClick={() => setSheet('hl')} icon={ico(3, <Pen size={16} weight="bold" />)} />
                     <Row label="自定义 CSS" value={prefs.cssGlobal ? '已写' : '没写'} onClick={() => setSheet('css')} icon={ico(4, <Code size={16} weight="bold" />)} />
                 </div>
             </div>
@@ -225,7 +227,6 @@ function SheetHost({ sheet, setSheet, t, prefs, cssDraft, setCssDraft }: {
     cssDraft: string | null;
     setCssDraft: (v: string | null) => void;
 }) {
-    const slot = prefs.highlightStyles.user ?? 1;
     const close = () => setSheet(null);
     if (!sheet) return null;
 
@@ -286,31 +287,7 @@ function SheetHost({ sheet, setSheet, t, prefs, cssDraft, setCssDraft }: {
         );
     }
 
-    if (sheet === 'hl') {
-        return (
-            <div className="rd-sheet-mask" onClick={close}>
-                <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                    <div className="rd-sheet-grip" />
-                    <div className="rd-sheet-title">划线配色</div>
-                    <div className="rd-row">
-                        <span className="rd-row-label">我</span>
-                        <div className="rd-btn-row">
-                            {HIGHLIGHT_SLOTS.map((s) => (
-                                <button
-                                    key={s.slot}
-                                    aria-label={s.label}
-                                    className={`rd-swatch${slot === s.slot ? ' rd-swatch-on' : ''}`}
-                                    onClick={() => setHighlightSlot('user', s.slot)}
-                                    style={{ background: `rgb(var(--rd-hl-${s.slot}-rgb))` }}
-                                />
-                            ))}
-                        </div>
-                    </div>
-                    <div className="rd-muted" style={{ marginTop: 8 }}>角色的槽位跟着书库页的开关走，第二批接上。</div>
-                </div>
-            </div>
-        );
-    }
+    if (sheet === 'hl') return <HighlightColorSheet onClose={close} />;
 
     // css
     return (

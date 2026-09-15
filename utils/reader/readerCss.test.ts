@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { READER_SKELETON_CSS } from '../../apps/reader/readerCss';
-import { READER_SKINS, READER_VAR_KEYS, highlightSlotVars, skinById } from '../../apps/reader/readerSkinPresets';
+import { READER_SKINS, READER_VAR_KEYS, skinById } from '../../apps/reader/readerSkinPresets';
 import { buildReaderCss, typographyVars } from '../../apps/reader/ReaderSkinPreset';
 import { DEFAULT_PREFS, DEFAULT_TYPOGRAPHY } from '../../apps/reader/readerPrefs';
 
@@ -64,11 +64,10 @@ describe('readerSkinPresets · 皮肤表与变量词典', () => {
         expect(skinById('不存在的').id).toBe(READER_SKINS[0].id);
     });
 
-    it('划线 6 个槽都有色值与 rgb 三元组', () => {
-        const vars = highlightSlotVars();
-        for (let slot = 1; slot <= 6; slot++) {
-            expect(vars[`--rd-hl-${slot}`]).toMatch(/^#[0-9a-f]{6}$/);
-            expect(vars[`--rd-hl-${slot}-rgb`]).toMatch(/^\d+, \d+, \d+$/);
+    it('每张皮肤都给了工具栏底色/字色（选中文字那条浮条）', () => {
+        for (const skin of READER_SKINS) {
+            expect(skin.vars['--rd-toolbar-bg'], `${skin.id} 缺工具栏底色`).toBeTruthy();
+            expect(skin.vars['--rd-toolbar-ink'], `${skin.id} 缺工具栏字色`).toBeTruthy();
         }
     });
 });

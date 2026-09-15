@@ -15,9 +15,8 @@ import {
     type RdAnnotation, type RdBook, type RdProgress,
 } from '../../utils/reader/readerDb';
 import { addCat, addTag, allCatNames, loadTags } from './readerCats';
-import {
-    readingModeFor, removeHighlightColor, setBookMode, setHighlightColor, useReaderPrefs,
-} from './readerPrefs';
+import HighlightColorSheet from './HighlightColorSheet';
+import { highlightColorOf, readingModeFor, setBookMode, useReaderPrefs } from './readerPrefs';
 import ReaderCover, { shrinkCoverImage } from './ReaderCover';
 
 interface Props {
@@ -319,8 +318,8 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                                 <span className="rd-item-chev">›</span>
                             </button>
                             <button className="rd-item" onClick={() => setSheet('hl')}>
-                                <span className="rd-item-label">划线颜色</span>
-                                <span className="rd-item-value">{prefs.highlightColor}</span>
+                                <span className="rd-item-label">我的划线颜色</span>
+                                <span className="rd-item-value">{highlightColorOf(prefs, 'user')}</span>
                                 <span className="rd-item-chev">›</span>
                             </button>
                             <button className="rd-item" onClick={() => notify(`格式 ${book.format.toUpperCase()} · 共 ${book.chapterCount} 章 · ${book.encoding || '默认编码'}`)}>
@@ -359,30 +358,8 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                 </div>
             )}
 
-            {/* ── 划线配色 ── */}
-            {sheet === 'hl' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">划线颜色</div>
-                        <div className="rd-hunt-hist" style={{ marginBottom: 'var(--rd-space-3)' }}>
-                            {prefs.highlightPalette.map((c) => (
-                                <button
-                                    key={c}
-                                    aria-label={c}
-                                    className={`rd-swatch${prefs.highlightColor === c ? ' rd-swatch-on' : ''}`}
-                                    style={{ background: c }}
-                                    onClick={() => setHighlightColor(c)}
-                                    onContextMenu={(e) => { e.preventDefault(); removeHighlightColor(c); }}
-                                />
-                            ))}
-                        </div>
-                        <div className="rd-muted">
-                            跟阅读页「更多 → 划线颜色」是同一套笔：那里能调新颜色、能存进这支调色盘。点一支就用它，长按或右键删。
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* ── 划线颜色：跟阅读页、设置页共用同一张弹卡（她：四处要打通） ── */}
+            {sheet === 'hl' && <HighlightColorSheet onClose={() => setSheet(null)} />}
 
             {/* ── 编辑资料 ── */}
             {sheet === 'edit' && (

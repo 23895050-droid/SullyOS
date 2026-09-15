@@ -17,8 +17,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-    ArrowLeft, BookmarkSimple, CaretLeft, CaretRight, Copy, DotsThree, Lightbulb, ListBullets,
-    MagnifyingGlass, TShirt, Trash, X,
+    ArrowLeft, BookmarkSimple, CaretLeft, CaretRight, ChatCircleDots, Copy, DotsThree, Highlighter,
+    Lightbulb, ListBullets, MagnifyingGlass, Palette, PencilSimple, ShareNetwork, TShirt, Trash, X,
 } from '@phosphor-icons/react';
 import { isImagePara } from '../../utils/reader/importEpub';
 import {
@@ -30,9 +30,10 @@ import {
     columnCountOf, columnOfAnchor, flowOrigin, slicesForColumn, type PageSlice,
 } from '../../utils/reader/paginate';
 import {
-    clearHuntHistory, DEFAULT_TYPOGRAPHY, pushHuntHistory, readingModeFor, removeHighlightColor,
-    saveHighlightColor, setBookMode, setHighlightColor, setTheme, setTypography, useReaderPrefs,
+    clearHuntHistory, DEFAULT_TYPOGRAPHY, highlightColorOf, pushHuntHistory, readingModeFor,
+    setBookMode, setTheme, setTypography, useReaderPrefs,
 } from './readerPrefs';
+import HighlightColorSheet from './HighlightColorSheet';
 import { hexTriple, READER_SKINS } from './readerSkinPresets';
 import { useBlobRefUrl } from '../../utils/blobRef';
 import { recordReading } from '../../utils/reader/readerStats';
@@ -117,19 +118,6 @@ const PAGE_TOP = 10;
 const PAGE_HEAD = 32;
 const PAGE_BOTTOM = 54;
 
-/** HSL → hex：调色盘两根条（色相 + 明度）就能调出任意一支笔，不用上取色器 */
-function hslHex(h: number, s: number, l: number): string {
-    const a = s * Math.min(l, 1 - l);
-    const f = (n: number) => {
-        const k = (n + h / 30) % 12;
-        const c = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
-        return Math.round(255 * c).toString(16).padStart(2, '0');
-    };
-    return `#${f(0)}${f(8)}${f(4)}`;
-}
-
-/** 色相条（写死在骨架层会被守卫测试拦——色值只能现算） */
-const HUE_STRIP = `linear-gradient(90deg, ${[0, 60, 120, 180, 240, 300, 360].map((h) => hslHex(h, 1, 0.5)).join(', ')})`;
 
 /** 本模块的 id 生成：不用 crypto.randomUUID（手机走 http 时它是 undefined，踩过） */
 const uid = (): string => `an_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -241,15 +229,19 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const [chromeOff, setChromeOff] = useState(false);
     /** 只为了让「阅读时长」每 20 秒自己走一格（值本身不用，读 Date.now 现算） */
     const [, setTick] = useState(0);
-    /** 选中文字后浮出来的小浮层（划线就在它上面挑颜色——她 09-15「调色板在何处」） */
-    const [sel, setSel] = useState<{ x: number; y: number; below: boolean; anchor: RdAnchor } | null>(null);
-    /** 小浮层的第二屏：现调一支颜色 */
-    const [selPalette, setSelPalette] = useState(false);
-    /** 点中的那条划线（改色 / 写批注 / 删掉） */
-    const [pickAnn, setPickAnn] = useState<RdAnnotation | null>(null);
-    const [pickAt, setPickAt] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-    const [pickPalette, setPickPalette] = useState(false);
+    /**
+     * 悬浮工具栏（她 2026-09-15 给的参考图）：**选中之后点一下那句话**才出来，
+     * 不在选中那一刻自己弹——那会跟 iOS 原生的选区菜单撞在一起。
+     * 两种情况共用这一条：选中一段话（划线/复制/写想法）、点中已有的划线（写想法/删掉）。
+     */
+    const [bar, setBar] = useState<{ x: number; y: number; text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
+    /** 工具栏右边那颗 › 展开的附加项 */
+    const [barMore, setBarMore] = useState(false);
+    /** 工具栏换成写想法那一屏 */
+    const [barNote, setBarNote] = useState(false);
     const [noteDraft, setNoteDraft] = useState('');
+    /** 最近一次选区（连行矩形一起记）：点选中的话那一刻，原生已经可能把选区收掉了，得靠这份缓存 */
+    const selCacheRef = useRef<{ rects: Array<{ l: number; t: number; r: number; b: number }>; anchor: RdAnchor } | null>(null);
     /** 这一章里每条划线的行矩形（覆盖层就照这些矩形画） */
     const [hlRects, setHlRects] = useState<Array<{ id: string; color: string; rects: Array<{ left: number; top: number; width: number; height: number }> }>>([]);
 
@@ -632,6 +624,29 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         else setChapterIdx(ci);
     };
 
+    /** 一条划线在屏幕上的行矩形（工具栏要贴着它浮出来） */
+    const hitRectsOf = useCallback((a: RdAnnotation): Array<{ l: number; t: number; r: number; b: number }> => {
+        const flow = flowRef.current;
+        if (!flow) return [];
+        const out: Array<{ l: number; t: number; r: number; b: number }> = [];
+        for (let pi = a.anchor.startPara; pi <= a.anchor.endPara; pi++) {
+            const el = flow.querySelector<HTMLElement>(`[data-para-idx="${pi}"]`);
+            const node = el?.firstChild;
+            if (!node || node.nodeType !== Node.TEXT_NODE) continue;
+            const data = (node as Text).data;
+            const from = pi === a.anchor.startPara ? Math.min(a.anchor.startOffset, data.length) : 0;
+            const to = pi === a.anchor.endPara ? Math.min(a.anchor.endOffset, data.length) : data.length;
+            if (to <= from) continue;
+            const range = document.createRange();
+            range.setStart(node, from);
+            range.setEnd(node, to);
+            for (const r of Array.from(range.getClientRects())) {
+                out.push({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+            }
+        }
+        return out;
+    }, []);
+
     /** 这个点落在哪条划线上（用文本插入点反查段号+偏移，不做矩形命中） */
     const hitAnnAt = useCallback((x: number, y: number): RdAnnotation | null => {
         const flow = flowRef.current;
@@ -666,78 +681,91 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         return Math.round((ci * span + t * span) * 10) / 10;
     }, [book]);
 
-    // ── 选中文字（正文的 user-select 在 readerCss 里放开）：松手浮出一排色卡 ──
+    // ── 选中文字（正文的 user-select 在 readerCss 里放开）──
+    // 只把选区和它的行矩形记下来；**浮层等用户点了那句话再出**（她的口径：选中就弹会被原生菜单挡）
     useEffect(() => {
         const onSelChange = () => {
             const flow = flowRef.current;
             const s = typeof window.getSelection === 'function' ? window.getSelection() : null;
-            if (!flow || !s || s.rangeCount === 0 || s.isCollapsed) { setSel(null); return; }
+            if (!flow || !s || s.rangeCount === 0 || s.isCollapsed) return;   // 收起来了：缓存留着（可能就是点工具栏那一下）
             const range = s.getRangeAt(0);
-            if (!flow.contains(range.startContainer) || !flow.contains(range.endContainer)) { setSel(null); return; }
+            if (!flow.contains(range.startContainer) || !flow.contains(range.endContainer)) return;
             const anchor = anchorFromRange(flow, range);
-            if (!anchor) { setSel(null); return; }
-            const rect = range.getBoundingClientRect();
-            const vw = window.innerWidth;
-            const below = rect.top < 130;                      // 贴顶的选区：浮层翻到下面去
-            setSel({
-                x: Math.max(72, Math.min(vw - 72, rect.left + rect.width / 2)),
-                y: below ? rect.bottom + 10 : rect.top - 10,
-                below,
+            if (!anchor) return;
+            selCacheRef.current = {
                 anchor,
-            });
-            setSelPalette(false);
+                rects: Array.from(range.getClientRects()).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom })),
+            };
+            setBar(null);
+            setBarMore(false);
         };
         document.addEventListener('selectionchange', onSelChange);
         return () => document.removeEventListener('selectionchange', onSelChange);
     }, [chapter]);
 
-    /** 划一条（颜色就是这一支） */
-    const makeHighlight = async (color: string) => {
-        if (!book || !sel) return;
-        const anchor = sel.anchor;
+    /** 给工具栏定位：贴着选区的上沿（贴顶就翻到下面），x 夹在屏幕里 */
+    const barAt = (rects: Array<{ l: number; t: number; r: number; b: number }>) => {
+        const top = Math.min(...rects.map((r) => r.t));
+        const bottom = Math.max(...rects.map((r) => r.b));
+        const mid = (Math.min(...rects.map((r) => r.l)) + Math.max(...rects.map((r) => r.r))) / 2;
+        const below = top < 130;                       // 贴顶：工具栏翻到选区下面
+        return {
+            x: Math.max(120, Math.min(window.innerWidth - 120, mid)),
+            y: below ? bottom + 14 : top - 10,
+        };
+    };
+
+    /** 划一条：用的是**自己那支笔**的颜色（她：颜色去设置里改，别在浮层里挑） */
+    const makeHighlight = async () => {
+        if (!book || !bar?.anchor) return;
+        const anchor = bar.anchor;
         const now = new Date().toISOString();
         await putAnnotation({
             id: uid(), bookId, ownerId: 'user', anchor, kind: 'highlight',
-            styleSlot: 1, color, contentRev: book.contentRev, status: 'active',
+            styleSlot: 1, contentRev: book.contentRev, status: 'active',
             chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount),
             createdAt: now, updatedAt: now,
         });
         window.getSelection()?.removeAllRanges();
-        setSel(null);
-        setSelPalette(false);
+        selCacheRef.current = null;
+        setBar(null);
         await reloadAnns();
         notify('划上了');
     };
 
-    /** 点已有的划线：改色 / 写批注 / 删掉 */
-    const recolour = async (color: string) => {
-        if (!pickAnn) return;
-        await putAnnotation({ ...pickAnn, color, updatedAt: new Date().toISOString() });
-        setPickAnn(null);
-        setPickPalette(false);
-        await reloadAnns();
-    };
-
+    /** 写想法（划线上的批注：已有的那条改文本，选区的当场划一条再写） */
     const saveNote = async () => {
-        if (!pickAnn) return;
+        if (!bar) return;
         const note = noteDraft.trim();
-        await putAnnotation({
-            ...pickAnn,
-            note: note || undefined,
-            kind: note ? 'note' : 'highlight',
-            updatedAt: new Date().toISOString(),
-        });
-        setPickAnn(null);
-        setPickPalette(false);
+        const target = bar.ann;
+        if (target) {
+            await putAnnotation({
+                ...target,
+                note: note || undefined,
+                kind: note ? 'note' : 'highlight',
+                updatedAt: new Date().toISOString(),
+            });
+        } else if (note && book) {
+            const now = new Date().toISOString();
+            await putAnnotation({
+                id: uid(), bookId, ownerId: 'user', anchor: bar.anchor, kind: 'note',
+                styleSlot: 1, note, contentRev: book.contentRev, status: 'active',
+                chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount),
+                createdAt: now, updatedAt: now,
+            });
+        }
+        window.getSelection()?.removeAllRanges();
+        selCacheRef.current = null;
+        setBar(null);
+        setBarNote(false);
         await reloadAnns();
-        notify(note ? '批注写上了' : '批注清掉了');
+        if (note || target) notify(note ? '想法写上了' : '想法清掉了');
     };
 
     const dropAnn = async () => {
-        if (!pickAnn) return;
-        await deleteAnnotation(pickAnn.id);
-        setPickAnn(null);
-        setPickPalette(false);
+        if (!bar?.ann) return;
+        await deleteAnnotation(bar.ann.id);
+        setBar(null);
         await reloadAnns();
         notify('这条划线删了');
     };
@@ -766,10 +794,10 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     rects.push({ left: r.left - origin.x, top: r.top - origin.y, width: r.width, height: r.height });
                 }
             }
-            if (rects.length > 0) out.push({ id: a.id, color: a.color || prefs.highlightColor, rects });
+            if (rects.length > 0) out.push({ id: a.id, color: highlightColorOf(prefs, a.ownerId), rects });
         }
         setHlRects(out);
-    }, [anns, chapter, step, layoutNonce, prefs.highlightColor]);
+    }, [anns, chapter, step, layoutNonce, prefs.highlightColors]);
 
     // ── 书签：夹在当前这一页上，再点一次拿掉（参考图：夹上了右上角挂条红丝带） ──
     const markHere = useMemo(() => {
@@ -850,7 +878,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         { key: 'share', label: '分享', on: false, run: () => notify('转发卡片在第三批，先欠着') },
         { key: 'detail', label: '书本详情', on: true, run: () => { setSheet(null); onOpenDetails(bookId); } },
         { key: 'book', label: '总结设置', on: true, run: () => setSheet('book') },
-        { key: 'hl', label: '划线设置', on: true, run: () => setSheet('hl') },
+        { key: 'hl', label: '我的划线颜色', on: true, run: () => setSheet('hl') },
         { key: 'style', label: '排版设置', on: true, run: () => { setSheet(null); setPanel('style'); } },
         { key: 'theme', label: '背景主题', on: true, run: () => { setSheet(null); setPanel('theme'); } },
     ], [notify, onOpenDetails, onOpenStats, bookId]);
@@ -906,18 +934,31 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 onClick={(e) => {
                     // 选字那一下松手后浏览器会补一次点击：那不是在翻页
                     if (suppressTapRef.current) { suppressTapRef.current = false; return; }
-                    // 点在一条划线上：开它的浮层（改色 / 写批注 / 删），不翻页
+                    // 点在刚选中的那段话上：出工具栏（她：选中之后点那句话才有工具栏）
+                    const cached = selCacheRef.current;
+                    if (cached && cached.rects.some((r) => e.clientX >= r.l - 6 && e.clientX <= r.r + 6
+                        && e.clientY >= r.t - 8 && e.clientY <= r.b + 8)) {
+                        setPanel(null);
+                        setNoteDraft('');
+                        setBarMore(false);
+                        setBarNote(false);
+                        setBar({ ...barAt(cached.rects), text: cached.anchor.text, anchor: cached.anchor });
+                        return;
+                    }
+                    // 点在一条已有的划线上：同一个工具栏（写想法 / 删掉）
                     const hit = hitAnnAt(e.clientX, e.clientY);
                     if (hit) {
                         setPanel(null);
-                        setSel(null);
                         setNoteDraft(hit.note ?? '');
-                        setPickPalette(false);
-                        setPickAt({ x: Math.max(96, Math.min(window.innerWidth - 96, e.clientX)), y: Math.max(140, e.clientY - 12) });
-                        setPickAnn(hit);
+                        setBarMore(false);
+                        setBarNote(false);
+                        const rects = hitRectsOf(hit);
+                        const at = rects.length > 0 ? barAt(rects) : { x: Math.max(120, Math.min(window.innerWidth - 120, e.clientX)), y: Math.max(140, e.clientY - 12) };
+                        setBar({ ...at, text: hit.anchor.text, anchor: hit.anchor, ann: hit });
                         return;
                     }
-                    setPickAnn(null);
+                    setBar(null);
+                    setBarNote(false);
                     const rect = e.currentTarget.getBoundingClientRect();
                     const ratio = (e.clientX - rect.left) / rect.width;
                     if (ratio < 0.3) { setPanel(null); goPage(-1); }
@@ -953,7 +994,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                             {hlRects.map((h) => h.rects.map((r, i) => (
                                 <div
                                     key={`${h.id}-${i}`}
-                                    className={`rd-hl-rect${pickAnn?.id === h.id ? ' rd-hl-rect-tap' : ''}`}
+                                    className={`rd-hl-rect${bar?.ann?.id === h.id ? ' rd-hl-rect-tap' : ''}`}
                                     style={{
                                         left: r.left, top: r.top, width: r.width, height: r.height,
                                         background: `rgba(${hexTriple(h.color)}, 0.32)`,
@@ -1283,51 +1324,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-            {/* ── 划线颜色（她 2026-09-15：不要那六个死配色，要能自己调、能存预设的调色盘） ── */}
-            {sheet === 'hl' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">划线颜色</div>
-
-                        <div className="rd-group-head"><span>我的笔</span><span>{prefs.highlightPalette.length} 支</span></div>
-                        <div className="rd-hunt-hist">
-                            {prefs.highlightPalette.map((c) => (
-                                <button
-                                    key={c}
-                                    aria-label={c}
-                                    className={`rd-swatch${prefs.highlightColor === c ? ' rd-swatch-on' : ''}`}
-                                    style={{ background: c }}
-                                    onClick={() => setHighlightColor(c)}
-                                    onContextMenu={(e) => { e.preventDefault(); removeHighlightColor(c); }}
-                                />
-                            ))}
-                        </div>
-                        <div className="rd-muted" style={{ marginTop: 8 }}>点一支就用它；长按或右键一支就删掉。</div>
-
-                        <div className="rd-group-head" style={{ marginTop: 'var(--rd-space-4)' }}><span>调一支新的</span></div>
-                        <div className="rd-row" style={{ marginBottom: 'var(--rd-space-2)' }}>
-                            <span className="rd-row-label">颜色</span>
-                            <span className="rd-hl-preview" style={{ background: hslHex(hue, 0.75, lum) }} />
-                        </div>
-                        <input
-                            className="rd-slider rd-slider-hue"
-                            type="range" min={0} max={360} step={1} value={hue}
-                            onChange={(e) => setHue(Number(e.target.value))}
-                            style={{ background: HUE_STRIP }}
-                        />
-                        <input
-                            className="rd-slider"
-                            type="range" min={20} max={90} step={1} value={Math.round(lum * 100)}
-                            onChange={(e) => setLum(Number(e.target.value) / 100)}
-                        />
-                        <div className="rd-btn-row" style={{ marginTop: 'var(--rd-space-3)' }}>
-                            <button className="rd-btn rd-btn-primary" onClick={() => saveHighlightColor(hslHex(hue, 0.75, lum))}>存进我的笔</button>
-                            <button className="rd-btn" onClick={() => setHighlightColor(hslHex(hue, 0.75, lum))}>直接用它</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* ── 我的划线颜色：跟书详情、设置页共用同一张弹卡 ── */}
+            {sheet === 'hl' && <HighlightColorSheet onClose={() => setSheet(null)} />}
 
             {/* ── 更多（参考图里那排胶囊） ── */}
             {sheet === 'more' && (
@@ -1353,107 +1351,70 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-            {/* ── 选中文字：就在这儿挑颜色（她 09-15「调色板在何处」） ── */}
-            {sel && (
+            {/* ── 悬浮工具栏（她 2026-09-15 的参考图）：选中后点那句话出它，
+                不在选中那一刻自己弹（会被 iOS 原生选区菜单挡住）。**不放色卡**——
+                笔的颜色去「更多 → 我的划线颜色」或者设置里改。 ── */}
+            {bar && (
                 <div
-                    className="rd-selpop"
-                    data-rd-page="selpop"
-                    style={{
-                        left: sel.x, top: sel.y,
-                        transform: sel.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
-                    }}
+                    className="rd-bar-tb"
+                    data-rd-page="textbar"
+                    style={{ left: bar.x, top: bar.y }}
                     onMouseDown={(e) => e.preventDefault()}
                     onTouchStart={(e) => e.stopPropagation()}
                 >
-                    <div className="rd-selpop-quote">{sel.anchor.text.slice(0, 42)}</div>
-                    {!selPalette ? (
-                        <>
-                            <div className="rd-selpop-row">
-                                <div className="rd-hunt-hist">
-                                    {prefs.highlightPalette.map((c) => (
-                                        <button
-                                            key={c}
-                                            aria-label={c}
-                                            className={`rd-swatch${prefs.highlightColor === c ? ' rd-swatch-on' : ''}`}
-                                            style={{ background: c }}
-                                            onClick={() => void makeHighlight(c)}
-                                        />
-                                    ))}
-                                </div>
-                                <button className="rd-selpop-btn" onClick={() => setSelPalette(true)}>调色盘</button>
-                            </div>
-                            <div className="rd-selpop-row">
-                                <button className="rd-selpop-btn" onClick={() => void copyToClipboard(sel.anchor.text)}>
-                                    <Copy size={13} />复制
-                                </button>
-                                <span className="rd-selpop-hint">点一支就划上</span>
-                            </div>
-                        </>
+                    {barNote ? (
+                        <div className="rd-bar-tb-note">
+                            <input
+                                className="rd-bar-tb-input"
+                                autoFocus
+                                placeholder="写句想法…"
+                                value={noteDraft}
+                                onChange={(e) => setNoteDraft(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') void saveNote(); }}
+                            />
+                            <button className="rd-bar-tb-text" onClick={() => void saveNote()}>记下</button>
+                            <button className="rd-bar-tb-text" onClick={() => { setBarNote(false); setNoteDraft(bar.ann?.note ?? ''); }}>收回</button>
+                        </div>
                     ) : (
                         <>
-                            <div className="rd-selpop-row">
-                                <span className="rd-hl-preview" style={{ background: hslHex(hue, 0.75, lum) }} />
-                                <button className="rd-selpop-btn" onClick={() => void makeHighlight(hslHex(hue, 0.75, lum))}>就用这支划</button>
-                                <button className="rd-selpop-btn" onClick={() => saveHighlightColor(hslHex(hue, 0.75, lum))}>存进我的笔</button>
-                            </div>
-                            <input
-                                className="rd-slider rd-slider-hue"
-                                type="range" min={0} max={360} step={1} value={hue}
-                                onChange={(e) => setHue(Number(e.target.value))}
-                                style={{ background: HUE_STRIP }}
-                            />
-                            <input
-                                className="rd-slider"
-                                type="range" min={20} max={90} step={1} value={Math.round(lum * 100)}
-                                onChange={(e) => setLum(Number(e.target.value) / 100)}
-                            />
+                            <button className="rd-bar-tb-item" onClick={() => void copyToClipboard(bar.text)}>
+                                <Copy size={17} weight="bold" /><span>复制</span>
+                            </button>
+                            {!bar.ann && (
+                                <button className="rd-bar-tb-item" onClick={() => void makeHighlight()}>
+                                    <Highlighter size={17} weight="bold" /><span>划线</span>
+                                </button>
+                            )}
+                            <button className="rd-bar-tb-item" onClick={() => { setBarNote(true); setNoteDraft(bar.ann?.note ?? ''); }}>
+                                <PencilSimple size={17} weight="bold" /><span>{bar.ann?.note ? '改想法' : '写想法'}</span>
+                            </button>
+                            {barMore && (
+                                <>
+                                    <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
+                                        <ShareNetwork size={17} weight="bold" /><span>分享书摘</span>
+                                    </button>
+                                    <button className="rd-bar-tb-item" onClick={() => notify('AI 问书在第二批')}>
+                                        <ChatCircleDots size={17} weight="bold" /><span>AI 问书</span>
+                                    </button>
+                                    <button className="rd-bar-tb-item" onClick={() => { setSheet('hl'); setBar(null); }}>
+                                        <Palette size={17} weight="bold" /><span>我的颜色</span>
+                                    </button>
+                                </>
+                            )}
+                            {bar.ann && (
+                                <button className="rd-bar-tb-item" onClick={() => void dropAnn()}>
+                                    <Trash size={16} weight="bold" /><span>删掉</span>
+                                </button>
+                            )}
+                            <button
+                                className="rd-bar-tb-item rd-bar-tb-arrow"
+                                aria-label="更多"
+                                onClick={() => setBarMore((v) => !v)}
+                            >
+                                <CaretRight size={16} weight="bold" />
+                            </button>
                         </>
                     )}
-                </div>
-            )}
-
-            {/* ── 点中一条划线：改色 / 写批注 / 删掉 ── */}
-            {pickAnn && (
-                <div
-                    className="rd-selpop"
-                    data-rd-page="annpop"
-                    style={{ left: pickAt.x, top: pickAt.y, transform: 'translate(-50%, -100%)' }}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onTouchStart={(e) => e.stopPropagation()}
-                >
-                    <div className="rd-selpop-quote">{pickAnn.anchor.text.slice(0, 42)}</div>
-                    <div className="rd-selpop-row">
-                        <div className="rd-hunt-hist">
-                            {prefs.highlightPalette.map((c) => (
-                                <button
-                                    key={c}
-                                    aria-label={c}
-                                    className={`rd-swatch${(pickAnn.color || prefs.highlightColor) === c ? ' rd-swatch-on' : ''}`}
-                                    style={{ background: c }}
-                                    onClick={() => void recolour(c)}
-                                />
-                            ))}
-                        </div>
-                        <button className="rd-selpop-btn" onClick={() => setPickPalette((v) => !v)}>调色盘</button>
-                    </div>
-                    {pickPalette && (
-                        <div className="rd-selpop-row">
-                            <span className="rd-hl-preview" style={{ background: hslHex(hue, 0.75, lum) }} />
-                            <button className="rd-selpop-btn" onClick={() => void recolour(hslHex(hue, 0.75, lum))}>换这支</button>
-                            <button className="rd-selpop-btn" onClick={() => saveHighlightColor(hslHex(hue, 0.75, lum))}>存进我的笔</button>
-                        </div>
-                    )}
-                    <div className="rd-selpop-row">
-                        <input
-                            className="rd-field"
-                            style={{ minHeight: 0, padding: '6px 10px', flex: '1 1 auto' }}
-                            placeholder="写句批注…"
-                            value={noteDraft}
-                            onChange={(e) => setNoteDraft(e.target.value)}
-                        />
-                        <button className="rd-selpop-btn" onClick={() => void saveNote()}>记下</button>
-                        <button className="rd-selpop-btn rd-selpop-btn-danger" onClick={() => void dropAnn()}>删掉</button>
-                    </div>
                 </div>
             )}
         </div>

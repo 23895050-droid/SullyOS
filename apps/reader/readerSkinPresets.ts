@@ -37,6 +37,8 @@ export const READER_VAR_KEYS = [
     '--rd-cover-a', '--rd-cover-b', '--rd-cover-ink',
     // 浮层与状态
     '--rd-scrim', '--rd-on-scrim', '--rd-veil', '--rd-danger',
+    // 选中文字浮出来的那条工具栏（她 2026-09-15 给的参考图：深色圆角条）
+    '--rd-toolbar-bg', '--rd-toolbar-ink',
     // 书签丝带（纸上的实物红，不跟着皮肤走）
     '--rd-ribbon',
     // 阴影
@@ -84,6 +86,8 @@ const BASE_SKINS: ReaderSkin[] = [
             '--rd-cover-ink': '#6b6157',
             '--rd-scrim': 'rgba(30, 26, 22, 0.38)',
             '--rd-on-scrim': '#fbf9f6',
+            '--rd-toolbar-bg': '#2b2723',
+            '--rd-toolbar-ink': '#f7f1e6',
             '--rd-veil': '#000000',
             '--rd-danger': '#c1544f',
             '--rd-ribbon': '#e0453a',
@@ -125,6 +129,8 @@ const BASE_SKINS: ReaderSkin[] = [
             '--rd-cover-ink': '#a9a49c',
             '--rd-scrim': 'rgba(0, 0, 0, 0.55)',
             '--rd-on-scrim': '#efebe4',
+            '--rd-toolbar-bg': '#2a2e34',
+            '--rd-toolbar-ink': '#efebe4',
             '--rd-veil': '#000000',
             '--rd-danger': '#d97a72',
             '--rd-ribbon': '#ef5a4d',
@@ -166,6 +172,8 @@ const BASE_SKINS: ReaderSkin[] = [
             '--rd-cover-ink': '#6d5c45',
             '--rd-scrim': 'rgba(59, 47, 34, 0.4)',
             '--rd-on-scrim': '#f7efde',
+            '--rd-toolbar-bg': '#3b2f22',
+            '--rd-toolbar-ink': '#f7efde',
             '--rd-veil': '#000000',
             '--rd-danger': '#a8462f',
             '--rd-ribbon': '#e0453a',
@@ -206,6 +214,8 @@ const BASE_SKINS: ReaderSkin[] = [
             '--rd-cover-ink': '#6f6f76',
             '--rd-scrim': 'rgba(24, 24, 27, 0.38)',
             '--rd-on-scrim': '#ffffff',
+            '--rd-toolbar-bg': '#26262b',
+            '--rd-toolbar-ink': '#ffffff',
             '--rd-veil': '#000000',
             '--rd-danger': '#c0392b',
             '--rd-ribbon': '#e0453a',
@@ -284,6 +294,8 @@ function derived(id: string, label: string, seed: SkinSeed, dark = false): Reade
             '--rd-cover-ink': inkSoft,
             '--rd-scrim': alpha(dark ? '#000000' : ink, dark ? 0.55 : 0.38),
             '--rd-on-scrim': onScrim,
+            '--rd-toolbar-bg': dark ? mix(bg, ink, 0.12) : ink,
+            '--rd-toolbar-ink': dark ? ink : paper,
             '--rd-veil': '#000000',
             '--rd-danger': dark ? '#d97a72' : '#c1544f',
             '--rd-ribbon': dark ? '#ef5a4d' : '#e0453a',
@@ -305,6 +317,13 @@ const MORE_SKINS: ReaderSkin[] = [
 ];
 
 /** 皮肤总表：手调的四张 + 派生的那批（主题面板整张网格就是它） */
+/** hex → "r, g, b"（划线颜色要给 rgba() 用，运行时的值不能写死在骨架层）。 */
+export function hexTriple(hex: string): string {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return '224, 163, 46';
+    return trip(`#${m[1]}`.toLowerCase());
+}
+
 export const READER_SKINS: ReaderSkin[] = [...BASE_SKINS, ...MORE_SKINS];
 
 export function skinById(id: string): ReaderSkin {
@@ -312,27 +331,3 @@ export function skinById(id: string): ReaderSkin {
 }
 
 /** 划线样式槽 1..6 的颜色（每 owner 挑一个槽；`-rgb` 三元组供半透明叠加用）。 */
-export const HIGHLIGHT_SLOTS: Array<{ slot: number; label: string; hex: string; rgb: string }> = [
-    { slot: 1, label: '琥珀', hex: '#e0a32e', rgb: '224, 163, 46' },
-    { slot: 2, label: '藤紫', hex: '#8b6fd0', rgb: '139, 111, 208' },
-    { slot: 3, label: '苔绿', hex: '#5f9e6e', rgb: '95, 158, 110' },
-    { slot: 4, label: '绯红', hex: '#d2545a', rgb: '210, 84, 90' },
-    { slot: 5, label: '湖蓝', hex: '#3f88c5', rgb: '63, 136, 197' },
-    { slot: 6, label: '灰蓝', hex: '#7b8794', rgb: '123, 135, 148' },
-];
-
-/** '#f2c14e' → '242, 193, 78'（自选划线色要的 rgb 三元组，给 rgba() 用） */
-export function hexTriple(hex: string): string {
-    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-    if (!m) return '224, 163, 46';
-    return trip(`#${m[1]}`.toLowerCase());
-}
-
-export function highlightSlotVars(): Record<string, string> {
-    const vars: Record<string, string> = {};
-    for (const s of HIGHLIGHT_SLOTS) {
-        vars[`--rd-hl-${s.slot}`] = s.hex;
-        vars[`--rd-hl-${s.slot}-rgb`] = s.rgb;
-    }
-    return vars;
-}

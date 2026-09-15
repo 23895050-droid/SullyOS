@@ -87,8 +87,6 @@ export const READER_SKELETON_CSS = `
   --rd-page-head: 32px;
   --rd-page-bottom: 54px;
 
-  /* 划线槽 1..6 的颜色由 readerSkinPresets.HIGHLIGHT_SLOTS 供给（见 ReaderSkinPreset） */
-
   background: var(--rd-bg);
   color: var(--rd-ink);
   font-family: var(--rd-font-body);
@@ -581,27 +579,43 @@ export const READER_SKELETON_CSS = `
 .rd-hl-rect { position: absolute; border-radius: var(--rd-radius-hl); background: rgba(var(--rd-hl-rgb), 0.32); }
 .rd-hl-rect-tap { outline: 1px solid var(--rd-accent); outline-offset: 1px; }
 
-/* 选中文字那一刻的小浮层：挑颜色就在这儿（她 2026-09-15「调色板在何处」） */
-.rd-selpop {
-  position: fixed; z-index: 60; transform: translate(-50%, -100%);
-  display: flex; flex-direction: column; gap: var(--rd-space-2);
-  max-width: min(320px, 92vw);
-  padding: var(--rd-space-3); border: 1px solid var(--rd-rule); border-radius: var(--rd-r-lg);
-  background: var(--rd-sheet-bg); box-shadow: var(--rd-shadow);
+/* 选中/点中划线后浮出来的**工具栏**（她 2026-09-15 给的参考图：深色圆角条 + 图标小字 + 右侧 ›）。
+   为什么不是「选中就弹」：那一层会被 iOS 原生的选区菜单压住（她报过）。
+   这里**故意不放色卡**——笔的颜色只有一个地方改（.rd-bar-tb 里的「我的颜色」只是入口）。 */
+.rd-bar-tb {
+  position: fixed; z-index: 62; transform: translate(-50%, -100%);
+  display: flex; align-items: stretch; gap: 2px;
+  padding: var(--rd-space-2);
+  border-radius: var(--rd-r-md);
+  background: var(--rd-toolbar-bg); color: var(--rd-toolbar-ink);
+  box-shadow: var(--rd-shadow);
 }
-.rd-selpop-row { display: flex; align-items: center; gap: var(--rd-space-2); }
-.rd-selpop-quote {
-  max-width: 220px; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* 底下那个小三角：指着被选中的那段话（参考图里也有） */
+.rd-bar-tb::after {
+  content: ''; position: absolute; left: 50%; bottom: -5px; width: 12px; height: 12px;
+  margin-left: -6px; border-radius: var(--rd-radius-hl); transform: rotate(45deg);
+  background: var(--rd-toolbar-bg);
 }
-.rd-selpop-hint { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
-.rd-selpop-btn {
-  display: inline-flex; align-items: center; gap: 4px; border: 0; flex: 0 0 auto;
-  padding: var(--rd-space-1) var(--rd-space-3); border-radius: var(--rd-r-pill);
-  background: var(--rd-chip-bg); color: var(--rd-ink); font-size: var(--rd-fs-sm);
-  white-space: nowrap;
+.rd-bar-tb-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-width: 54px; padding: var(--rd-space-2) 2px;
+  border: 0; background: transparent; color: inherit; white-space: nowrap;
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-tab);
 }
-.rd-selpop-btn-danger { color: var(--rd-danger); }
+.rd-bar-tb-item:active { opacity: 0.6; }
+.rd-bar-tb-arrow { min-width: 26px; justify-content: center; }
+.rd-bar-tb-note { display: flex; align-items: center; gap: var(--rd-space-2); padding: 2px; }
+.rd-bar-tb-input {
+  width: 190px; border: 0; border-radius: var(--rd-r-pill);
+  padding: var(--rd-space-2) var(--rd-space-3);
+  background: var(--rd-toolbar-ink); color: var(--rd-ink);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm);
+}
+.rd-bar-tb-text {
+  border: 0; background: transparent; color: inherit; white-space: nowrap;
+  padding: var(--rd-space-1) var(--rd-space-2);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm);
+}
 
 /* ── 书架 · 顶部（分类选择 + 菜单）、搜索胶囊、四种版式 ──
    参考图 2/3/4/5：顶部一行「All ⌄ …… ···」、大标题、搜索胶囊、四种版式、搜索页、分类页。 */

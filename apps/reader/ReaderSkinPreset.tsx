@@ -11,7 +11,8 @@
 
 import { useMemo } from 'react';
 import { READER_SKELETON_CSS } from './readerCss';
-import { hexTriple, highlightSlotVars, skinById } from './readerSkinPresets';
+import { hexTriple, skinById } from './readerSkinPresets';
+import { highlightColorOf } from './readerPrefs';
 import { useReaderPrefs, type ReaderPrefs, type ReaderTypography } from './readerPrefs';
 
 const FONT_STACKS: Record<string, { body: string; heading: string }> = {
@@ -59,10 +60,10 @@ export function buildReaderCss(prefs: ReaderPrefs): string {
     const layers: string[] = [READER_SKELETON_CSS];
     layers.push(varsToCss('.rd-root', {
         ...skin.vars,
-        ...highlightSlotVars(),
+
         ...typographyVars(prefs.typography),
         // 她自己调的那支笔：划线用 --rd-hl-rgb（六个固定槽留着给角色的）
-        '--rd-hl-rgb': hexTriple(prefs.highlightColor),
+        '--rd-hl-rgb': hexTriple(highlightColorOf(prefs, 'user')),
     }));
     const userGlobal = prefs.cssGlobal?.trim();
     if (userGlobal) layers.push(`.rd-root.rd-user {\n${userGlobal}\n}`);
