@@ -10,6 +10,7 @@
 import { putImageBlob } from '../blobRef';
 import { chapterRowId, deleteBookDeep, patchBook, putBook, putChapters, rdId, type RdBook, type RdChapter } from './readerDb';
 import type { ImportedPayload } from './importTxt';
+import { IMG_MARK, isImagePara } from './importEpub';
 import type { ImportWorkerReply, ImportWorkerRequest } from './importWorker';
 
 export interface ImportProgress {
@@ -87,15 +88,38 @@ async function runParse(
     }
 }
 
-function toChapterRows(bookId: string, payload: ImportedPayload): RdChapter[] {
-    return payload.chapters.map((c, idx) => ({
+function toChapterRows(bookId: string, chapters: ImportedPayload['chapters']): RdChapter[] {
+    return chapters.map((c, idx) => ({
         id: chapterRowId(bookId, idx),
         bookId,
         idx,
         title: c.title,
         paras: c.paras,
-        chars: c.paras.reduce((n, p) => n + p.length, 0),
+        // 插图占位段不算字数（它的「文本」是令牌，不是字）
+        chars: c.paras.reduce((n, p) => n + (isImagePara(p) ? 0 : p.length), 0),
     }));
+}
+
+/** 插图字节 → blobref 令牌，写回占位段（拿不到令牌的那段直接去掉）。 */
+async function materializeImages(chapters: ImportedPayload['chapters']): Promise<ImportedPayload['chapters']> {
+    const out: ImportedPayload['chapters'] = [];
+    for (const c of chapters) {
+        if (!c.images || c.images.length === 0) { out.push(c); continue; }
+        const refs: string[] = [];
+        for (const img of c.images) {
+            refs.push(await putImageBlob(new Blob([img.bytes], { type: img.mime })));
+        }
+        const paras = c.paras
+            .map((p) => {
+                const m = /^\u0000IMG:(\d+)\u0000$/.exec(p.trim());
+                if (!m) return p;
+                const ref = refs[Number(m[1])];
+                return ref ? `${IMG_MARK}${ref}\u0000` : '';
+            })
+            .filter((p) => p !== '');
+        out.push({ ...c, paras });
+    }
+    return out;
 }
 
 /**
@@ -151,7 +175,7 @@ export async function importBookFile(
         };
         await putBook(book);
 
-        const rows = toChapterRows(bookId, payload);
+        const rows = toChapterRows(bookId, await materializeImages(payload.chapters));
         const total = rows.length;
         for (let i = 0; i < total; i += CHAPTER_BATCH) {
             if (opts.signal?.aborted) throw new Error('已取消');

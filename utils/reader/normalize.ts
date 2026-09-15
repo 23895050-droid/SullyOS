@@ -69,6 +69,9 @@ const EN_HEADING = /^(chapter|part|prologue|epilogue)\s*([0-9ivxlcdm]{0,6})\b\s*
 export interface RawChapter {
     title: string;
     paras: string[];
+    /** 插图字节（EPUB 专用）：paras 里的占位段 `\u0000IMG:<下标>\u0000` 按下标引用它，
+     *  主线程导入时换成 blobref 令牌（见 importClient）。 */
+    images?: Array<{ bytes: ArrayBuffer; mime: string }>;
 }
 
 /** 一行是不是章节标题（是就返回标题文本，不是返回 null）。 */

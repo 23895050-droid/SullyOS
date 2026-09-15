@@ -364,7 +364,7 @@ export const READER_SKELETON_CSS = `
 /* 插图（EPUB 里的图）：不跨列断开，顶端对齐当页 */
 .rd-figure {
   display: block; margin: var(--rd-space-4) auto; max-width: 100%;
-  max-height: var(--rd-page-h, 60vh); width: auto; height: auto;
+  max-height: 100%; width: auto; height: auto;
   break-inside: avoid; -webkit-user-select: none; user-select: none;
 }
 /* 页眉：每页顶上那一行小字（参考图里的「第三章」）——定位在正文区上方，不跟着正文滚 */

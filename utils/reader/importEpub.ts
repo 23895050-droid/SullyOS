@@ -11,6 +11,14 @@
 //
 // 产出与 TXT 线共用 ImportedPayload：一章 = spine 里一个 XHTML 文档（EPUB 的惯例），
 // 章名优先取目录，其次取文档里第一个 h1-h6，最后兜底「第 N 节」。
+//
+// 2026-09-15 两处修补（她报「章节目录乱」「epub 解析没图像」）：
+//   · **目录**：以前把 nav/NCX 拍成「文件路径 → 标题」的 Map，同一个文件下的多个锚点
+//     （第1节/第2节…）互相覆盖，只剩最后一个——所以目录里只剩「第4节」这种残条。
+//     现在按**文档顺序**收链接（带锚点），同一文件多个锚点就在锚点处把这一章切成几章。
+//   · **插图**：以前 <img> 直接被 stripTags 剥掉。现在换成占位段
+//     `\u0000IMG:<编号>\u0000`（图片字节随 payload 走），导入时换成 blobref 令牌，
+//     阅读页照着画出来。占位段没有文本节点，分页/锚点都按「零长段落」对待。
 
 import { BlobReader, BlobWriter, TextWriter, ZipReader, type FileEntry } from '@zip.js/zip.js';
 import { contentRevOf, normalizeParagraphs, type RawChapter } from './normalize';
@@ -64,48 +72,125 @@ function resolvePath(base: string, href: string): string {
     return out.join('/');
 }
 
-/**
- * XHTML → 段落数组。块级标签当分段边界，其余标签直接剥掉；
- * 图片/样式/脚本不产出文本（第一期不渲染插图，见计划「明确不做」）。
- */
-export function xhtmlToParagraphs(xhtml: string): string[] {
-    const bodyMatch = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(xhtml);
-    const body = bodyMatch ? bodyMatch[1] : xhtml;
-    const cleaned = body
-        .replace(/<(script|style|head)\b[\s\S]*?<\/\1>/gi, '')
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/(p|div|h[1-6]|li|blockquote|section|article|tr|figcaption|dd|dt)\s*>/gi, '\n')
-        .replace(/<(p|div|h[1-6]|li|blockquote|section|article|tr|figcaption|dd|dt)\b[^>]*>/gi, '\n');
-    const text = decodeEntities(stripTags(cleaned));
-    return normalizeParagraphs(text.split('\n'));
+/** 插图占位段的记号（段文本就是它，阅读页照着画 <img>）。 */
+export const IMG_MARK = '\u0000IMG:';
+// 记号里装的可能是编号（解析阶段）也可能是 blobref 令牌（落库之后），所以不限定内容形状
+const IMG_MARK_RE = /^\u0000IMG:(.+)\u0000$/;
+
+/** 这一段是不是插图占位（`\u0000IMG:3\u0000`）。 */
+export function isImagePara(text: string): boolean {
+    return IMG_MARK_RE.test(text.trim());
 }
 
-/** 目录：(href → 标题)。优先 EPUB3 nav，其次 EPUB2 NCX。 */
-function parseNav(xhtml: string): Map<string, string> {
-    const map = new Map<string, string>();
+/**
+ * XHTML → 段落数组（插图变成占位段）。块级标签当分段边界，其余标签直接剥掉。
+ * 返回的 `images` 是这一章里图片的 src（占位段里的编号就是它的下标）。
+ */
+export function xhtmlToParagraphs(xhtml: string): { paras: string[]; images: string[] } {
+    const bodyMatch = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(xhtml);
+    const body = bodyMatch ? bodyMatch[1] : xhtml;
+    const images: string[] = [];
+    const withMarks = body
+        .replace(/<(script|style|head)\b[\s\S]*?<\/\1>/gi, '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        // 插图：<img src> 与 SVG 里的 <image xlink:href>。整条替换成占位段
+        .replace(/<(?:img|image)\b([^>]*)\/?>/gi, (_all, attrs: string) => {
+            const a = parseAttrs(attrs);
+            const src = a.src || a['xlink:href'] || a.href || '';
+            if (!src || src.startsWith('data:')) return '\n';
+            images.push(src);
+            return `\n${IMG_MARK}${images.length - 1}\u0000\n`;
+        })
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/(p|div|h[1-6]|li|blockquote|section|article|tr|figcaption|dd|dt|figure)\s*>/gi, '\n')
+        .replace(/<(p|div|h[1-6]|li|blockquote|section|article|tr|figcaption|dd|dt|figure)\b[^>]*>/gi, '\n');
+    const text = decodeEntities(stripTags(withMarks));
+    // 占位段单独成段（图夹在文字中间时，前后两截各自成段）
+    const out: string[] = [];
+    for (const raw of text.split('\n')) {
+        if (!raw.includes('\u0000')) { out.push(raw); continue; }
+        for (const piece of raw.split(/(\u0000IMG:\d+\u0000)/)) if (piece) out.push(piece);
+    }
+    return { paras: normalizeParagraphs(out), images };
+}
+
+/** 目录链接（**按文档顺序**，带锚点——一个文件下的第 1/2/3 节各自是一条）。 */
+interface TocLink {
+    /** 相对 OPF 的路径（不含 #锚点） */
+    path: string;
+    /** 锚点 id（没有就空串） */
+    anchor: string;
+    title: string;
+}
+
+/** 取 href 的路径与锚点（先按 base 解析路径，锚点原样留着）。 */
+function splitHref(href: string): { path: string; anchor: string } {
+    const hash = href.indexOf('#');
+    const raw = hash >= 0 ? href.slice(0, hash) : href;
+    const anchor = hash >= 0 ? href.slice(hash + 1) : '';
+    return { path: raw, anchor: decodeURIComponent(anchor) };
+}
+
+/** EPUB3 nav（保序） */
+function parseNav(xhtml: string, base: string): TocLink[] {
+    const out: TocLink[] = [];
     const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
     let m: RegExpExecArray | null;
     while ((m = re.exec(xhtml)) !== null) {
-        const attrs = parseAttrs(m[1]);
-        const href = attrs.href;
+        const href = parseAttrs(m[1]).href;
         if (!href || href.startsWith('http')) continue;
         const title = decodeEntities(stripTags(m[2])).replace(/\s+/g, ' ').trim();
-        if (title) map.set(href.split('#')[0], title);
+        if (!title) continue;
+        const { path, anchor } = splitHref(href);
+        out.push({ path: resolvePath(base, path), anchor, title });
     }
-    return map;
+    return out;
 }
 
-function parseNcx(xml: string): Map<string, string> {
-    const map = new Map<string, string>();
+/** EPUB2 NCX（保序） */
+function parseNcx(xml: string, base: string): TocLink[] {
+    const out: TocLink[] = [];
     const re = /<navPoint\b[\s\S]*?<text\b[^>]*>([\s\S]*?)<\/text>[\s\S]*?<content\b([^>]*)\/?>/gi;
     let m: RegExpExecArray | null;
     while ((m = re.exec(xml)) !== null) {
         const title = decodeEntities(stripTags(m[1])).replace(/\s+/g, ' ').trim();
         const src = parseAttrs(m[2]).src;
-        if (title && src) map.set(src.split('#')[0], title);
+        if (!title || !src) continue;
+        const { path, anchor } = splitHref(src);
+        out.push({ path: resolvePath(base, path), anchor, title });
     }
-    return map;
+    return out;
+}
+
+/** 在原始 XHTML 里找锚点位置（id="x" 或 name="x"）。找不到返回 -1。 */
+function anchorPos(html: string, anchor: string): number {
+    if (!anchor) return -1;
+    const esc = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?:id|name)\\s*=\\s*["']${esc}["']`, 'i');
+    const m = re.exec(html);
+    return m ? m.index : -1;
+}
+
+/** 按锚点把一个 XHTML 切成几段（锚点找不到的那条并进前一段）。 */
+function sliceAtAnchors(xhtml: string, links: TocLink[]): Array<{ title: string; html: string }> {
+    const cuts: Array<{ at: number; title: string }> = [];
+    for (const l of links) {
+        const at = anchorPos(xhtml, l.anchor);
+        if (at >= 0) cuts.push({ at, title: l.title });
+    }
+    if (cuts.length === 0) return [{ title: links[0].title, html: xhtml }];
+    cuts.sort((a, b) => a.at - b.at);
+    // 第一个锚点之前还有正文（章标题页/封面页常见）：带上，
+    // 标题取「指着整个文件的那条链接」（目录里「第一章」通常不带 #锚点）
+    const out: Array<{ title: string; html: string }> = [];
+    if (cuts[0].at > 0) {
+        const head = links.find((l) => !l.anchor)?.title ?? links[0].title;
+        out.push({ title: head, html: xhtml.slice(0, cuts[0].at) });
+    }
+    cuts.forEach((c, i) => {
+        out.push({ title: c.title, html: xhtml.slice(c.at, i + 1 < cuts.length ? cuts[i + 1].at : undefined) });
+    });
+    return out;
 }
 
 // ─── 主流程 ─────────────────────────────────────────────────────
@@ -165,33 +250,70 @@ export async function parseEpub(
         }
         if (spine.length === 0) return { error: '这个 EPUB 的 spine 是空的，抽不出正文' };
 
-        // 目录：EPUB3 nav → EPUB2 NCX
-        let toc = new Map<string, string>();
+        // 目录：EPUB3 nav → EPUB2 NCX（都保序、都带锚点）
+        let links: TocLink[] = [];
         const navItem = [...manifest.values()].find((i) => i.properties.includes('nav'));
         if (navItem) {
             const navText = await readText(resolvePath(opfPath, navItem.href));
-            if (navText) toc = parseNav(navText);
+            if (navText) links = parseNav(navText, opfPath);
         }
-        if (toc.size === 0) {
+        if (links.length === 0) {
             const ncxItem = [...manifest.values()].find((i) => i.mediaType.includes('ncx'));
             if (ncxItem) {
                 const ncxText = await readText(resolvePath(opfPath, ncxItem.href));
-                if (ncxText) toc = parseNcx(ncxText);
+                if (ncxText) links = parseNcx(ncxText, opfPath);
             }
         }
+        // 文件名 → 指向它的目录条（按文档顺序，一个文件可能有多条）
+        const linksByPath = new Map<string, TocLink[]>();
+        for (const l of links) {
+            const list = linksByPath.get(l.path);
+            if (list) list.push(l); else linksByPath.set(l.path, [l]);
+        }
 
-        // 正文
+        // 正文：一个 spine 文件里被目录点了多个锚点，就在锚点处切成几章
         const chapters: RawChapter[] = [];
         for (const item of spine) {
             const path = resolvePath(opfPath, item.href);
             const xhtml = await readText(path);
             if (!xhtml) continue;
-            const paras = xhtmlToParagraphs(xhtml);
-            if (paras.length === 0) continue;
-            const heading = (path in toc ? toc.get(path) : undefined)
-                || pickTag(xhtml, 'h1') || pickTag(xhtml, 'h2') || pickTag(xhtml, 'title')
-                || `第 ${chapters.length + 1} 节`;
-            chapters.push({ title: heading.trim(), paras });
+            const fileLinks = linksByPath.get(path) ?? [];
+            const pieces = fileLinks.length > 1
+                ? sliceAtAnchors(xhtml, fileLinks)
+                : [{ title: fileLinks[0]?.title ?? '', html: xhtml }];
+            for (const piece of pieces) {
+                const { paras, images } = xhtmlToParagraphs(piece.html);
+                if (paras.length === 0) continue;
+                const heading = piece.title
+                    || pickTag(piece.html, 'h1') || pickTag(piece.html, 'h2') || pickTag(piece.html, 'title')
+                    || `第 ${chapters.length + 1} 节`;
+                // 图片：这一章引用到的那些，读成字节随 payload 走（主线程再落令牌）。
+                // 拿不到的（包里没这个文件）把那个占位段直接去掉，编号重排成 blobs 的下标。
+                const blobs: Array<{ bytes: ArrayBuffer; mime: string }> = [];
+                const remap = new Map<number, number>();
+                for (let i = 0; i < images.length; i++) {
+                    if (!paras.some((p) => p.trim() === `${IMG_MARK}${i}\u0000`)) continue;
+                    const entry = byPath.get(resolvePath(path, images[i]));
+                    if (!entry) continue;
+                    const ext = (/\.[a-z0-9]+$/i.exec(images[i])?.[0] ?? '').toLowerCase();
+                    const mime = ext === '.png' ? 'image/png'
+                        : (ext === '.gif' ? 'image/gif'
+                            : (ext === '.svg' ? 'image/svg+xml' : 'image/jpeg'));
+                    const blob = await entry.getData(new BlobWriter(mime));
+                    remap.set(i, blobs.length);
+                    blobs.push({ bytes: await blob.arrayBuffer(), mime });
+                }
+                const finalParas = paras
+                    .map((p) => {
+                        const m = /^\u0000IMG:(\d+)\u0000$/.exec(p.trim());
+                        if (!m) return p;
+                        const to = remap.get(Number(m[1]));
+                        return to === undefined ? '' : `${IMG_MARK}${to}\u0000`;
+                    })
+                    .filter((p) => p !== '');
+                if (finalParas.length === 0) continue;
+                chapters.push({ title: heading.trim(), paras: finalParas, images: blobs.length > 0 ? blobs : undefined });
+            }
         }
         if (chapters.length === 0) return { error: 'EPUB 里没抽出任何正文段落' };
 
@@ -220,7 +342,7 @@ export async function parseEpub(
             chapterStartPara.push(cursor);
             tocOut.push({ title: c.title, chapterIdx: idx });
             cursor += c.paras.length;
-            for (const p of c.paras) totalChars += p.length;
+            for (const p of c.paras) if (!isImagePara(p)) totalChars += p.length;
         });
         return {
             chapters,

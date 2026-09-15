@@ -9,7 +9,7 @@ import { contentRevOf, splitTextToChapters, type RawChapter } from './normalize'
 
 /** 导入产物：EPUB 与 TXT 共用这一份形状（worker → 主线程的传输格式）。 */
 export interface ImportedPayload {
-    chapters: Array<{ title: string; paras: string[] }>;
+    chapters: Array<{ title: string; paras: string[]; images?: Array<{ bytes: ArrayBuffer; mime: string }> }>;
     /** 每章起始段号（全书单调），toc 跳转与百分比换算用 */
     chapterStartPara: number[];
     toc: Array<{ title: string; chapterIdx: number; level?: number }>;

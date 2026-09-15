@@ -20,6 +20,7 @@ import {
     ArrowLeft, BookmarkSimple, CaretLeft, CaretRight, Copy, DotsThree, Lightbulb, ListBullets,
     MagnifyingGlass, TShirt, Trash, X,
 } from '@phosphor-icons/react';
+import { isImagePara } from '../../utils/reader/importEpub';
 import {
     deleteAnnotation, getBook, getChapter, getProgress, listAnnotations, listChapters, putAnnotation,
     putProgress, type RdAnchor, type RdAnnotation, type RdBook, type RdChapter, type RdProgress,
@@ -33,6 +34,7 @@ import {
     saveHighlightColor, setBookMode, setHighlightColor, setTheme, setTypography, useReaderPrefs,
 } from './readerPrefs';
 import { hexTriple, READER_SKINS } from './readerSkinPresets';
+import { useBlobRefUrl } from '../../utils/blobRef';
 import { recordReading } from '../../utils/reader/readerStats';
 import { copyToClipboard } from '../../utils/clipboard';
 
@@ -56,6 +58,16 @@ function anchorFromRange(flow: HTMLElement, range: Range): RdAnchor | null {
         ? [a.idx, range.startOffset, b.idx, range.endOffset]
         : [b.idx, range.endOffset, a.idx, range.startOffset];
     return { startPara, startOffset, endPara, endOffset, text: text.slice(0, 200) };
+}
+
+/** 插图占位段：`\u0000IMG:<blobref 令牌或编号>\u0000`（见 utils/reader/importEpub）。 */
+const imgRefOf = (text: string): string => text.replace(/^\u0000IMG:/, '').replace(/\u0000$/, '');
+
+/** 书里的插图（EPUB）。没有令牌/还没解析出来就先不画，别留个破图。 */
+function ReaderFigure({ refText }: { refText: string }) {
+    const url = useBlobRefUrl(imgRefOf(refText));
+    if (!url) return null;
+    return <img className="rd-figure" src={url} alt="" loading="lazy" />;
 }
 
 const SAVE_DEBOUNCE = 900;
@@ -808,6 +820,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         let cut = false;
         for (const ch of chaptersRef.current) {
             for (let pi = 0; pi < ch.paras.length; pi++) {
+                if (isImagePara(ch.paras[pi])) continue;      // 插图不是字，别拿令牌去搜
                 const at = ch.paras[pi].toLowerCase().indexOf(lower);
                 if (at < 0) continue;
                 list.push({
@@ -931,7 +944,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         <div className="rd-reader-flow" ref={flowRef}>
                             {chapter && <div className="rd-reader-chapter">{chapter.title}</div>}
                             {chapter?.paras.map((p, i) => (
-                                <p className="rd-para" key={i} data-para-idx={i}>{p}</p>
+                                <p className="rd-para" key={i} data-para-idx={i}>
+                                    {isImagePara(p) ? <ReaderFigure refText={p} /> : p}
+                                </p>
                             ))}
                         </div>
                         <div className="rd-hl-layer" aria-hidden>
