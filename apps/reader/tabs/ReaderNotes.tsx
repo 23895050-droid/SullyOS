@@ -29,7 +29,11 @@ export default function ReaderNotes() {
             const books = await listBooks();
             const out: Group[] = [];
             for (const b of books) {
-                const items = await listAnnotations(b.id);
+                // 书签不算笔记（她 2026-09-15 报的：笔记页里混进了书签）——
+                // 书签归书详情那个「书签」页签，这里只收划线和批注
+                const items = (await listAnnotations(b.id))
+                    .filter((a) => a.kind !== 'bookmark')
+                    .sort((x, y) => x.anchor.startPara - y.anchor.startPara || x.anchor.startOffset - y.anchor.startOffset);
                 if (items.length > 0) out.push({ book: b, items });
             }
             setGroups(out);
