@@ -83,6 +83,8 @@ export const READER_SKELETON_CSS = `
      到离屏幕底 88px 结束（= 安全区上 54px）。上下栏是遮罩，压在正文上——**不占位**，
      所以正文该铺到哪就铺到哪，被盖住的那几行翻页后会从页顶露出来。 */
   --rd-page-top: 10px;
+  /* 页眉（那一行小章节名）占的高度 + 它和正文之间的空 —— 正文从它下面才开始 */
+  --rd-page-head: 32px;
   --rd-page-bottom: 54px;
 
   /* 划线槽 1..6 的颜色由 readerSkinPresets.HIGHLIGHT_SLOTS 供给（见 ReaderSkinPreset） */
@@ -341,13 +343,27 @@ export const READER_SKELETON_CSS = `
 /* 正文从标准上边距开始（不是从顶栏下面开始——顶栏是遮罩，压在上面），
    到标准下边距结束；底栏那 92px 里有 38px 压在正文最后一行上，
    翻页时那一行会从页顶升上来——**不占位、不丢字**。 */
-.rd-reader-clip { position: absolute; left: 0; right: 0; top: var(--rd-page-top); overflow: hidden; }
+.rd-reader-clip { position: absolute; left: 0; right: 0; top: calc(var(--rd-page-top) + var(--rd-page-head)); overflow: hidden; }
 .rd-reader-flow {
   position: absolute; left: var(--rd-page-gutter); right: var(--rd-page-gutter); top: 0;
   will-change: transform;
   transition: transform 260ms cubic-bezier(0.33, 0.7, 0.4, 1);
 }
-.rd-reader-kicker { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); letter-spacing: 0.08em; margin-bottom: var(--rd-space-3); }
+/* 页眉：每页顶上那一行小字（参考图里的「第三章」）——定位在正文区上方，不跟着正文滚 */
+.rd-reader-head {
+  position: absolute; left: var(--rd-page-gutter); right: var(--rd-page-gutter);
+  top: var(--rd-page-top); z-index: 5;
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); letter-spacing: 0.04em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 页脚：左下时间 + 右下页码（参考图那行 8:29 PM / 103 / 334）。字小，跟标注同一档 */
+.rd-reader-footnote {
+  position: absolute; left: var(--rd-page-gutter); right: var(--rd-page-gutter);
+  bottom: calc(max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 16px);
+  z-index: 19; pointer-events: none;
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--rd-space-3);
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums;
+}
 /* 章标题是「书里的东西」，跟着正文字号走（界面那些字号是固定的，见 .rd-root 那段注释） */
 .rd-reader-chapter { font-family: var(--rd-font-heading); font-size: var(--rd-fs-chapter); line-height: 1.4; margin: 0 0 var(--rd-space-5); font-weight: 600; }
 .rd-para {

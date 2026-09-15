@@ -78,6 +78,8 @@ interface HuntHit {
 /** 上下栏的本体高度 + 正文的上下标准边距（跟骨架层里的 --rd-bar-h / --rd-foot-h /
     --rd-page-top / --rd-page-bottom 一一对应，改一处要改两处） */
 const PAGE_TOP = 10;
+/** 页眉（小章节名）那行占的高度 + 它和正文之间的空 */
+const PAGE_HEAD = 32;
 const PAGE_BOTTOM = 54;
 
 /** HSL → hex：调色盘两根条（色相 + 明度）就能调出任意一支笔，不用上取色器 */
@@ -271,7 +273,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
      * 翻页也不会跳（她 2026-09-15 说的「不是把内容顶来顶去」）。
      */
     const contentH = useCallback(
-        () => Math.max(40, (viewportRef.current?.clientHeight ?? 0) - PAGE_TOP - PAGE_BOTTOM),
+        () => Math.max(40, (viewportRef.current?.clientHeight ?? 0) - PAGE_TOP - PAGE_HEAD - PAGE_BOTTOM),
         [],
     );
 
@@ -486,6 +488,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const remainSec = book
         ? Math.max(0, (book.totalChars * (1 - percent / 100)) / CHARS_PER_SEC)
         : 0;
+    /** 页脚那行时间（20 秒一跳的 tick 会让它自己走） */
+    const nowD = new Date();
+    const clockText = `${nowD.getHours()}:${String(nowD.getMinutes()).padStart(2, '0')}`;
     const bookMode = readingModeFor(prefs, bookId);
 
     const jumpChapter = (idx: number) => {
@@ -692,17 +697,22 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         ref={flowRef}
                         style={{ transform: `translateY(${-top}px)`, transition: restoringRef.current ? 'none' : undefined }}
                     >
-                        {/* 章标题自己就写着「第一章 启航」的时候不再重复一行 kicker */}
-                        {chapter && !/^第\s*[0-9一二三四五六七八九十百零]+\s*[章卷回节篇]/.test(chapter.title.trim()) && (
-                            <div className="rd-reader-kicker">第 {chapterIdx + 1} 章</div>
-                        )}
                         {chapter && <div className="rd-reader-chapter">{chapter.title}</div>}
                         {chapter?.paras.map((p, i) => (
                             <p className="rd-para" key={i} data-para-idx={i}>{p}</p>
                         ))}
                     </div>
                 </div>
+                {/* 页眉：每一页顶上那行小字（参考图里的「第三章」）——定位在正文区上方，不跟着滚 */}
+                {chapter && <div className="rd-reader-head">第 {chapterIdx + 1} 章</div>}
                 <div className="rd-reader-veil" style={{ opacity: brightness }} />
+            </div>
+
+            {/* 页脚：左下时间 + 右下页码（参考图那行 8:29 PM / 103 / 334）；深度沉浸时它露出来，
+                上下栏一亮就压在它上面（栏是遮罩） */}
+            <div className="rd-reader-footnote">
+                <span>{clockText}</span>
+                <span>{pages.length > 0 ? `${pageIdx + 1} / ${pages.length}` : ''}</span>
             </div>
 
             {atEnd && (
