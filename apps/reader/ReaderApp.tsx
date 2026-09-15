@@ -148,6 +148,7 @@ export default function ReaderApp({ onBack }: Props) {
                         notify={notify}
                         refreshToken={refreshToken}
                         onChanged={refresh}
+                        onExit={onBack}
                     />
                 )}
                 {tab === 'notes' && <ReaderNotes />}

@@ -93,8 +93,35 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
 
     const pct = Math.round(prog?.percent ?? 0);
     const state = pct >= 99 ? '读完' : pct > 0 ? '在读' : '未读';
-    const notes = anns.filter((a) => a.kind === 'note' || a.kind === 'highlight');
-    const bookmarks = anns.filter((a) => a.kind === 'bookmark');
+    const notes = anns
+        .filter((a) => a.kind === 'note' || a.kind === 'highlight')
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const bookmarks = anns
+        .filter((a) => a.kind === 'bookmark')
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    /** 段号 → 第几章（老批注没记章节号） */
+    const chapterOfPara = (para: number) => {
+        const starts = book.chapterStartPara ?? [];
+        let ci = 0;
+        for (let i = 0; i < starts.length; i++) if (starts[i] <= para) ci = i;
+        return ci;
+    };
+    const chapterTitleOf = (ci: number) => book.toc.find((t) => t.chapterIdx === ci)?.title ?? `第 ${ci + 1} 章`;
+    /** 全书百分比：书签存了就用存的，没存就按章位置估 */
+    const pctOfAnn = (a: RdAnnotation) => {
+        if (typeof a.percent === 'number') return a.percent.toFixed(2);
+        const ci = a.chapterIdx ?? chapterOfPara(a.anchor.startPara);
+        const span = 100 / Math.max(1, book.chapterCount);
+        return (ci * span).toFixed(2);
+    };
+    /** 2026-09-14 20:13:31（照参考图那样带时间） */
+    const stampOf = (iso: string) => {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+        const q = (n: number) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${q(d.getMonth() + 1)}-${q(d.getDate())} ${q(d.getHours())}:${q(d.getMinutes())}:${q(d.getSeconds())}`;
+    };
     const mode = readingModeFor(prefs, bookId);
 
     const setRating = (n: number) => {
@@ -222,28 +249,49 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                 )}
 
                 {tab === 'notes' && (
-                    <div className="rd-detail-card">
-                        {notes.length === 0 ? (
-                            <div className="rd-empty" style={{ padding: '32px 0' }}>
-                                <div className="rd-empty-text">这本书上还没有划线批注。</div>
-                            </div>
-                        ) : (
-                            <div className="rd-muted">{notes.length} 条</div>
-                        )}
-                    </div>
+                    notes.length === 0 ? (
+                        <div className="rd-empty" style={{ padding: '32px 0' }}>
+                            <div className="rd-empty-text">这本书上还没有划线批注。</div>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="rd-bmk-head"><span>{notes.length} 条</span></div>
+                            {notes.map((a) => (
+                                <div className="rd-bmk-card" key={a.id}>
+                                    <div className="rd-bmk-chapter">{chapterTitleOf(a.chapterIdx ?? chapterOfPara(a.anchor.startPara))}</div>
+                                    <div className="rd-bmk-text">{a.anchor.text || '（没存下原文）'}</div>
+                                    {a.note && <div className="rd-bmk-note">{a.note}</div>}
+                                    <div className="rd-bmk-foot">
+                                        <span>{stampOf(a.createdAt)}</span>
+                                        <span>{pctOfAnn(a)}%</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </>
+                    )
                 )}
 
                 {tab === 'bookmarks' && (
-                    <div className="rd-detail-card">
-                        {bookmarks.length === 0 ? (
-                            <div className="rd-empty" style={{ padding: '32px 0' }}>
-                                <BookmarkSimple size={30} weight="thin" />
-                                <div className="rd-empty-text">还没有书签。</div>
-                            </div>
-                        ) : (
-                            <div className="rd-muted">{bookmarks.length} 条</div>
-                        )}
-                    </div>
+                    bookmarks.length === 0 ? (
+                        <div className="rd-empty" style={{ padding: '32px 0' }}>
+                            <BookmarkSimple size={30} weight="thin" />
+                            <div className="rd-empty-text">还没有书签。读到想记的地方，点阅读页右上角那个书签。</div>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="rd-bmk-head"><span>{bookmarks.length} 条</span></div>
+                            {bookmarks.map((a) => (
+                                <div className="rd-bmk-card" key={a.id}>
+                                    <div className="rd-bmk-chapter">{chapterTitleOf(a.chapterIdx ?? chapterOfPara(a.anchor.startPara))}</div>
+                                    {a.anchor.text && <div className="rd-bmk-text">{a.anchor.text}</div>}
+                                    <div className="rd-bmk-foot">
+                                        <span>{stampOf(a.createdAt)}</span>
+                                        <span>{pctOfAnn(a)}%</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </>
+                    )
                 )}
 
                 {tab === 'more' && (

@@ -971,7 +971,7 @@ const PhoneShell: React.FC = () => {
       case AppID.Album: return <AlbumApp />;
       case AppID.ImageGen: return <CameraApp />;
       case AppID.NoxHome: return <NoxHomeApp />;
-      case AppID.Reading: return <ReaderApp />;
+      case AppID.Reading: return <ReaderApp onBack={closeApp} />;
       case AppID.Date: return <DateApp />;
       case AppID.User: return <UserApp />;
       case AppID.Journal: return <JournalApp />; 

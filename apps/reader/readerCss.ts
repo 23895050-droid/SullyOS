@@ -333,7 +333,12 @@ export const READER_SKELETON_CSS = `
 .rd-reader-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 /* 按「这一页的内容高度」裁切：视口通常比一页的内容高一点，不裁的话下一页的第一行
    会在底部露出半个字的边（书页本来就该在页边界处切断，不露下一页的字头）。 */
-.rd-reader-clip { position: absolute; left: 0; right: 0; top: var(--rd-bar-h); overflow: hidden; }
+/* 底部**不留白**：裁切区比一页多出一个底栏的高度，正文一直铺到屏幕底、由底栏盖住；
+   被盖住的那一截是「下一页的开头」，翻过去就从页顶露出来——一个字都不丢（她 2026-09-15 要的）。 */
+.rd-reader-clip {
+  position: absolute; left: 0; right: 0; top: var(--rd-bar-h); overflow: hidden;
+  height: calc(var(--rd-page-h, 0px) + var(--rd-foot-h) + max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+}
 .rd-reader-flow {
   position: absolute; left: var(--rd-page-gutter); right: var(--rd-page-gutter); top: 0;
   will-change: transform;
@@ -795,8 +800,24 @@ export const READER_SKELETON_CSS = `
 }
 .rd-hunt-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .rd-hunt-body::-webkit-scrollbar { width: 0; }
-/* 分类面板：从顶部展开的一块（把书架内容往下推），不是新页面 */
-.rd-catpanel { background: var(--rd-bg-2); border-radius: var(--rd-r-lg); padding: var(--rd-space-4) var(--rd-space-2) var(--rd-space-4); margin-bottom: var(--rd-space-4); animation: rd-rise 200ms ease-out; }
+/* ── 书详情：书签 / 笔记的卡片（参考图 13：章节名 · 引文 · 时间 + 百分比） ── */
+.rd-bmk-head { display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-3); color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); margin: var(--rd-space-3) 0 var(--rd-space-2); }
+.rd-bmk-card { background: var(--rd-card); border-radius: var(--rd-r-lg); box-shadow: var(--rd-shadow-sm); padding: var(--rd-space-4); margin-bottom: var(--rd-space-3); }
+.rd-bmk-chapter { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); margin-bottom: 6px; }
+.rd-bmk-text { font-size: var(--rd-fs-md); line-height: 1.7; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
+.rd-bmk-note { font-size: var(--rd-fs-sm); line-height: 1.7; color: var(--rd-accent); margin-top: 6px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.rd-bmk-foot { display: flex; align-items: baseline; justify-content: space-between; gap: var(--rd-space-3); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); margin-top: var(--rd-space-3); font-variant-numeric: tabular-nums; }
+
+/* 分类面板：从顶部展开的一块，**盖在书架上面**（不是把内容往下推） */
+.rd-catpanel {
+  position: absolute; left: var(--rd-space-2); right: var(--rd-space-2);
+  top: calc(var(--chrome-top, 0px) + 46px); z-index: 30;
+  max-height: calc(100% - var(--chrome-top, 0px) - 66px); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--rd-sheet-bg); border-radius: var(--rd-r-lg); box-shadow: var(--rd-shadow);
+  padding: var(--rd-space-4) var(--rd-space-2) var(--rd-space-4);
+  animation: rd-rise 200ms ease-out;
+}
+.rd-catpanel::-webkit-scrollbar { width: 0; }
 .rd-caret-up { transform: rotate(180deg); }
 .rd-hunt-hist { display: flex; flex-wrap: wrap; gap: var(--rd-space-2); }
 .rd-slider-hue { height: 14px; border-radius: var(--rd-r-pill); appearance: none; -webkit-appearance: none; }

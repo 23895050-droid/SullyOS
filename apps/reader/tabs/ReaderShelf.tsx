@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    BookOpen, CaretDown, Check, DotsThree, Folder, MagnifyingGlass, Plus, Star, Tag, Trash, User, X,
+    ArrowLeft, BookOpen, CaretDown, Check, DotsThree, Folder, MagnifyingGlass, Plus, Star, Tag, Trash, User, X,
 } from '@phosphor-icons/react';
 import { deleteBookDeep, getProgress, listBooks, patchBook, putBook, type RdBook, type RdProgress } from '../../../utils/reader/readerDb';
 import {
@@ -25,6 +25,8 @@ import ReaderCover, { shrinkCoverImage } from '../ReaderCover';
 
 interface Props {
     onOpenBook: (bookId: string) => void;
+    /** 退出书房（回桌面/来处）——书架是 App 首页，出口在这儿 */
+    onExit?: () => void;
     onOpenDetails: (bookId: string) => void;
     notify: (msg: string) => void;
     /** 已导入但还没打开：书架自己刷新（ReaderApp 传自增的号） */
@@ -474,7 +476,7 @@ function CatRow({ icon, label, count, onClick, editing, draft = '', onDraft, onR
     );
 }
 
-export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refreshToken, onChanged }: Props) {
+export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refreshToken, onChanged, onExit }: Props) {
     const prefs = useReaderPrefs();
     const [books, setBooks] = useState<RdBook[]>([]);
     const [prog, setProg] = useState<Record<string, RdProgress | null>>({});
@@ -692,7 +694,9 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
             {/* 顶部一行：中间分类（参考图的 All ⌄）+ 右上 ···
                 点中间那颗直接进分类页（参考图 9 那张「文件夹式」的），不再弹小菜单 */}
             <div className="rd-shelf-top" style={{ position: 'relative' }}>
-                <span className="rd-shelf-top-spacer" />
+                {onExit
+                    ? <button className="rd-icon-btn" onClick={onExit} aria-label="退出书房"><ArrowLeft size={20} /></button>
+                    : <span className="rd-shelf-top-spacer" />}
                 <button className="rd-shelf-cat" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
                     {catFilter === '__all__' ? '全部' : catFilter}
                     <CaretDown size={13} weight="bold" className={catOpen ? 'rd-caret-up' : undefined} />

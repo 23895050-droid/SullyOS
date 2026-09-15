@@ -685,7 +685,10 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 onTouchMove={onTouchMove}
                 onTouchEnd={onTouchEnd}
             >
-                <div className="rd-reader-clip" style={{ height: pages[pageIdx]?.height ?? '100%' }}>
+                <div
+                    className="rd-reader-clip"
+                    style={{ '--rd-page-h': `${pages[pageIdx]?.height ?? 9999}px` } as React.CSSProperties}
+                >
                     <div
                         className="rd-reader-flow"
                         ref={flowRef}
