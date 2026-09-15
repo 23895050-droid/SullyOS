@@ -235,8 +235,10 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
      * 两种情况共用这一条：选中一段话（划线/复制/写想法）、点中已有的划线（写想法/删掉）。
      */
     const [bar, setBar] = useState<{ x: number; y: number; text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
-    /** 工具栏换成写想法那一屏 */
-    const [barNote, setBarNote] = useState(false);
+    /** 笔记面板开着没有（照 #24：取消 / 笔记 / 存下 + 引文 + 文本框） */
+    const [noteOpen, setNoteOpen] = useState(false);
+    /** 这条笔记写在哪儿：已有划线（ann）或刚选中的一段话 */
+    const [noteTarget, setNoteTarget] = useState<{ text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
     const [noteDraft, setNoteDraft] = useState('');
     /** 最近一次选区（连行矩形一起记）：点选中的话那一刻，原生已经可能把选区收掉了，得靠这份缓存 */
     const selCacheRef = useRef<{ rects: Array<{ l: number; t: number; r: number; b: number }>; anchor: RdAnchor } | null>(null);
@@ -730,11 +732,19 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         notify('划上了');
     };
 
+    /** 划线编辑里改这一条的颜色（单条覆盖；没改过的还是 owner 那支笔） */
+    const recolourAnn = async (hex: string) => {
+        if (!bar?.ann) return;
+        await putAnnotation({ ...bar.ann, color: hex, updatedAt: new Date().toISOString() });
+        await reloadAnns();
+        setBar({ ...bar, ann: { ...bar.ann, color: hex } });
+    };
+
     /** 写想法（划线上的批注：已有的那条改文本，选区的当场划一条再写） */
     const saveNote = async () => {
-        if (!bar) return;
+        if (!noteTarget) return;
         const note = noteDraft.trim();
-        const target = bar.ann;
+        const target = noteTarget.ann;
         if (target) {
             await putAnnotation({
                 ...target,
@@ -745,7 +755,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         } else if (note && book) {
             const now = new Date().toISOString();
             await putAnnotation({
-                id: uid(), bookId, ownerId: 'user', anchor: bar.anchor, kind: 'note',
+                id: uid(), bookId, ownerId: 'user', anchor: noteTarget.anchor, kind: 'note',
                 styleSlot: 1, note, contentRev: book.contentRev, status: 'active',
                 chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount),
                 createdAt: now, updatedAt: now,
@@ -753,10 +763,18 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         }
         window.getSelection()?.removeAllRanges();
         selCacheRef.current = null;
+        setNoteOpen(false);
         setBar(null);
-        setBarNote(false);
         await reloadAnns();
-        if (note || target) notify(note ? '想法写上了' : '想法清掉了');
+        if (note || target) notify(note ? '笔记写上了' : '笔记清掉了');
+    };
+
+    /** 打开笔记面板（照 #24）：引文 + 文本框，取消/存下 */
+    const openNote = (target: { text: string; anchor: RdAnchor; ann?: RdAnnotation }) => {
+        setNoteTarget(target);
+        setNoteDraft(target.ann?.note ?? '');
+        setNoteOpen(true);
+        setBar(null);
     };
 
     const dropAnn = async () => {
@@ -791,7 +809,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     rects.push({ left: r.left - origin.x, top: r.top - origin.y, width: r.width, height: r.height });
                 }
             }
-            if (rects.length > 0) out.push({ id: a.id, color: highlightColorOf(prefs, a.ownerId), rects });
+            if (rects.length > 0) out.push({ id: a.id, color: a.color ?? highlightColorOf(prefs, a.ownerId), rects });
         }
         setHlRects(out);
     }, [anns, chapter, step, layoutNonce, prefs.highlightColors]);
@@ -936,8 +954,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     if (cached && cached.rects.some((r) => e.clientX >= r.l - 6 && e.clientX <= r.r + 6
                         && e.clientY >= r.t - 8 && e.clientY <= r.b + 8)) {
                         setPanel(null);
-                        setNoteDraft('');
-                        setBarNote(false);
                         setBar({ ...barAt(cached.rects), text: cached.anchor.text, anchor: cached.anchor });
                         return;
                     }
@@ -945,15 +961,12 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     const hit = hitAnnAt(e.clientX, e.clientY);
                     if (hit) {
                         setPanel(null);
-                        setNoteDraft(hit.note ?? '');
-                        setBarNote(false);
                         const rects = hitRectsOf(hit);
                         const at = rects.length > 0 ? barAt(rects) : { x: Math.max(120, Math.min(window.innerWidth - 120, e.clientX)), y: Math.max(140, e.clientY - 12) };
                         setBar({ ...at, text: hit.anchor.text, anchor: hit.anchor, ann: hit });
                         return;
                     }
                     setBar(null);
-                    setBarNote(false);
                     const rect = e.currentTarget.getBoundingClientRect();
                     const ratio = (e.clientX - rect.left) / rect.width;
                     if (ratio < 0.3) { setPanel(null); goPage(-1); }
@@ -1346,10 +1359,53 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-            {/* ── 悬浮工具栏（她 2026-09-15 的参考图）：选中后点那句话出它，
-                不在选中那一刻自己弹（会被 iOS 原生选区菜单挡住）。**不放色卡**——
-                笔的颜色去「更多 → 划线设置」改。 ── */}
-            {bar && (
+                        {/* ── 点中一条已有的划线：**划线编辑**（照她给的参考图：上面一排颜色改这一条，
+                下面一排操作）。颜色改的是**这一条**（没改过的还是「谁划的」那支笔）。 ── */}
+            {bar?.ann && (
+                <div
+                    className="rd-edit-bar"
+                    data-rd-page="annedit"
+                    style={{ left: bar.x, top: bar.y }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                >
+                    <div className="rd-edit-colors">
+                        {prefs.highlightPalette.map((c) => (
+                            <button
+                                key={c}
+                                aria-label={c}
+                                className={`rd-edit-dot${(bar.ann!.color ?? highlightColorOf(prefs, 'user')) === c ? ' rd-edit-dot-on' : ''}`}
+                                style={{ background: c }}
+                                onClick={() => void recolourAnn(c)}
+                            />
+                        ))}
+                        <button className="rd-edit-more" onClick={() => { setSheet('hl'); setBar(null); }}>划线设置</button>
+                    </div>
+                    <div className="rd-edit-acts">
+                        <button className="rd-edit-act" onClick={() => void copyToClipboard(bar.text)}>
+                            <Copy size={17} weight="bold" /><span>复制</span>
+                        </button>
+                        <button className="rd-edit-act" onClick={() => openNote({ text: bar.text, anchor: bar.anchor, ann: bar.ann })}>
+                            <PencilSimple size={17} weight="bold" /><span>{bar.ann.note ? '改笔记' : '笔记'}</span>
+                        </button>
+                        <button
+                            className="rd-edit-act"
+                            onClick={() => { setSheet('hunt'); setHuntWord(bar.text.slice(0, 12)); setHunt(null); setBar(null); }}
+                        >
+                            <MagnifyingGlass size={17} weight="bold" /><span>搜索</span>
+                        </button>
+                        <button className="rd-edit-act" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
+                            <ShareNetwork size={17} weight="bold" /><span>分享</span>
+                        </button>
+                        <button className="rd-edit-act rd-edit-act-danger" onClick={() => void dropAnn()}>
+                            <Trash size={17} weight="bold" /><span>删掉</span>
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 选中一段话（还没划线）：六项操作条（她 09-15 批过的那版，一次出全） ── */}
+            {bar && !bar.ann && (
                 <div
                     className="rd-bar-tb"
                     data-rd-page="textbar"
@@ -1357,52 +1413,46 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     onMouseDown={(e) => e.preventDefault()}
                     onTouchStart={(e) => e.stopPropagation()}
                 >
-                    {barNote ? (
-                        <div className="rd-bar-tb-note">
-                            <input
-                                className="rd-bar-tb-input"
-                                autoFocus
-                                placeholder="写句想法…"
-                                value={noteDraft}
-                                onChange={(e) => setNoteDraft(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') void saveNote(); }}
-                            />
-                            <button className="rd-bar-tb-text" onClick={() => void saveNote()}>记下</button>
-                            <button className="rd-bar-tb-text" onClick={() => { setBarNote(false); setNoteDraft(bar.ann?.note ?? ''); }}>收回</button>
-                        </div>
-                    ) : (
-                        <>
-                            {/* 六项一次出全（她 2026-09-15：别「先三个、点箭头再出三个」，
-                                留六个那一版就行）。选区上多一个「划线」，已有划线上多一个「删掉」。 */}
-                            <button className="rd-bar-tb-item" onClick={() => void copyToClipboard(bar.text)}>
-                                <Copy size={17} weight="bold" /><span>复制</span>
-                            </button>
-                            {!bar.ann && (
-                                <button className="rd-bar-tb-item" onClick={() => void makeHighlight()}>
-                                    <Highlighter size={17} weight="bold" /><span>划线</span>
-                                </button>
-                            )}
-                            <button className="rd-bar-tb-item" onClick={() => { setBarNote(true); setNoteDraft(bar.ann?.note ?? ''); }}>
-                                <PencilSimple size={17} weight="bold" /><span>{bar.ann?.note ? '改想法' : '写想法'}</span>
-                            </button>
-                            <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
-                                <ShareNetwork size={17} weight="bold" /><span>分享书摘</span>
-                            </button>
-                            <button className="rd-bar-tb-item" onClick={() => notify('讨论（不是问答）在下一批')}>
-                                <ChatCircleDots size={17} weight="bold" /><span>讨论</span>
-                            </button>
-                            <button className="rd-bar-tb-item" onClick={() => { setSheet('hl'); setBar(null); }}>
-                                <Palette size={17} weight="bold" /><span>划线设置</span>
-                            </button>
-                            {bar.ann && (
-                                <button className="rd-bar-tb-item" onClick={() => void dropAnn()}>
-                                    <Trash size={16} weight="bold" /><span>删掉</span>
-                                </button>
-                            )}
-                        </>
-                    )}
+                    <button className="rd-bar-tb-item" onClick={() => void copyToClipboard(bar.text)}>
+                        <Copy size={17} weight="bold" /><span>复制</span>
+                    </button>
+                    <button className="rd-bar-tb-item" onClick={() => void makeHighlight()}>
+                        <Highlighter size={17} weight="bold" /><span>划线</span>
+                    </button>
+                    <button className="rd-bar-tb-item" onClick={() => openNote({ text: bar.text, anchor: bar.anchor })}>
+                        <PencilSimple size={17} weight="bold" /><span>写笔记</span>
+                    </button>
+                    <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
+                        <ShareNetwork size={17} weight="bold" /><span>分享书摘</span>
+                    </button>
+                    <button className="rd-bar-tb-item" onClick={() => notify('讨论（不是问答）在下一批')}>
+                        <ChatCircleDots size={17} weight="bold" /><span>讨论</span>
+                    </button>
+                    <button className="rd-bar-tb-item" onClick={() => { setSheet('hl'); setBar(null); }}>
+                        <Palette size={17} weight="bold" /><span>划线设置</span>
+                    </button>
                 </div>
             )}
+
+            {/* ── 笔记面板（照她给的 Edit Note 参考图：取消 / 笔记 / 存下 + 引文 + 文本框） ── */}
+            {noteOpen && noteTarget && (
+                <div className="rd-notepanel" data-rd-page="notepanel">
+                    <div className="rd-notepanel-head">
+                        <button className="rd-notepanel-btn" onClick={() => setNoteOpen(false)}>取消</button>
+                        <span className="rd-notepanel-title">笔记</span>
+                        <button className="rd-notepanel-btn rd-notepanel-save" onClick={() => void saveNote()}>存下</button>
+                    </div>
+                    <div className="rd-notepanel-quote">{noteTarget.text}</div>
+                    <textarea
+                        className="rd-notepanel-area"
+                        autoFocus
+                        placeholder="写点什么…"
+                        value={noteDraft}
+                        onChange={(e) => setNoteDraft(e.target.value)}
+                    />
+                </div>
+            )}
+
         </div>
     );
 }

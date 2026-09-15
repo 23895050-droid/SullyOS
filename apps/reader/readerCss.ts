@@ -617,6 +617,55 @@ export const READER_SKELETON_CSS = `
   font-family: var(--rd-font-body); font-size: var(--rd-fs-sm);
 }
 
+/* ── 划线编辑（点中一条已有的划线）：上面一排颜色改**这一条**，下面一排操作 ──
+   浅色浮条（跟上面那条深色的「选中工具条」分工不同：这条是「编辑物件」，那条是「对选中文字做点事」） */
+.rd-edit-bar {
+  position: fixed; z-index: 62; transform: translate(-50%, -100%);
+  min-width: 268px; padding: var(--rd-space-2);
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-md);
+  background: var(--rd-card); color: var(--rd-ink);
+  box-shadow: var(--rd-shadow);
+}
+.rd-edit-colors { display: flex; align-items: center; gap: var(--rd-space-2); padding: var(--rd-space-1) var(--rd-space-2) var(--rd-space-2); }
+.rd-edit-dot { width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: var(--rd-r-pill); }
+.rd-edit-dot-on { outline: 2px solid var(--rd-accent); outline-offset: 2px; }
+.rd-edit-more { margin-left: auto; border: 0; background: transparent; color: var(--rd-accent); white-space: nowrap; font-family: var(--rd-font-body); font-size: var(--rd-fs-sm); }
+.rd-edit-acts { display: flex; align-items: stretch; justify-content: space-between; gap: 2px; border-top: 1px solid var(--rd-rule); padding-top: var(--rd-space-2); }
+.rd-edit-act {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1 1 0; min-width: 48px;
+  border: 0; background: transparent; color: var(--rd-ink); white-space: nowrap;
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-tab);
+}
+.rd-edit-act:active { opacity: 0.6; }
+.rd-edit-act-danger { color: var(--rd-danger); }
+
+/* ── 笔记面板（照她给的 Edit Note 参考图）：取消 / 笔记 / 存下 + 引文 + 文本框 ── */
+.rd-notepanel {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
+  display: flex; flex-direction: column; gap: var(--rd-space-3);
+  height: 72vh; padding: var(--rd-space-4);
+  padding-bottom: calc(var(--rd-space-4) + max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+  border-radius: var(--rd-r-lg) var(--rd-r-lg) 0 0;
+  background: var(--rd-sheet-bg); color: var(--rd-ink);
+  box-shadow: var(--rd-shadow);
+}
+.rd-notepanel-head { display: flex; align-items: center; justify-content: space-between; }
+.rd-notepanel-title { font-family: var(--rd-font-body); font-size: var(--rd-fs-md); font-weight: 600; }
+.rd-notepanel-btn { border: 0; background: transparent; color: var(--rd-accent); font-family: var(--rd-font-body); font-size: var(--rd-fs-md); padding: var(--rd-space-1); }
+.rd-notepanel-save { font-weight: 600; }
+.rd-notepanel-quote {
+  flex: 0 0 auto; max-height: 32%; overflow-y: auto;
+  padding: var(--rd-space-3); border-radius: var(--rd-r-md);
+  background: var(--rd-rule-soft); color: var(--rd-ink-soft);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm); line-height: 1.6;
+}
+.rd-notepanel-area {
+  flex: 1 1 auto; min-height: 0; resize: none;
+  padding: var(--rd-space-3); border: 1px solid var(--rd-rule); border-radius: var(--rd-r-md);
+  background: var(--rd-card); color: var(--rd-ink);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-md); line-height: 1.7;
+}
+
 /* ── 书架 · 顶部（分类选择 + 菜单）、搜索胶囊、四种版式 ──
    参考图 2/3/4/5：顶部一行「All ⌄ …… ···」、大标题、搜索胶囊、四种版式、搜索页、分类页。 */
 .rd-shelf-top { position: relative; display: flex; align-items: center; gap: var(--rd-space-2); margin-bottom: 2px; }
