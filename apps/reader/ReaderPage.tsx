@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     ArrowLeft, BookmarkSimple, CaretLeft, CaretRight, DotsThree, Lightbulb, ListBullets,
-    MagnifyingGlass, TShirt, X,
+    MagnifyingGlass, TShirt, Trash, X,
 } from '@phosphor-icons/react';
 import {
     deleteAnnotation, getBook, getChapter, getProgress, listAnnotations, listChapters, putAnnotation,
@@ -29,9 +29,10 @@ import {
     pageForAnchor, paginateFlow, slicesForPage, type PageSlice, type RdPageBox,
 } from '../../utils/reader/paginate';
 import {
-    DEFAULT_TYPOGRAPHY, readingModeFor, setBookMode, setHighlightSlot, setTheme, setTypography, useReaderPrefs,
+    clearHuntHistory, DEFAULT_TYPOGRAPHY, pushHuntHistory, readingModeFor, removeHighlightColor,
+    saveHighlightColor, setBookMode, setHighlightColor, setTheme, setTypography, useReaderPrefs,
 } from './readerPrefs';
-import { HIGHLIGHT_SLOTS, READER_SKINS } from './readerSkinPresets';
+import { READER_SKINS } from './readerSkinPresets';
 import { recordReading } from '../../utils/reader/readerStats';
 
 const SAVE_DEBOUNCE = 900;
@@ -46,13 +47,14 @@ interface Props {
     onBack: () => void;
 }
 
-/** 秒 → 「3 小时 10 分」这种人话 */
+/** 秒 → 「3 小时 10 分」这种人话。
+    满一分钟就不报秒了——计时器被人盯着的时候数字一秒一跳很吵（她 2026-09-15 说的）。 */
 function fmtDuration(sec: number): string {
     const s = Math.max(0, Math.round(sec));
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     if (h > 0) return `${h} 小时 ${m} 分`;
-    if (m > 0) return `${m} 分 ${s % 60} 秒`;
+    if (m > 0) return `${m} 分`;
     return `${s} 秒`;
 }
 
@@ -72,6 +74,24 @@ interface HuntHit {
     /** 全书百分比（面板上显示的那个） */
     pct: number;
 }
+
+/** 上下栏的本体高度（跟骨架层里的 --rd-bar-h / --rd-foot-h 一一对应，改一处要改两处） */
+const BAR_H = 46;
+const FOOT_H = 92;
+
+/** HSL → hex：调色盘两根条（色相 + 明度）就能调出任意一支笔，不用上取色器 */
+function hslHex(h: number, s: number, l: number): string {
+    const a = s * Math.min(l, 1 - l);
+    const f = (n: number) => {
+        const k = (n + h / 30) % 12;
+        const c = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+        return Math.round(255 * c).toString(16).padStart(2, '0');
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+/** 色相条（写死在骨架层会被守卫测试拦——色值只能现算） */
+const HUE_STRIP = `linear-gradient(90deg, ${[0, 60, 120, 180, 240, 300, 360].map((h) => hslHex(h, 1, 0.5)).join(', ')})`;
 
 /** 本模块的 id 生成：不用 crypto.randomUUID（手机走 http 时它是 undefined，踩过） */
 const uid = (): string => `an_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -167,6 +187,13 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     /** 书内搜索：输入词 + 结果（null = 还没搜） */
     const [huntWord, setHuntWord] = useState('');
     const [hunt, setHunt] = useState<{ list: HuntHit[]; cut: boolean } | null>(null);
+    /** 搜到之后跳过去的那一条（回到搜索页它带着选中态） */
+    const [huntPick, setHuntPick] = useState<number | null>(null);
+    /** 底栏那条进度滑轨展开着没有（左二那颗图标开关） */
+    const [seekOpen, setSeekOpen] = useState(false);
+    /** 调色盘：色相 / 明度两根条 */
+    const [hue, setHue] = useState(45);
+    const [lum, setLum] = useState(0.62);
     /** 全书章节缓存（搜索时要扫全文，扫一次记着） */
     const chaptersRef = useRef<RdChapter[] | null>(null);
     const [brightness, setBrightness] = useState(0);
@@ -175,6 +202,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     /** 只为了让「阅读时长」每 20 秒自己走一格（值本身不用，读 Date.now 现算） */
     const [, setTick] = useState(0);
 
+    const rootRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
     const flowRef = useRef<HTMLDivElement>(null);
     /** 章节切换后要落在哪一页（页码 / 锚点 / 章的百分之几——拖进度条跨章时用最后那个） */
@@ -236,12 +264,22 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         return () => { alive = false; };
     }, [bookId, chapterIdx]);
 
+    /**
+     * 正文区高度 = 视口高 − 顶栏 − 底栏。
+     * **恒定**：沉浸态只是把上下栏淡出，这里不减不增 —— 所以藏栏不会让正文重排、
+     * 翻页也不会跳（她 2026-09-15 说的「不是把内容顶来顶去」）。
+     */
+    const contentH = useCallback(
+        () => Math.max(40, (viewportRef.current?.clientHeight ?? 0) - BAR_H - FOOT_H),
+        [],
+    );
+
     // ── 量页（章节/排版变化后重算，并落到该落的页）──
     useLayoutEffect(() => {
         const viewport = viewportRef.current;
         const flow = flowRef.current;
         if (!chapter || !viewport || !flow) return;
-        const height = viewport.clientHeight;
+        const height = contentH();
         if (height < 40) return;                       // 布局还没铺开，等下一次
         const next = paginateFlow(flow, height);
         if (next.length === 0) { setPages([]); return; }
@@ -268,7 +306,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             : null;
         setPageIdx(idx);
         restoringRef.current = false;
-    }, [chapter, prefs.typography, layoutNonce]);
+    }, [chapter, prefs.typography, layoutNonce, contentH]);
 
     // 字体就绪后补量一次：首量可能发生在字体替换之前（行盒高度会变，页数跟着变）
     useEffect(() => {
@@ -286,11 +324,11 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const viewport = viewportRef.current;
         const page = pages[pageIdx];
         if (!flow || !viewport || !page) return null;
-        const slices = slicesForPage(flow, page, viewport.clientHeight);
+        const slices = slicesForPage(flow, page, contentH());
         currentSlicesRef.current = slices;
         const first = slices[0];
         return first ? { paraIdx: first.paraIdx, charOffset: first.startOffset } : null;
-    }, [pages, pageIdx]);
+    }, [pages, pageIdx, contentH]);
 
     /** 给观察器用的「当前页锚点」取值口：ref 保持最新，观察器就不用随翻页重建。 */
     const anchorGetterRef = useRef(anchorOfCurrentPage);
@@ -448,7 +486,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         ? Math.max(0, (book.totalChars * (1 - percent / 100)) / CHARS_PER_SEC)
         : 0;
     const bookMode = readingModeFor(prefs, bookId);
-    const mySlot = prefs.highlightStyles.user ?? 1;
 
     const jumpChapter = (idx: number) => {
         if (idx !== chapterIdx) recordReading({ pages: 1, chars: pageChars(), bookId });
@@ -565,6 +602,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             if (cut) break;
         }
         setHunt({ list, cut });
+        setHuntPick(null);
+        pushHuntHistory(word);
     };
 
     const notes = useMemo(() => anns
@@ -580,7 +619,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         { key: 'stat', label: '统计', on: true, run: () => { setSheet(null); onOpenStats(); } },
         { key: 'share', label: '分享', on: false, run: () => notify('转发卡片在第三批，先欠着') },
         { key: 'detail', label: '书本详情', on: true, run: () => { setSheet(null); onOpenDetails(bookId); } },
-        { key: 'book', label: '本书设置', on: true, run: () => setSheet('book') },
+        { key: 'book', label: '总结设置', on: true, run: () => setSheet('book') },
         { key: 'hl', label: '划线设置', on: true, run: () => setSheet('hl') },
         { key: 'style', label: '排版设置', on: true, run: () => { setSheet(null); setPanel('style'); } },
         { key: 'theme', label: '背景主题', on: true, run: () => { setSheet(null); setPanel('theme'); } },
@@ -602,12 +641,12 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     }
 
     return (
-        <div className="rd-reader" data-rd-page="reader">
+        <div className="rd-reader" data-rd-page="reader" ref={rootRef}>
             {/* 夹了书签：纸的右上角挂一条红丝带（参考图 1/3） */}
             {bookmarked && <div className="rd-ribbon" aria-hidden />}
 
-            {!chromeOff && (
-                <div className="rd-reader-bar">
+            {/* 顶栏一直在树上，沉浸时只淡出——摘掉它正文会重排（她说的「顶来顶去」） */}
+            <div className={`rd-reader-bar${chromeOff ? ' rd-chrome-off' : ''}`}>
                     <button className="rd-icon-btn" onClick={onBack} aria-label="返回"><ArrowLeft size={18} /></button>
                     <div className="rd-reader-bar-title">
                         {book ? `${book.title} · 第 ${chapterIdx + 1} / ${book.chapterCount} 章` : '…'}
@@ -629,8 +668,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                             <BookmarkSimple size={19} weight={bookmarked ? 'fill' : 'regular'} />
                         </button>
                     </div>
-                </div>
-            )}
+            </div>
 
             <div
                 className="rd-reader-viewport"
@@ -641,7 +679,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     if (ratio < 0.3) { setPanel(null); goPage(-1); }
                     else if (ratio > 0.7) { setPanel(null); goPage(1); }
                     else if (panel) setPanel(null);          // 面板开着：点中间先收面板
-                    else setChromeOff((v) => !v);
+                    else { setSeekOpen(false); setPanel(null); setChromeOff((v) => !v); }
                 }}
                 onTouchStart={onTouchStart}
                 onTouchMove={onTouchMove}
@@ -666,43 +704,37 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 <div className="rd-reader-veil" style={{ opacity: brightness }} />
             </div>
 
-            {atEnd && !chromeOff && (
-                <div className="rd-reader-stat" style={{ justifyContent: 'center', padding: '6px 0 0' }}>
+            {atEnd && (
+                <div className={`rd-reader-stat${chromeOff ? ' rd-chrome-off' : ''}`} style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--rd-foot-h) + max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px)))', justifyContent: 'center', zIndex: 21 }}>
                     这本书读完了{book?.totalChars ? ` · ${Math.round(book.totalChars / 1000)} 千字` : ''}
                 </div>
             )}
 
-            {!chromeOff && (
-                <div className="rd-reader-foot">
-                    {/* 面板开着的时候顶掉进度那两行（参考图就是这样：面板占了它们的位置） */}
-                    {panel === null && (
-                        <>
-                            <div className="rd-reader-stat">
-                                <span>阅读时长 {fmtDuration(elapsedTotal)}</span>
-                                <span>剩余 {fmtDuration(remainSec)}</span>
+            {/* 底栏也是遮罩：高度写死，内容浮在它上面（展开的滑轨、排版/主题面板都走 bottom:100%） */}
+            <div className={`rd-reader-foot${chromeOff ? ' rd-chrome-off' : ''}`}>
+                    {/* 左二那颗图标点开的进度滑轨（她：图标是图标，展开能拖就行） */}
+                    {seekOpen && (
+                        <div className="rd-reader-seekrow">
+                            <button className="rd-slider-nav" onClick={() => goPage(-1)} aria-label="上一页"><CaretLeft size={15} /></button>
+                            <div
+                                className="rd-slider-track"
+                                onPointerDown={(e) => {
+                                    e.currentTarget.setPointerCapture(e.pointerId);
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    seekRatio((e.clientX - rect.left) / rect.width);
+                                }}
+                                onPointerMove={(e) => {
+                                    if (!e.buttons) return;
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    seekRatio((e.clientX - rect.left) / rect.width);
+                                }}
+                            >
+                                <div className="rd-slider-rail"><div className="rd-slider-fill" style={{ width: `${percent}%` }} /></div>
+                                <div className="rd-slider-knob" style={{ left: `${percent}%` }} />
                             </div>
-
-                            <div className="rd-reader-slider">
-                                <button className="rd-slider-nav" onClick={() => goPage(-1)} aria-label="上一页"><CaretLeft size={15} /></button>
-                                <div
-                                    className="rd-slider-track"
-                                    onPointerDown={(e) => {
-                                        e.currentTarget.setPointerCapture(e.pointerId);
-                                        const rect = e.currentTarget.getBoundingClientRect();
-                                        seekRatio((e.clientX - rect.left) / rect.width);
-                                    }}
-                                    onPointerMove={(e) => {
-                                        if (!e.buttons) return;
-                                        const rect = e.currentTarget.getBoundingClientRect();
-                                        seekRatio((e.clientX - rect.left) / rect.width);
-                                    }}
-                                >
-                                    <div className="rd-slider-rail"><div className="rd-slider-fill" style={{ width: `${percent}%` }} /></div>
-                                    <div className="rd-slider-knob" style={{ left: `${percent}%` }} />
-                                </div>
-                                <button className="rd-slider-nav" onClick={() => goPage(1)} aria-label="下一页"><CaretRight size={15} /></button>
-                            </div>
-                        </>
+                            <button className="rd-slider-nav" onClick={() => goPage(1)} aria-label="下一页"><CaretRight size={15} /></button>
+                            <span className="rd-reader-seekpct">{percent}%</span>
+                        </div>
                     )}
 
                     {/* ── 排版面板（参考图 1：字体 / 字号 / 页边距 / 行距 / 翻页模式） ── */}
@@ -777,32 +809,22 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         </div>
                     )}
 
+                    <div className="rd-reader-stat">
+                        <span>阅读时长 {fmtDuration(elapsedTotal)}</span>
+                        <span>剩余 {fmtDuration(remainSec)}</span>
+                    </div>
+
                     {/* 工具排：目录 / 进度条 / 亮度 / 排版(A) / 主题 / 更多
                         —— 左二那个不是按钮，是**进度条本体**（参考图里的 —◯—），点或拖都在调进度 */}
                     <div className="rd-reader-tools">
                         <button className="rd-tool" onClick={() => { setPanel(null); setSheet('toc'); }} aria-label="目录"><ListBullets size={19} /></button>
-                        <div
-                            className="rd-seek"
-                            role="slider"
+                        <button
+                            className={`rd-tool${seekOpen ? ' rd-tool-on' : ''}`}
                             aria-label="阅读进度"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={percent}
-                            onPointerDown={(e) => {
-                                e.currentTarget.setPointerCapture(e.pointerId);
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                seekRatio((e.clientX - rect.left) / rect.width);
-                            }}
-                            onPointerMove={(e) => {
-                                if (!e.buttons) return;
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                seekRatio((e.clientX - rect.left) / rect.width);
-                            }}
+                            onClick={() => { setPanel(null); setSeekOpen((v) => !v); }}
                         >
-                            <div className="rd-seek-rail" />
-                            <div className="rd-seek-fill" style={{ width: `${percent}%` }} />
-                            <div className="rd-seek-knob" style={{ left: `${percent}%` }} />
-                        </div>
+                            <span className="rd-seek-icon"><span className="rd-seek-icon-knob" /></span>
+                        </button>
                         <button className={`rd-tool${brightness > 0 ? ' rd-tool-on' : ''}`} onClick={() => setSheet('bright')} aria-label="亮度"><Lightbulb size={19} /></button>
                         <button
                             className={`rd-tool${panel === 'style' ? ' rd-tool-on' : ''}`}
@@ -812,10 +834,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                             A
                         </button>
                         <button className={`rd-tool${panel === 'theme' ? ' rd-tool-on' : ''}`} onClick={() => setPanel(panel === 'theme' ? null : 'theme')} aria-label="主题"><TShirt size={19} /></button>
-                        <button className="rd-tool" onClick={() => { setPanel(null); setSheet('more'); }} aria-label="更多"><DotsThree size={20} /></button>
-                    </div>
+                    <button className="rd-tool" onClick={() => { setPanel(null); setSheet('more'); }} aria-label="更多"><DotsThree size={20} /></button>
                 </div>
-            )}
+            </div>
 
             {/* ── 目录 / 笔记 / 书签（参考图「左下一展开」：书信息头 + 三页签 + 列表） ── */}
             {sheet === 'toc' && book && (
@@ -894,43 +915,61 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-            {/* ── 书内搜索（参考图「右上二搜索」：总条数 + 章节名/百分比 + 命中的字上底色） ── */}
+            {/* ── 书内搜索（参考图 11：**整页**，不是被键盘顶出来的小浮层）── */}
             {sheet === 'hunt' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet rd-sheet-tall" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-search-bar">
-                            <div className="rd-search-input">
-                                <MagnifyingGlass size={17} />
-                                <input
-                                    autoFocus
-                                    value={huntWord}
-                                    placeholder="在这本书里找"
-                                    onChange={(e) => { setHuntWord(e.target.value); if (!e.target.value.trim()) setHunt(null); }}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') void runHunt(huntWord); }}
-                                />
-                                {huntWord && (
-                                    <button className="rd-search-cancel" onClick={() => { setHuntWord(''); setHunt(null); }} aria-label="清空"><X size={15} /></button>
-                                )}
-                            </div>
-                            <button className="rd-search-cancel" onClick={() => { setHunt(null); setSheet(null); }}>取消</button>
+                <div className="rd-hunt" data-rd-page="hunt">
+                    <div className="rd-search-bar">
+                        <div className="rd-search-input">
+                            <MagnifyingGlass size={17} />
+                            <input
+                                autoFocus
+                                value={huntWord}
+                                placeholder="在书里找字"
+                                onChange={(e) => { setHuntWord(e.target.value); if (!e.target.value.trim()) { setHunt(null); setHuntPick(null); } }}
+                                onKeyDown={(e) => { if (e.key === 'Enter') void runHunt(huntWord); }}
+                            />
+                            {huntWord && (
+                                <button className="rd-search-cancel" onClick={() => { setHuntWord(''); setHunt(null); setHuntPick(null); }} aria-label="清空"><X size={15} /></button>
+                            )}
                         </div>
+                        <button className="rd-search-cancel" onClick={() => setSheet(null)}>取消</button>
+                    </div>
 
-                        {hunt && <div className="rd-search-found">共找到 {hunt.list.length} 处{hunt.cut ? '（这里先列前面的）' : ''}</div>}
+                    <div className="rd-hunt-body">
+                        {!hunt && prefs.huntHistory.length > 0 && (
+                            <>
+                                <div className="rd-group-head">
+                                    <span>搜索历史</span>
+                                    <button className="rd-group-action" onClick={clearHuntHistory} aria-label="清空历史"><Trash size={15} /></button>
+                                </div>
+                                <div className="rd-hunt-hist">
+                                    {prefs.huntHistory.map((h) => (
+                                        <button key={h} className="rd-hunt-chip" onClick={() => { setHuntWord(h); void runHunt(h); }}>{h}</button>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                        {!hunt && prefs.huntHistory.length === 0 && <div className="rd-hunt-empty">打个词，回车开始找。</div>}
 
-                        <div className="rd-toc-scroll">
-                            {!hunt && <div className="rd-hunt-empty">打个词，回车开始找。</div>}
-                            {hunt && hunt.list.length === 0 && <div className="rd-hunt-empty">没有找到「{huntWord.trim()}」。</div>}
-                            {hunt?.list.map((hit, i) => (
-                                <button key={`${hit.ci}-${hit.pi}-${i}`} className="rd-toc-row" onClick={() => jumpToAnchor(hit.ci, hit.pi, hit.off)}>
-                                    <div className="rd-toc-row-head">
-                                        <span>{chapterTitleOf(hit.ci)}</span>
-                                        <span className="rd-toc-pct">{hit.pct.toFixed(2)}%</span>
-                                    </div>
-                                    <Excerpt text={hit.text} at={hit.off} len={Math.max(1, huntWord.trim().length)} />
-                                </button>
-                            ))}
-                        </div>
+                        {hunt && (
+                            <>
+                                <div className="rd-search-found">共找到 {hunt.list.length} 处{hunt.cut ? '（这里先列前面的）' : ''}</div>
+                                {hunt.list.length === 0 && <div className="rd-hunt-empty">没有找到「{huntWord.trim()}」。</div>}
+                                {hunt.list.map((hit, i) => (
+                                    <button
+                                        key={`${hit.ci}-${hit.pi}-${i}`}
+                                        className={`rd-toc-row${huntPick === i ? ' rd-toc-row-on' : ''}`}
+                                        onClick={() => { setHuntPick(i); jumpToAnchor(hit.ci, hit.pi, hit.off); }}
+                                    >
+                                        <div className="rd-toc-row-head">
+                                            <span>{chapterTitleOf(hit.ci)}</span>
+                                            <span className="rd-toc-pct">{hit.pct.toFixed(2)}%</span>
+                                        </div>
+                                        <Excerpt text={hit.text} at={hit.off} len={Math.max(1, huntWord.trim().length)} />
+                                    </button>
+                                ))}
+                            </>
+                        )}
                     </div>
                 </div>
             )}
@@ -957,7 +996,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
                     <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
                         <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">本书设置</div>
+                        <div className="rd-sheet-title">总结设置</div>
                         <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-3)' }}>{book?.title}</div>
 
                         <div className="rd-row-label" style={{ marginBottom: 'var(--rd-space-2)' }}>共读模式（只对这本书）</div>
@@ -973,27 +1012,48 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-            {/* ── 划线配色（自己一个槽，每个角色各一个） ── */}
+            {/* ── 划线颜色（她 2026-09-15：不要那六个死配色，要能自己调、能存预设的调色盘） ── */}
             {sheet === 'hl' && (
                 <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
                     <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
                         <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">划线配色</div>
-                        <div className="rd-row" style={{ marginBottom: 'var(--rd-space-3)' }}>
-                            <span className="rd-row-label">我</span>
-                            <div className="rd-btn-row">
-                                {HIGHLIGHT_SLOTS.map((s) => (
-                                    <button
-                                        key={s.slot}
-                                        aria-label={s.label}
-                                        className={`rd-swatch${mySlot === s.slot ? ' rd-swatch-on' : ''}`}
-                                        onClick={() => setHighlightSlot('user', s.slot)}
-                                        style={{ background: `rgb(var(--rd-hl-${s.slot}-rgb))` }}
-                                    />
-                                ))}
-                            </div>
+                        <div className="rd-sheet-title">划线颜色</div>
+
+                        <div className="rd-group-head"><span>我的笔</span><span>{prefs.highlightPalette.length} 支</span></div>
+                        <div className="rd-hunt-hist">
+                            {prefs.highlightPalette.map((c) => (
+                                <button
+                                    key={c}
+                                    aria-label={c}
+                                    className={`rd-swatch${prefs.highlightColor === c ? ' rd-swatch-on' : ''}`}
+                                    style={{ background: c }}
+                                    onClick={() => setHighlightColor(c)}
+                                    onContextMenu={(e) => { e.preventDefault(); removeHighlightColor(c); }}
+                                />
+                            ))}
                         </div>
-                        <div className="rd-muted">角色的槽位跟着书库页的开关走，第二批接上。</div>
+                        <div className="rd-muted" style={{ marginTop: 8 }}>点一支就用它；长按或右键一支就删掉。</div>
+
+                        <div className="rd-group-head" style={{ marginTop: 'var(--rd-space-4)' }}><span>调一支新的</span></div>
+                        <div className="rd-row" style={{ marginBottom: 'var(--rd-space-2)' }}>
+                            <span className="rd-row-label">颜色</span>
+                            <span className="rd-hl-preview" style={{ background: hslHex(hue, 0.75, lum) }} />
+                        </div>
+                        <input
+                            className="rd-slider rd-slider-hue"
+                            type="range" min={0} max={360} step={1} value={hue}
+                            onChange={(e) => setHue(Number(e.target.value))}
+                            style={{ background: HUE_STRIP }}
+                        />
+                        <input
+                            className="rd-slider"
+                            type="range" min={20} max={90} step={1} value={Math.round(lum * 100)}
+                            onChange={(e) => setLum(Number(e.target.value) / 100)}
+                        />
+                        <div className="rd-btn-row" style={{ marginTop: 'var(--rd-space-3)' }}>
+                            <button className="rd-btn rd-btn-primary" onClick={() => saveHighlightColor(hslHex(hue, 0.75, lum))}>存进我的笔</button>
+                            <button className="rd-btn" onClick={() => setHighlightColor(hslHex(hue, 0.75, lum))}>直接用它</button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -44,6 +44,12 @@ export interface ReaderPrefs {
     shelfGrouped: boolean;
     /** 搜索历史（参考图那排 Search History 胶囊） */
     searchHistory: string[];
+    /** 书内搜索的历史（跟书架的搜索分开记，参考图 11 那排胶囊） */
+    huntHistory: string[];
+    /** 划线颜色：她自己调的一套预设（hex），可增可删——不要那六个死配色了 */
+    highlightPalette: string[];
+    /** 现在用的那支笔的颜色 */
+    highlightColor: string;
     /** 默认共读模式（没单独设过的书用它） */
     readingMode: ReadingMode;
     /** 单书共读模式：bookId → 'focus' | 'casual'（v3 §4.6 的单书设置） */
@@ -68,6 +74,9 @@ export const DEFAULT_TYPOGRAPHY: ReaderTypography = {
     margin: 22,
 };
 
+/** 划线的默认调色盘（她自己调的那套的起点；不想要哪支删掉就行） */
+export const DEFAULT_HIGHLIGHT_PALETTE = ['#f2c14e', '#7fc8a9', '#6fb3e0', '#f19cbb', '#b39ddb', '#ffab91'];
+
 export const DEFAULT_PREFS: ReaderPrefs = {
     version: 1,
     updatedAt: new Date().toISOString(),
@@ -78,6 +87,9 @@ export const DEFAULT_PREFS: ReaderPrefs = {
     shelfAsc: false,
     shelfGrouped: false,
     searchHistory: [],
+    huntHistory: [],
+    highlightPalette: DEFAULT_HIGHLIGHT_PALETTE,
+    highlightColor: DEFAULT_HIGHLIGHT_PALETTE[0],
     readingMode: 'focus',
     bookModes: {},
     highlightStyles: { user: 1 },
@@ -122,6 +134,38 @@ export function setShelfAsc(shelfAsc: boolean): void {
 
 export function setShelfGrouped(shelfGrouped: boolean): void {
     store.set((s) => ({ ...s, shelfGrouped }));
+}
+
+/** 书内搜索历史：去重、新的在前、最多留 12 条 */
+export function pushHuntHistory(word: string): void {
+    const w = word.trim();
+    if (!w) return;
+    store.set((s) => ({ ...s, huntHistory: [w, ...s.huntHistory.filter((x) => x !== w)].slice(0, 12) }));
+}
+
+export function clearHuntHistory(): void {
+    store.set((s) => ({ ...s, huntHistory: [] }));
+}
+
+/** 换一支笔 / 存一支新笔 / 删掉一支笔（调色盘） */
+export function setHighlightColor(hex: string): void {
+    store.set((s) => ({ ...s, highlightColor: hex }));
+}
+
+export function saveHighlightColor(hex: string): void {
+    store.set((s) => ({
+        ...s,
+        highlightColor: hex,
+        highlightPalette: s.highlightPalette.includes(hex) ? s.highlightPalette : [...s.highlightPalette, hex],
+    }));
+}
+
+export function removeHighlightColor(hex: string): void {
+    store.set((s) => ({
+        ...s,
+        highlightPalette: s.highlightPalette.filter((c) => c !== hex),
+        highlightColor: s.highlightColor === hex ? (s.highlightPalette.find((c) => c !== hex) ?? s.highlightColor) : s.highlightColor,
+    }));
 }
 
 /** 搜索历史：去重、新的在前、最多留 12 条。 */

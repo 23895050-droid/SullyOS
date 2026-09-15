@@ -20,6 +20,7 @@ import {
     useReaderPrefs, type ShelfLayout, type ShelfSort,
 } from '../readerPrefs';
 import ImportSheet from '../ImportSheet';
+import { addCat, loadCats, removeCat, renameCat } from '../readerCats';
 import ReaderCover, { shrinkCoverImage } from '../ReaderCover';
 
 interface Props {
@@ -32,7 +33,7 @@ interface Props {
 }
 
 type Filter = 'all' | 'reading' | 'done' | 'unread';
-type ShelfView = 'shelf' | 'search' | 'categories';
+type ShelfView = 'shelf' | 'search';
 
 const FILTERS: Array<{ key: Filter; label: string }> = [
     { key: 'all', label: '全部' },
@@ -235,10 +236,10 @@ function ShelfSearch({ books, prog, onOpen, onClose }: {
     );
 }
 
-// ── 分类页（参考图 5）──
+// ── 分类面板（参考图 5 + 图 9）：点顶部标题**从上往下展开**，再点收回去 ──
 type CatSeg = 'category' | 'tag' | 'author';
 
-function ShelfCategories({ books, prog, onPick, onClose, notify, onChanged }: {
+function CatPanel({ books, prog, onPick, onClose, notify, onChanged }: {
     books: RdBook[];
     prog: Record<string, RdProgress | null>;
     onPick: (cat: string) => void;
@@ -250,8 +251,13 @@ function ShelfCategories({ books, prog, onPick, onClose, notify, onChanged }: {
     const [word, setWord] = useState('');
     const [renaming, setRenaming] = useState<string | null>(null);
     const [draft, setDraft] = useState('');
+    /** 编辑态：每行后面挂「改名 / 删除」 */
+    const [editing, setEditing] = useState(false);
+    /** 「添加分类」的行内输入 */
+    const [adding, setAdding] = useState(false);
+    const [newName, setNewName] = useState('');
 
-    /** 系统分类那五行（参考图 5：All / Uncategorized / Unread / Finished / Reading） */
+    /** 系统分类那五行（参考图：All / Uncategorized / Unread / Finished / Reading） */
     const system = useMemo(() => {
         const pcts = books.map((b) => pctOf(prog[b.id]));
         return [
@@ -273,10 +279,11 @@ function ShelfCategories({ books, prog, onPick, onClose, notify, onChanged }: {
         books.forEach((b) => { const a = (b.customAuthor || b.author || '').trim() || '佚名'; m.set(a, (m.get(a) ?? 0) + 1); });
         return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
     }, [books]);
+    /** 我的分类 = 书上用着的 ∪ 名册里建的（新建的哪怕没书用也列出来，计数 0） */
     const cats = useMemo(() => {
         const m = new Map<string, number>();
-        books.forEach((b) => { const c = catOf(b); m.set(c, (m.get(c) ?? 0) + 1); });
-        // 「未分类」已经在系统分类那一组里了，这里不再列一遍
+        books.forEach((b) => { const c = catOf(b); if (c !== '未分类') m.set(c, (m.get(c) ?? 0) + 1); });
+        for (const c of loadCats()) if (!m.has(c.name)) m.set(c.name, 0);
         return Array.from(m.entries()).filter(([k]) => k !== '未分类').sort((a, b) => b[1] - a[1]);
     }, [books]);
 
@@ -296,18 +303,22 @@ function ShelfCategories({ books, prog, onPick, onClose, notify, onChanged }: {
             else patch.customAuthor = name;
             await putBook({ ...b, ...patch, updatedAt: new Date().toISOString() });
         }
+        if (seg === 'category') renameCat(from, name);
         notify(`「${from}」改成「${name}」了，${targets.length} 本跟着变`);
         onChanged();
     };
 
-    return (
-        <div className="rd-screen rd-screen-tight page-focus-once" data-rd-page="shelf-categories">
-            <div className="rd-headbar">
-                <button className="rd-back" onClick={onClose}>‹ 书架</button>
-                <div className="rd-headbar-title">分类</div>
-                <span style={{ width: 44 }} />
-            </div>
+    /** 删分类：名册里去掉 + 那些书回到「未分类」（书本身不动） */
+    const dropCat = async (name: string) => {
+        const targets = books.filter((b) => catOf(b) === name);
+        for (const b of targets) await putBook({ ...b, category: '', updatedAt: new Date().toISOString() });
+        if (seg === 'category') removeCat(name);
+        notify(`「${name}」删了，${targets.length} 本回到未分类`);
+        onChanged();
+    };
 
+    return (
+        <div className="rd-catpanel" data-rd-page="shelf-cats">
             <div className="rd-opt-seg" style={{ marginBottom: 'var(--rd-space-3)' }}>
                 {([['category', '分类'], ['tag', '标签'], ['author', '作者']] as Array<[CatSeg, string]>).map(([k, label]) => (
                     <button key={k} className={`rd-opt-seg-btn${seg === k ? ' rd-opt-seg-on' : ''}`} onClick={() => setSeg(k)}>{label}</button>
@@ -316,7 +327,7 @@ function ShelfCategories({ books, prog, onPick, onClose, notify, onChanged }: {
 
             <div className="rd-search-input" style={{ marginBottom: 'var(--rd-space-3)' }}>
                 <MagnifyingGlass size={17} />
-                <input value={word} placeholder="搜索" onChange={(e) => setWord(e.target.value)} />
+                <input value={word} placeholder="搜索分类" onChange={(e) => setWord(e.target.value)} />
             </div>
 
             {seg === 'category' && (
@@ -338,7 +349,53 @@ function ShelfCategories({ books, prog, onPick, onClose, notify, onChanged }: {
                 </>
             )}
 
-            <div className="rd-group-head"><span>{seg === 'category' ? '我的分类' : seg === 'tag' ? '标签' : '作者'}</span></div>
+            <div className="rd-group-head">
+                <span>{seg === 'category' ? '我的分类' : seg === 'tag' ? '标签' : '作者'}</span>
+                {seg === 'category' && (
+                    <span style={{ display: 'inline-flex', gap: 'var(--rd-space-3)' }}>
+                        <button className="rd-group-action" onClick={() => { setEditing((v) => !v); setAdding(false); }}>
+                            {editing ? '改完了' : '编辑分类'}
+                        </button>
+                        <button className="rd-group-action" onClick={() => { setAdding(true); setEditing(false); setNewName(''); }}>添加分类</button>
+                    </span>
+                )}
+            </div>
+
+            {seg === 'category' && adding && (
+                <div className="rd-folder">
+                    <span className="rd-folder-icon"><Folder size={19} weight="fill" /></span>
+                    <input
+                        className="rd-folder-label"
+                        autoFocus
+                        value={newName}
+                        placeholder="新分类叫什么"
+                        style={{ border: 0, background: 'transparent', color: 'inherit', font: 'inherit', outline: 'none' }}
+                        onChange={(e) => setNewName(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            const n = newName.trim();
+                            if (!n) { setAdding(false); return; }
+                            addCat(n);
+                            notify(`加了「${n}」`);
+                            setAdding(false);
+                            onChanged();
+                        }}
+                    />
+                    <button
+                        className="rd-group-action"
+                        onClick={() => {
+                            const n = newName.trim();
+                            if (!n) { setAdding(false); return; }
+                            addCat(n);
+                            notify(`加了「${n}」`);
+                            setAdding(false);
+                            onChanged();
+                        }}
+                    >加</button>
+                    <button className="rd-group-action" style={{ color: 'var(--rd-ink-soft)' }} onClick={() => setAdding(false)}>取消</button>
+                </div>
+            )}
+
             <div className="rd-card rd-card-flush">
                 <div className="rd-list" style={{ padding: '0 var(--rd-space-4)' }}>
                     {list.length === 0 && <div className="rd-muted" style={{ padding: 'var(--rd-space-4) 0' }}>还没有</div>}
@@ -354,6 +411,8 @@ function ShelfCategories({ books, prog, onPick, onClose, notify, onChanged }: {
                             onRename={() => { setRenaming(name); setDraft(name); }}
                             onCommit={() => void applyRename(name, draft)}
                             onCancel={() => setRenaming(null)}
+                            showActions={editing && seg === 'category'}
+                            onDrop={() => void dropCat(name)}
                             onClick={() => { onPick(name); onClose(); }}
                         />
                     ))}
@@ -363,7 +422,7 @@ function ShelfCategories({ books, prog, onPick, onClose, notify, onChanged }: {
     );
 }
 
-function CatRow({ icon, label, count, onClick, editing, draft = '', onDraft, onRename, onCommit, onCancel }: {
+function CatRow({ icon, label, count, onClick, editing, draft = '', onDraft, onRename, onCommit, onCancel, showActions, onDrop }: {
     icon: React.ReactNode;
     label: string;
     count: number;
@@ -374,6 +433,9 @@ function CatRow({ icon, label, count, onClick, editing, draft = '', onDraft, onR
     onRename?: () => void;
     onCommit?: () => void;
     onCancel?: () => void;
+    /** 编辑态：行尾挂「改名 / 删除」 */
+    showActions?: boolean;
+    onDrop?: () => void;
 }) {
     if (editing) {
         return (
@@ -389,6 +451,17 @@ function CatRow({ icon, label, count, onClick, editing, draft = '', onDraft, onR
                 />
                 <button className="rd-group-action" onClick={onCommit}>改</button>
                 <button className="rd-group-action" style={{ color: 'var(--rd-ink-soft)' }} onClick={onCancel}>取消</button>
+            </div>
+        );
+    }
+    if (showActions) {
+        return (
+            <div className="rd-folder">
+                <span className="rd-folder-icon">{icon}</span>
+                <span className="rd-folder-label">{label}</span>
+                <span className="rd-folder-count">{count}</span>
+                <button className="rd-group-action" onClick={onRename}>改名</button>
+                <button className="rd-group-action" style={{ color: 'var(--rd-danger)' }} onClick={onDrop}>删除</button>
             </div>
         );
     }
@@ -411,6 +484,8 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
     const [importOpen, setImportOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
+    /** 分类面板展开着没有（点顶部那颗标题切换，从上往下展开） */
+    const [catOpen, setCatOpen] = useState(false);
     const [selecting, setSelecting] = useState(false);
     const [picked, setPicked] = useState<Set<string>>(new Set());
     const [menuBook, setMenuBook] = useState<RdBook | null>(null);
@@ -612,39 +687,38 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
             />
         );
     }
-    if (view === 'categories') {
-        return (
-            <ShelfCategories
-                books={books}
-                prog={prog}
-                notify={notify}
-                onChanged={() => void reload().then(onChanged)}
-                onPick={(c) => {
-                    // 系统分类里那四个状态不是「分类」，落到状态筛选上
-                    const asState: Partial<Record<string, Filter>> = { 未读: 'unread', 读完: 'done', 在读: 'reading' };
-                    if (c === '__all__') { setCatFilter('__all__'); setFilter('all'); return; }
-                    if (asState[c]) { setCatFilter('__all__'); setFilter(asState[c] as Filter); return; }
-                    setCatFilter(c);
-                    setFilter('all');
-                }}
-                onClose={() => setView('shelf')}
-            />
-        );
-    }
-
     return (
         <div className="rd-screen" data-rd-page="shelf">
             {/* 顶部一行：中间分类（参考图的 All ⌄）+ 右上 ···
                 点中间那颗直接进分类页（参考图 9 那张「文件夹式」的），不再弹小菜单 */}
             <div className="rd-shelf-top" style={{ position: 'relative' }}>
                 <span className="rd-shelf-top-spacer" />
-                <button className="rd-shelf-cat" onClick={() => setView('categories')}>
+                <button className="rd-shelf-cat" onClick={() => setCatOpen((v) => !v)} aria-expanded={catOpen}>
                     {catFilter === '__all__' ? '全部' : catFilter}
-                    <CaretDown size={13} weight="bold" />
+                    <CaretDown size={13} weight="bold" className={catOpen ? 'rd-caret-up' : undefined} />
                 </button>
                 <span className="rd-shelf-top-spacer" />
                 <button className="rd-icon-btn" onClick={() => setMenuOpen(true)} aria-label="书架菜单"><DotsThree size={22} /></button>
             </div>
+
+            {/* 分类面板：就从顶上展开（她：不是点开去一个新页面） */}
+            {catOpen && (
+                <CatPanel
+                    books={books}
+                    prog={prog}
+                    notify={notify}
+                    onChanged={() => void reload().then(onChanged)}
+                    onPick={(c) => {
+                        // 系统分类里那四个状态不是「分类」，落到状态筛选上
+                        const asState: Partial<Record<string, Filter>> = { 未读: 'unread', 读完: 'done', 在读: 'reading' };
+                        if (c === '__all__') { setCatFilter('__all__'); setFilter('all'); return; }
+                        if (asState[c]) { setCatFilter('__all__'); setFilter(asState[c] as Filter); return; }
+                        setCatFilter(c);
+                        setFilter('all');
+                    }}
+                    onClose={() => setCatOpen(false)}
+                />
+            )}
 
             <div className="rd-head">
                 <div className="rd-head-main">
@@ -722,7 +796,7 @@ export default function ReaderShelf({ onOpenBook, onOpenDetails, notify, refresh
                                     <span className="rd-item-label">选择</span>
                                     <span className="rd-item-chev"><Check size={16} /></span>
                                 </button>
-                                <button className="rd-item" onClick={() => { setMenuOpen(false); setView('categories'); }}>
+                                <button className="rd-item" onClick={() => { setMenuOpen(false); setCatOpen(true); }}>
                                     <span className="rd-item-label">管理分类</span>
                                     <span className="rd-item-chev"><Folder size={17} /></span>
                                 </button>

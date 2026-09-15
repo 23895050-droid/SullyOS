@@ -11,8 +11,10 @@ import {
     ArrowLeft, BookmarkSimple, CheckCircle, Clock, FileText, Heart, Gear, Star,
 } from '@phosphor-icons/react';
 import {
-    deleteBookDeep, getBook, getProgress, listAnnotations, patchBook, type RdAnnotation, type RdBook, type RdProgress,
+    deleteBookDeep, getBook, getProgress, listAnnotations, listBooks, patchBook,
+    type RdAnnotation, type RdBook, type RdProgress,
 } from '../../utils/reader/readerDb';
+import { addCat, allCatNames } from './readerCats';
 import { readingModeFor, setBookMode, setHighlightSlot, useReaderPrefs } from './readerPrefs';
 import { HIGHLIGHT_SLOTS } from './readerSkinPresets';
 import ReaderCover, { shrinkCoverImage } from './ReaderCover';
@@ -47,7 +49,10 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
     const [prog, setProg] = useState<RdProgress | null>(null);
     const [anns, setAnns] = useState<RdAnnotation[]>([]);
     const [tab, setTab] = useState<Tab>('intro');
-    const [sheet, setSheet] = useState<null | 'book' | 'hl' | 'edit'>(null);
+    const [sheet, setSheet] = useState<null | 'book' | 'hl' | 'edit' | 'cat'>(null);
+    /** 分类能选哪些：书上用过的 ∪ 名册里建的（添加分类在书架那张面板上，这里也能现打一个） */
+    const [catNames, setCatNames] = useState<string[]>([]);
+    const [newCat, setNewCat] = useState('');
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [draft, setDraft] = useState({ title: '', author: '', category: '', intro: '' });
 
@@ -63,6 +68,14 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
         });
         setProg(await getProgress(bookId, 'user'));
         setAnns(await listAnnotations(bookId));
+        // 分类候选：所有书上用过的 + 名册里的
+        const all = await listBooks();
+        const m = new Map<string, number>();
+        for (const x of all) {
+            const c = (x.category || '').trim();
+            if (c) m.set(c, (m.get(c) ?? 0) + 1);
+        }
+        setCatNames(allCatNames(Array.from(m.entries()).sort((a, b) => b[1] - a[1])));
     }, [bookId]);
 
     useEffect(() => { void load(); }, [load]);
@@ -111,6 +124,7 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
     };
 
     const saveEdit = async () => {
+        if (draft.category.trim()) addCat(draft.category);
         const b = await patchBook(bookId, {
             title: draft.title.trim() || book.title,
             customAuthor: draft.author.trim(),
@@ -147,7 +161,7 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                     >
                         <Heart size={20} weight={book.onShelf ? 'fill' : 'regular'} />
                     </button>
-                    <button className="rd-icon-btn" aria-label="本书设置" onClick={() => setSheet('book')}>
+                    <button className="rd-icon-btn" aria-label="总结设置" onClick={() => setSheet('book')}>
                         <Gear size={20} />
                     </button>
                 </div>
@@ -240,7 +254,7 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                                 <span className="rd-item-chev">›</span>
                             </button>
                             <button className="rd-item" onClick={() => setSheet('book')}>
-                                <span className="rd-item-label">本书设置（共读模式）</span>
+                                <span className="rd-item-label">总结设置（共读模式）</span>
                                 <span className="rd-item-value">{mode === 'focus' ? '专注' : '随心'}</span>
                                 <span className="rd-item-chev">›</span>
                             </button>
@@ -265,12 +279,12 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                 {pct > 0 && pct < 99 ? `继续阅读 · ${pct}%` : pct >= 99 ? '再读一遍' : '开始阅读'}
             </button>
 
-            {/* ── 本书设置（单书设置） ── */}
+            {/* ── 总结设置（单书设置） ── */}
             {sheet === 'book' && (
                 <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
                     <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
                         <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">本书设置</div>
+                        <div className="rd-sheet-title">总结设置</div>
                         <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-3)' }}>{book.title}</div>
                         <div className="rd-row-label" style={{ marginBottom: 'var(--rd-space-2)' }}>共读模式（只对这本书）</div>
                         <div className="rd-btn-row" style={{ marginBottom: 'var(--rd-space-2)' }}>
@@ -328,12 +342,75 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                             </div>
                             <input className="rd-field" placeholder="书名" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
                             <input className="rd-field" placeholder="作者" value={draft.author} onChange={(e) => setDraft({ ...draft, author: e.target.value })} />
-                            <input className="rd-field" placeholder="分类（如：小说）" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} />
+                            <button className="rd-item" style={{ border: '1px solid var(--rd-rule)', borderRadius: 'var(--rd-r-md)', minHeight: 0, padding: '10px 14px' }} onClick={() => setSheet('cat')}>
+                                <span className="rd-item-label">分类</span>
+                                <span className="rd-item-value">{draft.category.trim() || '未分类'}</span>
+                                <span className="rd-item-chev">›</span>
+                            </button>
                             <textarea className="rd-field" rows={5} placeholder="简介" value={draft.intro} onChange={(e) => setDraft({ ...draft, intro: e.target.value })} />
                             <div className="rd-btn-row">
                                 <button className="rd-btn rd-btn-primary" onClick={() => void saveEdit()}>保存</button>
                                 <button className="rd-btn" onClick={() => setSheet(null)}>取消</button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 挑分类（名册 + 现打一个） ── */}
+            {sheet === 'cat' && (
+                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
+                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="rd-sheet-grip" />
+                        <div className="rd-sheet-title">分类</div>
+                        <div className="rd-card rd-card-flush">
+                            <div className="rd-list">
+                                <button className="rd-item" onClick={() => { setDraft({ ...draft, category: '' }); setSheet('edit'); }}>
+                                    <span className="rd-item-label">未分类</span>
+                                    {!draft.category.trim() && <span className="rd-check">✓</span>}
+                                </button>
+                                {catNames.map((c) => (
+                                    <button key={c} className="rd-item" onClick={() => { setDraft({ ...draft, category: c }); setSheet('edit'); }}>
+                                        <span className="rd-item-label">{c}</span>
+                                        {draft.category.trim() === c && <span className="rd-check">✓</span>}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="rd-muted" style={{ marginTop: 'var(--rd-space-3)' }}>
+                            没有想要的就在下面新打一个，它会进书架那张分类面板的「我的分类」。
+                        </div>
+                        <div className="rd-row" style={{ marginTop: 'var(--rd-space-2)' }}>
+                            <input
+                                className="rd-field"
+                                placeholder="新建一个分类"
+                                value={newCat}
+                                onChange={(e) => setNewCat(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return;
+                                    const n = newCat.trim();
+                                    if (!n) return;
+                                    addCat(n);
+                                    setCatNames((prev) => (prev.includes(n) ? prev : [...prev, n]));
+                                    setDraft({ ...draft, category: n });
+                                    setNewCat('');
+                                    setSheet('edit');
+                                }}
+                            />
+                            <button
+                                className="rd-btn"
+                                onClick={() => {
+                                    const n = newCat.trim();
+                                    if (!n) return;
+                                    addCat(n);
+                                    setCatNames((prev) => (prev.includes(n) ? prev : [...prev, n]));
+                                    setDraft({ ...draft, category: n });
+                                    setNewCat('');
+                                    setSheet('edit');
+                                }}
+                            >
+                                加上
+                            </button>
                         </div>
                     </div>
                 </div>

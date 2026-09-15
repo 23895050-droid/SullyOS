@@ -321,6 +321,13 @@ export const HIGHLIGHT_SLOTS: Array<{ slot: number; label: string; hex: string; 
     { slot: 6, label: '灰蓝', hex: '#7b8794', rgb: '123, 135, 148' },
 ];
 
+/** '#f2c14e' → '242, 193, 78'（自选划线色要的 rgb 三元组，给 rgba() 用） */
+export function hexTriple(hex: string): string {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return '224, 163, 46';
+    return trip(`#${m[1]}`.toLowerCase());
+}
+
 export function highlightSlotVars(): Record<string, string> {
     const vars: Record<string, string> = {};
     for (const s of HIGHLIGHT_SLOTS) {

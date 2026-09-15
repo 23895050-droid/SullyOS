@@ -75,6 +75,10 @@ export const READER_SKELETON_CSS = `
   --rd-space-5: 20px;
   --rd-space-6: 24px;
   --rd-nav-h: 52px;
+  /* 阅读页上下栏的本体高度（安全区另算）。顶栏/底栏是**遮罩**，正文区按这两个数
+     让开位置——所以沉浸开关不会让正文重排（ReaderPage 里的 BAR_H / FOOT_H 要跟这里一致）。 */
+  --rd-bar-h: 46px;
+  --rd-foot-h: 92px;
 
   /* 划线槽 1..6 的颜色由 readerSkinPresets.HIGHLIGHT_SLOTS 供给（见 ReaderSkinPreset） */
 
@@ -240,7 +244,7 @@ export const READER_SKELETON_CSS = `
 }
 .rd-sheet::-webkit-scrollbar { width: 0; }
 /* 目录/搜索那两张高面板：自己不开滚动条，让里面的列表滚（头和三页签钉在上头） */
-.rd-sheet-tall { display: flex; flex-direction: column; overflow: hidden; }
+.rd-sheet-tall { display: flex; flex-direction: column; overflow: hidden; height: 78vh; }
 .rd-sheet-grip { width: 38px; height: 4px; border-radius: var(--rd-r-pill); background: var(--rd-rule); margin: 0 auto var(--rd-space-4); }
 .rd-sheet-title { font-family: var(--rd-font-heading); font-size: var(--rd-fs-title); margin-bottom: var(--rd-space-3); }
 .rd-sheet-body { display: flex; flex-direction: column; gap: var(--rd-space-3); }
@@ -308,10 +312,14 @@ export const READER_SKELETON_CSS = `
   background: var(--rd-paper); background-image: var(--rd-paper-tex);
   color: var(--rd-ink);
 }
+/* 顶栏是**遮罩**：absolute 浮在正文上，不占流。它自己的安全区内边距垫到状态栏后面，
+   正文区在 .rd-reader 的 padding 里，所以两边都不越界；沉浸时只淡出，一行都不位移。 */
 .rd-reader-bar {
-  position: relative;
-  flex: 0 0 auto; display: flex; align-items: center; gap: 2px;
-  padding: 5px var(--rd-space-2) 2px;
+  position: absolute; top: 0; left: 0; right: 0; z-index: 20;
+  display: flex; align-items: center; gap: 2px;
+  height: calc(var(--rd-bar-h) + max(var(--chrome-top, 0px), env(safe-area-inset-top, 0px)));
+  padding: max(var(--chrome-top, 0px), env(safe-area-inset-top, 0px)) var(--rd-space-2) 0;
+  background: var(--rd-paper); background-image: var(--rd-paper-tex);
 }
 /* 标题脱流之后这排按钮没了推力，得自己贴右边 */
 .rd-reader-bar-tools { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
@@ -325,7 +333,7 @@ export const READER_SKELETON_CSS = `
 .rd-reader-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 /* 按「这一页的内容高度」裁切：视口通常比一页的内容高一点，不裁的话下一页的第一行
    会在底部露出半个字的边（书页本来就该在页边界处切断，不露下一页的字头）。 */
-.rd-reader-clip { position: absolute; left: 0; right: 0; top: 0; overflow: hidden; }
+.rd-reader-clip { position: absolute; left: 0; right: 0; top: var(--rd-bar-h); overflow: hidden; }
 .rd-reader-flow {
   position: absolute; left: var(--rd-page-gutter); right: var(--rd-page-gutter); top: 0;
   will-change: transform;
@@ -342,7 +350,14 @@ export const READER_SKELETON_CSS = `
 }
 .rd-reader-veil { position: absolute; inset: 0; background: var(--rd-veil); pointer-events: none; }
 
-.rd-reader-foot { flex: 0 0 auto; background: var(--rd-paper-2); border-top: 1px solid var(--rd-rule-soft); }
+/* 底栏同样是遮罩，高度写死——里面的行都靠 flex-end 兜底，加减内容不会把正文顶走 */
+.rd-reader-foot {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 20;
+  height: calc(var(--rd-foot-h) + max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+  padding-bottom: max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; justify-content: flex-end;
+  background: var(--rd-paper-2);
+}
 .rd-reader-stat { display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-3); padding: var(--rd-space-2) var(--rd-space-4) 0; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
 .rd-reader-slider { display: flex; align-items: center; gap: var(--rd-space-2); padding: var(--rd-space-2) var(--rd-space-4); }
 .rd-slider-nav {
@@ -370,7 +385,15 @@ export const READER_SKELETON_CSS = `
 .rd-tool-on { color: var(--rd-accent); }
 
 /* ── 阅读页的底部面板（排版 / 主题）：从工具排上面升起，顶替进度那两行 ── */
-.rd-reader-panel { padding: var(--rd-space-4) var(--rd-space-4) var(--rd-space-1); animation: rd-rise 200ms ease-out; }
+/* 排版/主题面板浮在底栏**上面**（bottom:100%），底栏高度不动 → 正文不动 */
+.rd-reader-panel {
+  position: absolute; left: 0; right: 0; bottom: 100%;
+  padding: var(--rd-space-4) var(--rd-space-4) var(--rd-space-3);
+  background: var(--rd-paper-2);
+  border-radius: var(--rd-r-lg) var(--rd-r-lg) 0 0;
+  box-shadow: var(--rd-shadow);
+  animation: rd-rise 200ms ease-out;
+}
 /* 「标签在左、控件在右」的行（参考图那条 Font / Font Size / H Margin / Line Spacing） */
 .rd-opt { display: flex; align-items: center; gap: var(--rd-space-3); margin-bottom: var(--rd-space-3); }
 .rd-opt-label { width: 84px; flex: 0 0 auto; font-size: var(--rd-fs-md); }
@@ -743,6 +766,50 @@ export const READER_SKELETON_CSS = `
 .rd-rank-val { flex: 0 0 auto; color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); font-variant-numeric: tabular-nums; }
 /* 统计页顶栏那颗「日报」入口（右上角），跟标题同一行 */
 .rd-head-link { border: 0; background: transparent; color: var(--rd-accent); font-family: inherit; font-size: var(--rd-fs-sm); flex: 0 0 auto; padding: 4px 0; }
+
+/* 沉浸：上下栏只淡出、不摘（摘掉正文会重排、跳动——她说的「顶来顶去」就是它） */
+.rd-chrome-off { opacity: 0; pointer-events: none; transition: opacity 220ms ease-out; }
+
+/* ── 底栏左二：图标是那个 —◯— ，点了在底栏上方**展开**一条能拖的进度条 ── */
+.rd-seek-icon { position: relative; display: block; width: 24px; height: 5px; border-radius: var(--rd-r-pill); background: var(--rd-track); }
+.rd-seek-icon-knob { position: absolute; top: 50%; left: 40%; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: var(--rd-r-pill); background: var(--rd-ink-soft); }
+.rd-reader-seekrow {
+  position: absolute; left: 0; right: 0; bottom: 100%;
+  display: flex; align-items: center; gap: var(--rd-space-2);
+  padding: var(--rd-space-3) var(--rd-space-4);
+  background: var(--rd-paper-2);
+  border-radius: var(--rd-r-lg) var(--rd-r-lg) 0 0;
+  box-shadow: var(--rd-shadow);
+  animation: rd-rise 200ms ease-out;
+}
+.rd-reader-seekpct { flex: 0 0 auto; min-width: 46px; text-align: right; color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); font-variant-numeric: tabular-nums; }
+.rd-reader-seekrow .rd-slider-track { height: 40px; }
+
+/* ── 书内搜索：整页（参考图 11 的高度，不是被键盘顶出来的小浮层）── */
+.rd-hunt {
+  position: absolute; inset: 0; z-index: 60;
+  display: flex; flex-direction: column;
+  padding: max(var(--chrome-top, 0px), env(safe-area-inset-top, 0px)) var(--rd-space-4)
+           max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
+  background: var(--rd-paper); background-image: var(--rd-paper-tex); color: var(--rd-ink);
+}
+.rd-hunt-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.rd-hunt-body::-webkit-scrollbar { width: 0; }
+/* 分类面板：从顶部展开的一块（把书架内容往下推），不是新页面 */
+.rd-catpanel { background: var(--rd-bg-2); border-radius: var(--rd-r-lg); padding: var(--rd-space-4) var(--rd-space-2) var(--rd-space-4); margin-bottom: var(--rd-space-4); animation: rd-rise 200ms ease-out; }
+.rd-caret-up { transform: rotate(180deg); }
+.rd-hunt-hist { display: flex; flex-wrap: wrap; gap: var(--rd-space-2); }
+.rd-slider-hue { height: 14px; border-radius: var(--rd-r-pill); appearance: none; -webkit-appearance: none; }
+.rd-slider-hue::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: var(--rd-r-pill); background: var(--rd-knob); box-shadow: var(--rd-shadow-sm); }
+.rd-hl-preview { width: 30px; height: 30px; border-radius: var(--rd-r-pill); box-shadow: var(--rd-shadow-sm); flex: 0 0 auto; }
+.rd-hunt-chip {
+  border: 0; border-radius: var(--rd-r-pill); background: var(--rd-card);
+  color: var(--rd-ink); font-family: inherit; font-size: var(--rd-fs-sm);
+  padding: 6px var(--rd-space-4); box-shadow: var(--rd-shadow-sm);
+}
+/* 从搜索结果跳过去的那一条：回到列表时有选中态 */
+.rd-toc-row-on { background: var(--rd-accent-soft); border-radius: var(--rd-r-md); }
+.rd-toc-row-on .rd-toc-row-head span:first-child { color: var(--rd-accent); font-weight: 600; }
 
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }
