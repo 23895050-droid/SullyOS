@@ -15,8 +15,9 @@ import {
     type RdAnnotation, type RdBook, type RdProgress,
 } from '../../utils/reader/readerDb';
 import { addCat, allCatNames } from './readerCats';
-import { readingModeFor, setBookMode, setHighlightSlot, useReaderPrefs } from './readerPrefs';
-import { HIGHLIGHT_SLOTS } from './readerSkinPresets';
+import {
+    readingModeFor, removeHighlightColor, setBookMode, setHighlightColor, useReaderPrefs,
+} from './readerPrefs';
 import ReaderCover, { shrinkCoverImage } from './ReaderCover';
 
 interface Props {
@@ -95,7 +96,6 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
     const notes = anns.filter((a) => a.kind === 'note' || a.kind === 'highlight');
     const bookmarks = anns.filter((a) => a.kind === 'bookmark');
     const mode = readingModeFor(prefs, bookId);
-    const mySlot = prefs.highlightStyles.user ?? 1;
 
     const setRating = (n: number) => {
         void patchBook(bookId, { rating: n }).then((b) => setBook(b));
@@ -259,8 +259,8 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                                 <span className="rd-item-chev">›</span>
                             </button>
                             <button className="rd-item" onClick={() => setSheet('hl')}>
-                                <span className="rd-item-label">划线配色</span>
-                                <span className="rd-item-value">{HIGHLIGHT_SLOTS.find((s) => s.slot === mySlot)?.label}</span>
+                                <span className="rd-item-label">划线颜色</span>
+                                <span className="rd-item-value">{prefs.highlightColor}</span>
                                 <span className="rd-item-chev">›</span>
                             </button>
                             <button className="rd-item" onClick={() => notify(`格式 ${book.format.toUpperCase()} · 共 ${book.chapterCount} 章 · ${book.encoding || '默认编码'}`)}>
@@ -304,22 +304,22 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                 <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
                     <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
                         <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">划线配色</div>
-                        <div className="rd-row" style={{ marginBottom: 'var(--rd-space-3)' }}>
-                            <span className="rd-row-label">我</span>
-                            <div className="rd-btn-row">
-                                {HIGHLIGHT_SLOTS.map((s) => (
-                                    <button
-                                        key={s.slot}
-                                        aria-label={s.label}
-                                        className={`rd-swatch${mySlot === s.slot ? ' rd-swatch-on' : ''}`}
-                                        onClick={() => setHighlightSlot('user', s.slot)}
-                                        style={{ background: `rgb(var(--rd-hl-${s.slot}-rgb))` }}
-                                    />
-                                ))}
-                            </div>
+                        <div className="rd-sheet-title">划线颜色</div>
+                        <div className="rd-hunt-hist" style={{ marginBottom: 'var(--rd-space-3)' }}>
+                            {prefs.highlightPalette.map((c) => (
+                                <button
+                                    key={c}
+                                    aria-label={c}
+                                    className={`rd-swatch${prefs.highlightColor === c ? ' rd-swatch-on' : ''}`}
+                                    style={{ background: c }}
+                                    onClick={() => setHighlightColor(c)}
+                                    onContextMenu={(e) => { e.preventDefault(); removeHighlightColor(c); }}
+                                />
+                            ))}
                         </div>
-                        <div className="rd-muted">角色的槽位跟着书库页的开关走，第二批接上。</div>
+                        <div className="rd-muted">
+                            跟阅读页「更多 → 划线颜色」是同一套笔：那里能调新颜色、能存进这支调色盘。点一支就用它，长按或右键删。
+                        </div>
                     </div>
                 </div>
             )}
