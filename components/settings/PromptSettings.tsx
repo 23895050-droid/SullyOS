@@ -38,6 +38,11 @@ const Item: React.FC<{ entry: PromptEntry }> = ({ entry }) => {
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
+            // 手机上键盘一起来就把光标那行顶到能看见的地方（她 09-21 报的输入框被挡）
+            onFocus={(e) => {
+              const el = e.currentTarget;
+              window.setTimeout(() => el.scrollIntoView({ block: 'center' }), 300);
+            }}
             rows={7}
             className="w-full rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 text-[11px] leading-relaxed text-slate-700 resize-y outline-none focus:border-pink-300"
           />

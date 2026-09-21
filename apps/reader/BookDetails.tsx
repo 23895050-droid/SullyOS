@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-    ArrowLeft, BookmarkSimple, CheckCircle, Clock, FileText, Heart, Gear, Star,
+    ArrowLeft, BookmarkSimple, CheckCircle, Clock, FileText, Heart, Star,
 } from '@phosphor-icons/react';
 import {
     deleteBookDeep, getBook, getProgress, listAnnotations, listBooks, patchBook,
@@ -16,7 +16,7 @@ import {
 } from '../../utils/reader/readerDb';
 import { addCat, addTag, allCatNames, loadTags } from './readerCats';
 import HighlightColorSheet from './HighlightColorSheet';
-import { highlightColorOf, readingModeFor, setBookMode, useReaderPrefs } from './readerPrefs';
+import { highlightColorOf, useReaderPrefs } from './readerPrefs';
 import ReaderCover, { shrinkCoverImage } from './ReaderCover';
 
 interface Props {
@@ -49,7 +49,7 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
     const [prog, setProg] = useState<RdProgress | null>(null);
     const [anns, setAnns] = useState<RdAnnotation[]>([]);
     const [tab, setTab] = useState<Tab>('intro');
-    const [sheet, setSheet] = useState<null | 'book' | 'hl' | 'edit' | 'cat' | 'tag'>(null);
+    const [sheet, setSheet] = useState<null | 'hl' | 'edit' | 'cat' | 'tag'>(null);
     /** 分类能选哪些：书上用过的 ∪ 名册里建的（添加分类在书架那张面板上，这里也能现打一个） */
     const [catNames, setCatNames] = useState<string[]>([]);
     const [newCat, setNewCat] = useState('');
@@ -131,7 +131,6 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
         const q = (n: number) => String(n).padStart(2, '0');
         return `${d.getFullYear()}-${q(d.getMonth() + 1)}-${q(d.getDate())} ${q(d.getHours())}:${q(d.getMinutes())}:${q(d.getSeconds())}`;
     };
-    const mode = readingModeFor(prefs, bookId);
 
     const setRating = (n: number) => {
         void patchBook(bookId, { rating: n }).then((b) => setBook(b));
@@ -198,9 +197,6 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                         }}
                     >
                         <Heart size={20} weight={book.onShelf ? 'fill' : 'regular'} />
-                    </button>
-                    <button className="rd-icon-btn" aria-label="总结设置" onClick={() => setSheet('book')}>
-                        <Gear size={20} />
                     </button>
                 </div>
 
@@ -312,11 +308,6 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                                 <span className="rd-item-label">编辑资料</span>
                                 <span className="rd-item-chev">›</span>
                             </button>
-                            <button className="rd-item" onClick={() => setSheet('book')}>
-                                <span className="rd-item-label">总结设置（共读模式）</span>
-                                <span className="rd-item-value">{mode === 'focus' ? '专注' : '随心'}</span>
-                                <span className="rd-item-chev">›</span>
-                            </button>
                             <button className="rd-item" onClick={() => setSheet('hl')}>
                                 <span className="rd-item-label">划线设置</span>
                                 <span className="rd-item-value">{highlightColorOf(prefs, 'user')}</span>
@@ -337,26 +328,6 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
             <button className="rd-cta" onClick={() => onRead(bookId)}>
                 {pct > 0 && pct < 99 ? `继续阅读 · ${pct}%` : pct >= 99 ? '再读一遍' : '开始阅读'}
             </button>
-
-            {/* ── 总结设置（单书设置） ── */}
-            {sheet === 'book' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">总结设置</div>
-                        <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-3)' }}>{book.title}</div>
-                        <div className="rd-row-label" style={{ marginBottom: 'var(--rd-space-2)' }}>共读模式（只对这本书）</div>
-                        <div className="rd-btn-row" style={{ marginBottom: 'var(--rd-space-2)' }}>
-                            <button className={mode === 'focus' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => setBookMode(bookId, 'focus')}>专注</button>
-                            <button className={mode === 'casual' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => setBookMode(bookId, 'casual')}>随心</button>
-                        </div>
-                        <div className="rd-muted">
-                            专注：上下文以当前页正文为主，只带这本书最近几条批注；<br />
-                            随心：保留正常聊天上下文，读书只是其中一件事。
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* ── 划线颜色：跟阅读页、设置页共用同一张弹卡（她：四处要打通） ── */}
             {sheet === 'hl' && <HighlightColorSheet onClose={() => setSheet(null)} />}

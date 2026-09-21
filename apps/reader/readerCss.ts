@@ -56,7 +56,7 @@ export const READER_SKELETON_CSS = `
   --rd-fs-md: 15px;
   --rd-fs-sm: 13px;
   --rd-fs-caption: 12px;
-  --rd-fs-tab: 10px;
+  --rd-fs-tab: 11px;
   --rd-lh-body: 1.9;
   --rd-para-gap: 12px;
   --rd-para-indent: 2em;
@@ -68,6 +68,9 @@ export const READER_SKELETON_CSS = `
   --rd-r-lg: 18px;
   --rd-r-pill: 999px;
   --rd-radius-hl: 2px;
+  /* 段落侧面色条：离正文多远、多粗（她要的是「贴着段落边上一根细柱子」） */
+  --rd-para-bar-x: 11px;
+  --rd-para-bar-w: 3px;
   /* 波浪线用的正弦遮罩（16×6 一格，描边在竖直中间；颜色由 currentColor 铺，遮罩不带色） */
   --rd-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='6'%3E%3Cpath d='M0 3.4 Q 4 0.2 8 3.4 T 16 3.4' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E");
   --rd-wave-size: 16px 6px;
@@ -77,7 +80,13 @@ export const READER_SKELETON_CSS = `
   --rd-space-4: 16px;
   --rd-space-5: 20px;
   --rd-space-6: 24px;
-  --rd-nav-h: 52px;
+  /* 底部导航的高度与让位——**照她 09-21 给的参考图量的**（同尺寸设备 426.7×924.7pt）：
+     参考图那条导航整体 82.7pt、图标实墨 18pt、文字下缘离屏幕底 38pt。
+     所以它高在**图标和字更大**，不是下面留空更多：按钮 50pt 装得下「24px 图标 + 11px 字」，
+     底下让位比安全区少 4pt（≈30pt，home 条本体在离底 8-13pt，净空还够 20pt+）。
+     悬浮胶囊（进度/任务条）也按这两个变量算，别各写各的。 */
+  --rd-nav-h: 50px;
+  --rd-nav-pad: max(12px, calc(var(--safe-bottom, 0px) - 4px));
   /* 阅读页上下栏的本体高度（安全区另算）。顶栏/底栏是**遮罩**，正文区按这两个数
      让开位置——所以沉浸开关不会让正文重排（ReaderPage 里的 BAR_H / FOOT_H 要跟这里一致）。 */
   --rd-bar-h: 46px;
@@ -95,7 +104,10 @@ export const READER_SKELETON_CSS = `
   font-family: var(--rd-font-body);
   display: flex;
   flex-direction: column;
+  /* 高度按**可见视口**算，不按外壳容器（同 .rd-reader 那段：独立模式里容器可能比屏幕高一截，
+     照它排的话底部页签也跟着压到 home 条上）。dvh 不支持的老浏览器退回 100%。 */
   height: 100%;
+  height: 100dvh;
   min-height: 0;
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
@@ -138,7 +150,7 @@ export const READER_SKELETON_CSS = `
 
 .rd-nav {
   flex: 0 0 auto; display: flex; align-items: stretch;
-  padding-bottom: var(--safe-bottom, 0px);
+  padding-bottom: var(--rd-nav-pad);
   border-top: 1px solid var(--rd-rule);
   background: var(--rd-nav-bg, var(--rd-card));
 }
@@ -227,7 +239,8 @@ export const READER_SKELETON_CSS = `
 .rd-btn:active { background: var(--rd-bg-2); }
 .rd-btn-primary { background: var(--rd-accent); border-color: var(--rd-accent); color: var(--rd-on-accent); }
 .rd-btn-soft { background: var(--rd-accent-soft); border-color: transparent; color: var(--rd-accent); }
-.rd-btn-block { display: block; width: 100%; text-align: center; padding: var(--rd-space-3); font-size: var(--rd-fs-lg); border-radius: var(--rd-r-md); }
+/* 通栏按钮：字号跟 .rd-btn 一样（15px）——以前是 20px，她 09-16 说「字太巨大了」 */
+.rd-btn-block { display: block; width: 100%; text-align: center; padding: var(--rd-space-3); font-size: var(--rd-fs-md); border-radius: var(--rd-r-md); }
 .rd-btn:disabled { opacity: 0.45; }
 .rd-btn-row { display: flex; gap: var(--rd-space-2); flex-wrap: wrap; }
 
@@ -240,19 +253,35 @@ export const READER_SKELETON_CSS = `
 
 /* ── 浮层（底部弹出卡） ── */
 .rd-sheet-mask {
-  position: fixed; inset: 0; background: var(--rd-scrim); z-index: 60;
+  /* 底边同样按**可见视口**算（inset:0 会跟着外壳容器一起跑到屏幕底下，见 .rd-reader 那段） */
+  position: fixed; top: 0; left: 0; right: 0; height: 100dvh;
+  background: var(--rd-scrim); z-index: 60;
   display: flex; align-items: flex-end; animation: rd-fade 160ms ease;
 }
 .rd-sheet {
-  width: 100%; max-height: 86vh; overflow-y: auto; overscroll-behavior: contain;
+  /* 上限取「视口」和「遮罩（= 可视区）」里小的那个：键盘弹起时遮罩矮了，卡也得跟着矮，
+     不然卡顶会被顶出屏幕（她 09-21 报的：编辑提示词时只剩顶上三行露在外面） */
+  width: 100%; max-height: min(86vh, 100%); overflow-y: auto; overscroll-behavior: contain;
   background: var(--rd-sheet-bg); color: var(--rd-ink);
   border-radius: var(--rd-r-lg) var(--rd-r-lg) 0 0;
-  padding: var(--rd-space-2) var(--rd-space-4) calc(var(--rd-space-5) + var(--safe-bottom, 0px));
+  /* 底部安全区：**用「地板」写法**——--safe-bottom 全项目没人赋值（恒 0），
+     env() 在 Safari 里也可能是 0，光靠变量救不了。给一个 40px 的底，
+     三者取大、不会双算（同 apps/Camera.tsx 的「安全区地板」注释）。
+     她 09-16 报的「一起读书面板下面也留个安全区」就是这里。 */
+  padding: var(--rd-space-2) var(--rd-space-4)
+    max(40px, var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
   animation: rd-rise 220ms cubic-bezier(0.32, 0.72, 0.28, 1);
 }
+/* 键盘弹起时：① 遮罩底边从「屏幕底」收到「键盘上沿」——不然弹卡下半截被键盘盖住（她 09-21）；
+   ② 收掉给 home 条留的那截底隙（键盘已经把那儿盖住了，留着只会把内容往上挤）。
+   平时这两条都不生效，遮罩还是她验收过的 100dvh，别动。 */
+body.ios-keyboard-open .rd-sheet-mask,
+body.ios-keyboard-open .rd-discuss-mask { height: var(--visual-viewport-height, 100dvh); }
+body.ios-keyboard-open .rd-sheet,
+body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 .rd-sheet::-webkit-scrollbar { width: 0; }
 /* 目录/搜索那两张高面板：自己不开滚动条，让里面的列表滚（头和三页签钉在上头） */
-.rd-sheet-tall { display: flex; flex-direction: column; overflow: hidden; height: 78vh; }
+.rd-sheet-tall { display: flex; flex-direction: column; overflow: hidden; height: min(78vh, 100%); }
 .rd-sheet-grip { width: 38px; height: 4px; border-radius: var(--rd-r-pill); background: var(--rd-rule); margin: 0 auto var(--rd-space-4); }
 .rd-sheet-title { font-family: var(--rd-font-heading); font-size: var(--rd-fs-title); margin-bottom: var(--rd-space-3); }
 .rd-sheet-body { display: flex; flex-direction: column; gap: var(--rd-space-3); }
@@ -314,7 +343,12 @@ export const READER_SKELETON_CSS = `
    max() 兜住两种来源：上游给 SELF_SAFE_AREA_APPS 算的 --chrome-top/--safe-bottom，
    以及 iOS 自己的 env()（手机上上游那两个值可能是 0）。取大值，不会双算。 */
 .rd-reader {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
+  /* **钉在可见视口上，不钉外壳容器**（她 09-16 拍的「全都太靠下」）：
+     独立模式里外壳容器可能比屏幕高出一截（--app-height 多出来的 +safe 溢出区），
+     照容器的底边排版，整套底部控件就会被推到 home 条底下。
+     top:0 + height:100dvh = 自己算底边：容器本来对的时候两者重合，容器高了就按屏幕算。 */
+  position: fixed; top: 0; left: 0; right: 0; height: 100dvh;
+  display: flex; flex-direction: column;
   padding-top: max(var(--chrome-top, 0px), env(safe-area-inset-top, 0px));
   padding-bottom: max(var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
   background: var(--rd-paper); background-image: var(--rd-paper-tex);
@@ -343,7 +377,7 @@ export const READER_SKELETON_CSS = `
 }
 .rd-reader-viewport {
   position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden;
-  /* 横向手势归我们（翻页跟手），纵向留给浏览器（正文本来不滚，这样长按选字不打架） */
+  /* 横向手势归阅读器（翻页跟手），纵向留给浏览器（正文本来不滚，这样长按选字不打架） */
   touch-action: pan-y;
 }
 /* 一屏一片：整章排进**多列流**里，一列就是一页，翻页 = 整列横向平移。
@@ -390,10 +424,24 @@ export const READER_SKELETON_CSS = `
 /* 章标题是「书里的东西」，跟着正文字号走（界面那些字号是固定的，见 .rd-root 那段注释） */
 .rd-reader-chapter { font-family: var(--rd-font-heading); font-size: var(--rd-fs-chapter); line-height: 1.4; margin: 0 0 var(--rd-space-5); font-weight: 600; }
 .rd-para {
+  position: relative;
   font-size: var(--rd-fs-body); line-height: var(--rd-lh-body);
   margin: 0 0 var(--rd-para-gap);
   text-indent: var(--rd-para-indent);
   white-space: pre-wrap; word-break: break-word;
+}
+/* 段落侧面色条（她 09-15 定的口径）：这一段里有谁标注/讨论过，左侧就挂一条色柱，
+   颜色按参与时间从上往下排；**≥3 人整条墨色**。
+   必须用伪元素——.rd-para 里绝不能加真子节点（分页取 firstChild 的文本节点，见 paginate）。
+   颜色与分段由 ReaderPage 算好，塞在行内的 --rd-bar 里（一条 linear-gradient 硬分段，不混色）。 */
+.rd-para[data-rd-bar]::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--rd-para-bar-x) * -1);
+  top: 0.35em; bottom: 0.35em;
+  width: var(--rd-para-bar-w);
+  border-radius: var(--rd-r-pill);
+  background: var(--rd-bar);
 }
 .rd-reader-veil { position: absolute; inset: 0; background: var(--rd-veil); pointer-events: none; }
 
@@ -529,8 +577,79 @@ export const READER_SKELETON_CSS = `
 .rd-note-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .rd-note-book { font-size: var(--rd-fs-md); font-weight: 600; }
 .rd-note-sub { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+/* 这条笔记是谁写的（她 09-16：至少得让我知道谁写的）——笔色点 + 名字 + 日期 */
+.rd-note-by { display: flex; align-items: center; gap: var(--rd-space-2); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-note-dot { width: 8px; height: 8px; border-radius: var(--rd-r-pill); flex: 0 0 auto; }
 .rd-note-quote { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .rd-note-text { font-size: var(--rd-fs-sm); line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* ── 笔记库页（她 09-20 文档）：一本书一行 → 展开是这本书的笔记 → 再展开是批注与原文 + 讨论 ── */
+.rd-notes-seg { margin-bottom: var(--rd-space-3); }
+.rd-filter-row {
+  display: flex; align-items: center; gap: var(--rd-space-2); flex-wrap: wrap;
+  margin-bottom: var(--rd-space-4);
+}
+.rd-filter-clear {
+  border: 0; background: transparent; color: var(--rd-ink-soft); font-family: inherit;
+  font-size: var(--rd-fs-caption); text-decoration: underline; padding: var(--rd-space-1) var(--rd-space-2);
+}
+/* 一本书一组：组和组之间一条实线，组里第一条笔记不再另加线 */
+.rd-nbook + .rd-nbook { border-top: 1px solid var(--rd-rule); }
+/* 卡本身不带左右内边距（rd-card-flush），这里自己留出来——两边不许顶到卡边（她 09-20） */
+.rd-nbook-head { align-items: flex-start; padding-left: var(--rd-space-4); padding-right: var(--rd-space-4); }
+.rd-nbook-head .rd-fold-chev { flex: 0 0 auto; margin-top: var(--rd-space-2); color: var(--rd-ink-soft); }
+/* 展开出来的那条笔记：往右缩一格，看得出它属于上面这本书；右边同样留白 */
+.rd-nb-wrap { padding: 0 var(--rd-space-4) 0 calc(var(--rd-space-4) * 2); }
+.rd-nb-wrap + .rd-nb-wrap { border-top: 1px solid var(--rd-rule-soft); }
+.rd-nb-chapter {
+  font-size: var(--rd-fs-caption); color: var(--rd-ink-soft); letter-spacing: 0.08em;
+  padding: var(--rd-space-3) 0 var(--rd-space-1);
+}
+.rd-nb {
+  display: block; width: 100%; text-align: left; border: 0; background: transparent;
+  color: inherit; font-family: inherit; padding: var(--rd-space-3) 0 var(--rd-space-2);
+}
+.rd-nb-quote { font-size: var(--rd-fs-sm); line-height: 1.65; }
+.rd-nb-meta {
+  display: flex; align-items: center; gap: var(--rd-space-2);
+  margin-top: var(--rd-space-2); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
+}
+.rd-nb-count::before { content: '·'; margin-right: var(--rd-space-2); }
+.rd-nb-chev { margin-left: auto; }
+.rd-nb-body {
+  display: flex; flex-direction: column; gap: var(--rd-space-3);
+  background: var(--rd-bg-2); border-radius: var(--rd-r-md);
+  padding: var(--rd-space-3) var(--rd-space-3) var(--rd-space-4);
+  margin-bottom: var(--rd-space-3);
+}
+.rd-nb-note { font-size: var(--rd-fs-sm); line-height: 1.75; }
+.rd-nb-src {
+  display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--rd-space-2) var(--rd-space-3);
+  padding-top: var(--rd-space-3); border-top: 1px solid var(--rd-rule-soft);
+}
+/* 原文自己占一整行——不然「转发 / 查看原文」会插进引文中间（长句子时字和按钮缠在一起） */
+.rd-nb-src-text { flex: 1 1 100%; min-width: 0; color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.65; }
+.rd-nb-goto {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px;
+  border: 0; background: transparent; color: var(--rd-accent);
+  font-family: inherit; font-size: var(--rd-fs-caption); padding: 0;
+}
+.rd-nb-thread {
+  display: flex; flex-direction: column; gap: var(--rd-space-3);
+  padding-top: var(--rd-space-3); border-top: 1px solid var(--rd-rule-soft);
+}
+.rd-nb-msg { display: flex; flex-direction: column; gap: var(--rd-space-1); }
+.rd-nb-msg-me { align-items: flex-end; text-align: right; }
+.rd-nb-msg-head { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-nb-msg-text { font-size: var(--rd-fs-sm); line-height: 1.75; }
+
+/* 阅读风格（气质 / 偏好）那两段正文 */
+.rd-style-text { font-size: var(--rd-fs-sm); line-height: 1.75; white-space: pre-wrap; }
+/* 书库页：点名字看他的阅读风格（那行原本只有开关） */
+.rd-lib-name {
+  border: 0; background: transparent; color: inherit; font-family: inherit;
+  text-align: left; padding: 0; display: flex; flex-direction: column; gap: 2px;
+}
 
 /* ── 统计 ── */
 .rd-seg { display: flex; background: var(--rd-bg-2); border-radius: var(--rd-r-pill); padding: 3px; margin-bottom: var(--rd-space-4); }
@@ -557,7 +676,7 @@ export const READER_SKELETON_CSS = `
 /* ── 轻提示（一句话反馈） ── */
 .rd-toast {
   position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: calc(var(--rd-nav-h) + var(--safe-bottom, 0px) + var(--rd-space-4));
+  bottom: calc(var(--rd-nav-h) + var(--rd-nav-pad) + var(--rd-space-4));
   max-width: 82%; text-align: center;
   background: var(--rd-scrim); color: var(--rd-on-scrim);
   border-radius: var(--rd-r-pill);
@@ -665,8 +784,12 @@ export const READER_SKELETON_CSS = `
   border-radius: var(--rd-r-pill);
   background: var(--rd-toolbar-bg); box-shadow: var(--rd-shadow);
 }
-.rd-bar-tb-dot { width: 24px; height: 24px; flex: 0 0 auto; border: 0; border-radius: var(--rd-r-pill); }
-.rd-bar-tb-dot-on { outline: 2px solid var(--rd-toolbar-ink); outline-offset: 2px; }
+/* 这条的颜色：一个小取色框（她 09-16 要的调色台调法，替掉了原来那排固定色卡） */
+.rd-bar-tb-pick {
+  display: flex; align-items: center; gap: var(--rd-space-2);
+  color: var(--rd-toolbar-ink); font-size: var(--rd-fs-caption); flex: 0 0 auto;
+}
+.rd-bar-tb-pick .rd-color-in { border-color: var(--rd-toolbar-ink); background: transparent; }
 
 .rd-notepanel {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
@@ -693,6 +816,362 @@ export const READER_SKELETON_CSS = `
   background: var(--rd-card); color: var(--rd-ink);
   font-family: var(--rd-font-body); font-size: var(--rd-fs-md); line-height: 1.7;
 }
+
+/* ── 一起读书（共读面板）────────────────────────────────────── */
+/* 选角色那一排胶囊（只列开了读书开关的角色） */
+.rd-char-row { display: flex; flex-wrap: wrap; gap: var(--rd-space-2); }
+/* 面板里的多行输入（摘要规则）：比 .rd-field 高一些，能拖 */
+.rd-field-area {
+  min-height: 84px; resize: vertical; line-height: 1.6;
+  font-size: var(--rd-fs-sm); border-radius: var(--rd-r-md);
+}
+/* 共读中那张状态卡：他读到哪 + 你这一页在哪 */
+.rd-coread-card {
+  padding: var(--rd-space-3) var(--rd-space-4); border-radius: var(--rd-r-md);
+  background: var(--rd-rule-soft);
+  /* 上下都留气：她 09-16 说「有些都贴在一起了」——上头那枚「‹ 换一个」、下面那行设置标题 */
+  margin: var(--rd-space-3) 0 var(--rd-space-4);
+}
+.rd-coread-name { font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); margin-bottom: var(--rd-space-1); }
+.rd-coread-recent { margin-top: var(--rd-space-4); }
+.rd-coread-act {
+  padding: var(--rd-space-3); border-radius: var(--rd-r-md);
+  background: var(--rd-card); box-shadow: var(--rd-shadow-sm);
+  font-size: var(--rd-fs-sm); line-height: 1.6; margin-bottom: var(--rd-space-2);
+}
+
+/* 「最近读到的」时间线（她 09-20：加时间线、配时间戳；回复记录也显示在上面） */
+.rd-tl { position: relative; margin-top: var(--rd-space-3); padding-left: var(--rd-space-5); }
+.rd-tl::before {
+  content: ''; position: absolute; left: 5px; top: var(--rd-space-1); bottom: var(--rd-space-1);
+  width: 1px; background: var(--rd-rule);
+}
+.rd-tl-item { position: relative; padding-bottom: var(--rd-space-5); }
+.rd-tl-item:last-child { padding-bottom: 0; }
+.rd-tl-dot {
+  position: absolute; left: calc(var(--rd-space-5) * -1 + 1px); top: 6px;
+  width: 9px; height: 9px; border-radius: var(--rd-r-pill);
+  box-shadow: 0 0 0 3px var(--rd-sheet-bg);
+}
+.rd-tl-head { display: flex; align-items: baseline; gap: var(--rd-space-2); }
+.rd-tl-who { font-size: var(--rd-fs-sm); font-weight: 600; }
+.rd-tl-time { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums; }
+.rd-tl-text { font-size: var(--rd-fs-sm); line-height: 1.6; margin-top: var(--rd-space-1); }
+.rd-tl-ex { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); line-height: 1.6; margin-top: var(--rd-space-1); }
+/* 他顺手回的话：分行列出来，和「做了什么」区分开 */
+.rd-tl-reply {
+  margin-top: var(--rd-space-2); padding-left: var(--rd-space-3);
+  border-left: 2px solid var(--rd-rule); font-size: var(--rd-fs-sm); line-height: 1.6;
+}
+.rd-tl-meta { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); margin-top: var(--rd-space-2); }
+/* 内心活动：一行小字，斜一点，和「做了什么」分开 */
+.rd-coread-feel {
+  margin-top: var(--rd-space-1); padding-left: var(--rd-space-3);
+  border-left: 2px solid var(--rd-rule);
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-style: italic;
+}
+/* 活动记录底下那行 token 账（读进去 / 吐出来是分开的） */
+.rd-coread-tok {
+  margin-top: var(--rd-space-2); padding-top: var(--rd-space-2);
+  border-top: 1px dashed var(--rd-rule);
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-tab);
+}
+.rd-coread-tok-in { color: var(--rd-accent); }
+.rd-coread-tok-out { color: var(--rd-ink-soft); }
+
+/* 三个 API 输入竖排 */
+.rd-api-form { display: flex; flex-direction: column; gap: var(--rd-space-2); margin-top: var(--rd-space-2); }
+/* 共读中：顶栏那枚图标换成角色的头像 */
+.rd-coread-avatar-img { width: 26px; height: 26px; border-radius: var(--rd-r-pill); object-fit: cover; }
+/* 两个人以上：两个头像叠着，第二个蒙一层半透明、上面写人数（她 09-20 给的样子） */
+.rd-coread-stack { width: auto; gap: var(--rd-space-1); padding: 0 2px; }
+.rd-coread-stack-face { width: 24px; height: 24px; border-radius: var(--rd-r-pill); object-fit: cover; }
+.rd-coread-stack-second { position: relative; display: inline-flex; }
+.rd-coread-stack-second::after {
+  content: ''; position: absolute; inset: 0;
+  border-radius: var(--rd-r-pill); background: var(--rd-scrim);
+}
+.rd-coread-stack-count {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  /* 蒙版是 ::after，画在子节点上面——人数得抬一层才看得见（踩过：数字整个被盖住） */
+  z-index: 1;
+  color: var(--rd-on-scrim);
+  font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums;
+}
+/* 「‹ 换一个」那种返回小按钮 */
+.rd-coread-back { align-self: flex-start; padding: var(--rd-space-1) var(--rd-space-2); }
+
+/* ── 共读面板（09-20 按她的三份文档重写）──────────────────────────────────
+   版面：面板头 → 三步向导（邀请 / 规则 / 确认设置）或 信息页 + 设置 → 底部动作。
+   间距一条原则：**分组之间大（space-5/6）、组内小（space-2/3）**，
+   线和字之间永远隔开——她连着两次说「文字和线条都贴上了」。 */
+/* 这张卡里全是分组卡片，左右比别的弹卡多给一口气 */
+.rd-sheet-coread { padding-left: var(--rd-space-5); padding-right: var(--rd-space-5); }
+.rd-sheet-coread .rd-empty { padding: var(--rd-space-6) var(--rd-space-3); }
+/* 名单下面接别的东西时留一口气（不然那块像贴在最后一行上） */
+.rd-sheet-coread .rd-list { margin-bottom: var(--rd-space-4); }
+.rd-sheet-coread .rd-list .rd-item + .rd-item { border-top: 1px solid var(--rd-rule); }
+.rd-coread-head { margin-bottom: var(--rd-space-5); }
+.rd-coread-title {
+  display: flex; align-items: center; gap: var(--rd-space-2);
+  font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); line-height: 1.3;
+}
+.rd-coread-book { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); margin-top: var(--rd-space-1); }
+/* 底部动作区：主按钮 + 次按钮 + 一行小字说明（主按钮只有这一个） */
+.rd-coread-actions,
+.rd-actions { display: flex; flex-direction: column; gap: var(--rd-space-3); margin-top: var(--rd-space-6); }
+.rd-coread-actions .rd-muted,
+.rd-actions .rd-muted { margin-top: var(--rd-space-1); }
+
+/* 向导里每一步的标题（衬线，和正文拉开层级） */
+.rd-step-title {
+  font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); line-height: 1.35;
+  margin-bottom: var(--rd-space-4);
+}
+
+/* 邀请名单：一行一个人，点一下选中（勾在行尾，没选时是一枚淡圈——看得出能多选） */
+.rd-item-tap { cursor: pointer; }
+.rd-item-on { color: var(--rd-accent); }
+.rd-list .rd-item { border-radius: var(--rd-r-sm); }
+.rd-sheet-coread .rd-item-label { flex: 1 1 auto; min-width: 0; }
+.rd-item-tick { flex: 0 0 auto; display: inline-flex; color: var(--rd-ink-soft); opacity: 0.5; }
+.rd-item-tick-on { color: var(--rd-accent); opacity: 1; }
+
+/* 规则三选一：竖排三张卡，选中的那张有勾 */
+.rd-rules { display: flex; flex-direction: column; gap: var(--rd-space-3); }
+.rd-rule {
+  position: relative; display: flex; flex-direction: column; gap: var(--rd-space-1);
+  width: 100%; text-align: left; cursor: pointer;
+  padding: var(--rd-space-4); border: 1px solid var(--rd-rule);
+  border-radius: var(--rd-r-md); background: var(--rd-card); color: var(--rd-ink);
+  font-family: var(--rd-font-body);
+}
+.rd-rule-on { border-color: var(--rd-accent); background: var(--rd-accent-soft); }
+.rd-rule-name { font-size: var(--rd-fs-md); }
+.rd-rule-desc { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); line-height: 1.6; }
+.rd-rule-tick { position: absolute; top: var(--rd-space-4); right: var(--rd-space-4); color: var(--rd-accent); }
+/* 自定义那块：跟着选中的卡展开，左边留一道竖线做归属 */
+.rd-rule-body {
+  display: flex; flex-direction: column; gap: var(--rd-space-3);
+  margin-top: var(--rd-space-3); padding: var(--rd-space-4);
+  border-left: 2px solid var(--rd-accent-soft);
+  background: var(--rd-rule-soft); border-radius: var(--rd-r-sm);
+}
+
+/* 确认设置里每个人一行：折叠只显示预设名，点开才是可改的表 */
+.rd-member {
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-md);
+  background: var(--rd-card); overflow: hidden;
+}
+.rd-member + .rd-member { margin-top: var(--rd-space-3); }
+.rd-member-head {
+  display: flex; align-items: baseline; gap: var(--rd-space-3); width: 100%;
+  padding: var(--rd-space-4); border: 0; background: transparent; color: var(--rd-ink);
+  font-family: var(--rd-font-body); text-align: left;
+}
+.rd-member-name { flex: 0 0 auto; font-size: var(--rd-fs-md); }
+.rd-member-sum {
+  flex: 1 1 auto; min-width: 0; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rd-member-body {
+  display: flex; flex-direction: column; gap: var(--rd-space-3);
+  padding: var(--rd-space-1) var(--rd-space-4) var(--rd-space-5);
+}
+/* 表里每组之间用一条虚线分开，线上下都留气 */
+.rd-member-body .rd-row-label { margin-top: var(--rd-space-3); }
+.rd-member-body > .rd-row-label:first-child { margin-top: 0; }
+
+/* 共读中每个人的状态卡 */
+.rd-status {
+  display: flex; flex-direction: column; gap: var(--rd-space-1);
+  padding: var(--rd-space-4); border-radius: var(--rd-r-md);
+  background: var(--rd-rule-soft);
+}
+.rd-status + .rd-status { margin-top: var(--rd-space-3); }
+.rd-status-name { font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); line-height: 1.3; }
+.rd-status-line { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.6; }
+
+/* 竖排数字输入那一行（页数 a-b / 笔记上限） */
+.rd-field-row { display: flex; align-items: center; gap: var(--rd-space-2); flex-wrap: wrap; }
+.rd-field-num { width: 68px; text-align: center; }
+
+/* 折叠块（共读设置）：一行当前值，点开才是详情——「叠起来，别都摊在表面上」 */
+.rd-fold {
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-md);
+  background: var(--rd-card); overflow: hidden; margin-top: var(--rd-space-5);
+}
+/* 折叠块里那几行彼此的间距：线在上一行的下面，两边都留够 */
+.rd-fold-row + .rd-fold-row {
+  border-top: 1px solid var(--rd-rule);
+  margin-top: var(--rd-space-5); padding-top: var(--rd-space-5);
+}
+.rd-fold-open { background: var(--rd-card); }
+.rd-fold-head {
+  display: flex; align-items: center; gap: var(--rd-space-2); width: 100%;
+  padding: var(--rd-space-4);
+  border: 0; background: transparent; color: var(--rd-ink);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-md); text-align: left;
+}
+.rd-fold-label { flex: 0 0 auto; }
+.rd-fold-value {
+  flex: 1 1 auto; min-width: 0; text-align: right; color: var(--rd-ink-soft);
+  font-size: var(--rd-fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rd-fold-chev { flex: 0 0 auto; color: var(--rd-ink-soft); transition: transform 160ms ease; }
+.rd-fold-chev-on { transform: rotate(180deg); }
+/* 提示词那一版折叠头：标题一行、说明两行截断（说明比较长，横着塞不下） */
+.rd-prompt-head { flex-direction: column; align-items: stretch; gap: var(--rd-space-1); }
+.rd-prompt-top { display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-2); }
+.rd-prompt-desc {
+  text-align: left; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); line-height: 1.5;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+/* 折叠行标题上的小标（提示词管理里标「已改过」） */
+.rd-fold-badge {
+  margin-left: var(--rd-space-2); padding: 1px var(--rd-space-2);
+  border-radius: var(--rd-r-pill); background: var(--rd-accent-soft); color: var(--rd-accent);
+  font-size: var(--rd-fs-tab);
+}
+.rd-fold-open .rd-fold-chev { transform: rotate(180deg); }
+.rd-fold-body {
+  display: flex; flex-direction: column; gap: var(--rd-space-3);
+  padding: var(--rd-space-1) var(--rd-space-4) var(--rd-space-5);
+}
+.rd-fold-row { display: flex; flex-direction: column; gap: var(--rd-space-2); }
+/* 第一行贴着折叠头，得自己补一口气 */
+.rd-fold-body > .rd-fold-row:first-child { margin-top: var(--rd-space-3); }
+/* 开关那一行：标签和开关排同一行（开关掉到标签底下读着像两个东西）。
+   它自己带 display: flex——以前这条只写了方向，靠外面那层给 display（皮肤卡里是这么用的），
+   单独用（角色设置页）就退回块级，开关被挤到第二行去了。 */
+.rd-switch-row { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--rd-space-2) var(--rd-space-3); }
+.rd-switch-row > .rd-row-label { flex: 1 1 auto; }
+.rd-switch-row > .rd-muted { flex: 1 1 100%; }
+
+/* ── 后台任务的状态胶囊（全局悬浮：书房哪一页都看得见）────────────────── */
+.rd-jobpill {
+  position: fixed; z-index: 95;
+  top: calc(var(--safe-top, 0px) + var(--rd-space-3));
+  left: 0; right: 0;
+  display: flex; flex-direction: column; align-items: center; gap: var(--rd-space-2);
+  padding: 0 var(--rd-space-4); pointer-events: none;
+}
+.rd-jobpill-item {
+  display: inline-flex; align-items: center; gap: var(--rd-space-2);
+  max-width: 100%;
+  padding: var(--rd-space-2) var(--rd-space-4);
+  border-radius: var(--rd-r-pill);
+  background: var(--rd-card); color: var(--rd-ink);
+  box-shadow: var(--rd-shadow); font-size: var(--rd-fs-sm);
+  animation: rd-fade 160ms ease;
+}
+.rd-jobpill-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-jobpill-ok { color: var(--rd-accent); }
+.rd-jobpill-error { color: var(--rd-danger, var(--rd-accent)); }
+.rd-jobpill-ico { flex: 0 0 auto; }
+/* 转圈：拿边框画一个环，颜色继承文字色（骨架里不写死色号，守卫测试盯着） */
+.rd-jobpill-spin {
+  width: 14px; height: 14px; flex: 0 0 auto; border-radius: var(--rd-r-pill);
+  border: 2px solid var(--rd-rule); border-top-color: var(--rd-accent);
+  animation: rd-spin 720ms linear infinite;
+}
+@keyframes rd-spin { to { transform: rotate(360deg) } }
+
+/* 原生取色框（调色台那套：点开系统色轮随便调，颜色是运行时值、不写死色号） */
+.rd-color-in {
+  width: 30px; height: 30px; padding: 0; flex: 0 0 auto; cursor: pointer;
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-sm);
+  background: var(--rd-card);
+}
+.rd-color-in::-webkit-color-swatch-wrapper { padding: 2px; }
+.rd-color-in::-webkit-color-swatch { border: none; border-radius: var(--rd-r-sm); }
+/* 设置行右边那组「预览 + 取色框」 */
+.rd-row-pick { display: flex; align-items: center; gap: var(--rd-space-3); flex: 0 0 auto; }
+
+/* ── 讨论面板（长按划线拉起来的那张卡；**不是整屏**）───────────── */
+/* 遮罩：点面板外面就收起来（她问「这个面板怎么关」——三种关法都留着） */
+.rd-discuss-mask {
+  /* 底边按可见视口算，同上 */
+  position: fixed; top: 0; left: 0; right: 0; height: 100dvh; z-index: 72;
+  display: flex; align-items: flex-end;
+  animation: rd-fade 160ms ease;
+}
+.rd-discuss {
+  width: 100%;
+  display: flex; flex-direction: column; gap: var(--rd-space-5);
+  /* **固定高度**（她 09-16）：批注长短不一时面板不许自己长高长矮，里面的流水自己滚。
+     72dvh 和笔记面板一个手感——够呼吸，又不是整屏。 */
+  height: min(72dvh, 100%);
+  padding: var(--rd-space-2) var(--rd-space-5);
+  /* 底部多留一截：最下面那行提示不该钻进手机的 home 条 / Safari 底栏里。
+     地板写法同上——三值取大，不双算。 */
+  padding-bottom: max(40px, var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
+  border-radius: var(--rd-r-lg) var(--rd-r-lg) 0 0;
+  background: var(--rd-sheet-bg); color: var(--rd-ink);
+  box-shadow: var(--rd-shadow);
+  animation: rd-rise 200ms cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+/* 顶上那行：横杠居中（右上角那个 ✕ 她 09-16 让删了，关面板点横杠或点外面） */
+.rd-discuss-head { position: relative; display: flex; align-items: center; justify-content: center; }
+.rd-discuss-grip {
+  width: 38px; height: 4px; border-radius: var(--rd-r-pill);
+  background: var(--rd-rule); cursor: pointer;
+}
+/* 顶部：原文摘录 + 两侧箭头（同一句被多人标注时才出箭头） */
+.rd-discuss-quote-row { display: flex; align-items: center; gap: var(--rd-space-2); }
+.rd-discuss-quote {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--rd-font-heading); font-size: var(--rd-fs-md); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.rd-discuss-arrow {
+  flex: 0 0 auto; border: 0; background: transparent; color: var(--rd-ink-soft);
+  padding: var(--rd-space-1); border-radius: var(--rd-r-pill);
+}
+.rd-discuss-count { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); text-align: center; }
+/* 当前这个人的批注 */
+.rd-discuss-note {
+  padding: var(--rd-space-3); border-radius: var(--rd-r-md);
+  background: var(--rd-rule-soft);
+}
+.rd-discuss-who { display: flex; align-items: center; gap: var(--rd-space-2); margin-bottom: var(--rd-space-1); }
+.rd-discuss-pen { flex: 0 0 auto; width: 3px; height: 15px; border-radius: var(--rd-r-pill); }
+.rd-discuss-name { font-size: var(--rd-fs-sm); }
+.rd-discuss-time { margin-left: auto; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-discuss-text { font-size: var(--rd-fs-md); line-height: 1.6; }
+.rd-discuss-editable { cursor: pointer; }
+.rd-discuss-empty { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); }
+.rd-discuss-hint { margin-top: var(--rd-space-1); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+/* 讨论流水（时间顺序，每条带作者的笔色）。
+   面板高度是固定的（见 .rd-discuss），所以这里只管把剩下的空间全吃掉、自己滚——
+   批注卡和输入框之间自然留着一大截（她 09-15 报的挤、09-16 要的固定高度）。 */
+.rd-discuss-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--rd-space-4);
+  padding-top: var(--rd-space-2);
+}
+.rd-discuss-msg { display: flex; gap: var(--rd-space-2); }
+.rd-discuss-msg-me { flex-direction: row-reverse; }
+.rd-discuss-msg-body { min-width: 0; flex: 1 1 auto; }
+.rd-discuss-msg-me .rd-discuss-msg-body { text-align: right; }
+.rd-discuss-msg-head { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); margin-bottom: 2px; }
+.rd-discuss-msg-text { font-size: var(--rd-fs-md); line-height: 1.6; white-space: pre-wrap; }
+/* 输入 + 发送 + ⚡：上面一条分隔线，像聊天框的输入行 */
+.rd-discuss-input-row {
+  display: flex; align-items: center; gap: var(--rd-space-2);
+  margin-top: var(--rd-space-3);
+  padding-top: var(--rd-space-4);
+  border-top: 1px solid var(--rd-rule);
+}
+.rd-discuss-input-row .rd-field { flex: 1 1 auto; border-radius: var(--rd-r-pill); }
+.rd-discuss-send, .rd-discuss-bolt {
+  flex: 0 0 auto; border: 0; width: 36px; height: 36px; border-radius: var(--rd-r-pill);
+  display: flex; align-items: center; justify-content: center;
+}
+.rd-discuss-send { background: var(--rd-accent); color: var(--rd-on-accent); }
+.rd-discuss-bolt { background: var(--rd-accent-soft); color: var(--rd-accent); }
+.rd-discuss-send:disabled, .rd-discuss-bolt:disabled { opacity: 0.4; }
+.rd-discuss-foot { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); line-height: 1.5; }
 
 /* ── 书架 · 顶部（分类选择 + 菜单）、搜索胶囊、四种版式 ──
    参考图 2/3/4/5：顶部一行「All ⌄ …… ···」、大标题、搜索胶囊、四种版式、搜索页、分类页。 */
@@ -774,7 +1253,7 @@ export const READER_SKELETON_CSS = `
 .rd-book-pick-on { background: var(--rd-accent); border-color: var(--rd-accent); }
 .rd-pickbar {
   position: fixed; left: var(--rd-space-4); right: var(--rd-space-4);
-  bottom: calc(var(--rd-nav-h) + var(--safe-bottom, 0px) + var(--rd-space-3));
+  bottom: calc(var(--rd-nav-h) + var(--rd-nav-pad) + var(--rd-space-3));
   display: flex; align-items: center; gap: var(--rd-space-3); z-index: 70;
   background: var(--rd-card); border-radius: var(--rd-r-pill); box-shadow: var(--rd-shadow);
   padding: var(--rd-space-2) var(--rd-space-2) var(--rd-space-2) var(--rd-space-4);
@@ -793,6 +1272,7 @@ export const READER_SKELETON_CSS = `
 .rd-row-ico-2 { filter: hue-rotate(118deg); }
 .rd-row-ico-3 { filter: hue-rotate(-118deg); }
 .rd-row-ico-4 { filter: hue-rotate(58deg); }
+.rd-row-ico-5 { filter: hue-rotate(200deg); }
 
 /* ── 统计页（参考图 7/8）：问候卡 · 2×2 数字格 · 柱状图 · 热力格 · 年份条 · 时段分布 ── */
 .rd-hello { background: var(--rd-card); border-radius: var(--rd-r-lg); box-shadow: var(--rd-shadow-sm); padding: var(--rd-space-4); margin-bottom: var(--rd-space-3); }
@@ -992,6 +1472,171 @@ export const READER_SKELETON_CSS = `
 /* 从搜索结果跳过去的那一条：回到列表时有选中态 */
 .rd-toc-row-on { background: var(--rd-accent-soft); border-radius: var(--rd-r-md); }
 .rd-toc-row-on .rd-toc-row-head span:first-child { color: var(--rd-accent); font-weight: 600; }
+
+/* ── 角色个人页（她 09-20 的 T4；**09-21 照微信读书的排版爆改**）────────
+   主页只放「能看出他是个什么样的人」的东西；设置项全在右上角齿轮那一页。 */
+/* 卡里自己排版的行（书架行、笔记行）用它补左右留白，字和封面别顶到卡边（她 09-21 的贴边） */
+.rd-row-pad { padding-left: var(--rd-space-4); padding-right: var(--rd-space-4); }
+/* 页头右端那颗齿轮（.rd-headbar 没有标题时没人顶它） */
+.rd-headbar-end { margin-left: auto; }
+
+/* 头部：大圆头像 + 名字 + 小胶囊，全居中 */
+.rd-cp-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--rd-space-2); padding: var(--rd-space-2) 0 var(--rd-space-4); }
+.rd-cp-face {
+  width: 88px; aspect-ratio: 1 / 1; border-radius: var(--rd-r-pill); overflow: hidden;
+  background: var(--rd-bg-2); box-shadow: var(--rd-shadow-sm);
+  display: flex; align-items: center; justify-content: center;
+}
+.rd-cp-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rd-cp-face-ph { font-family: var(--rd-font-heading); font-size: var(--rd-fs-hero); color: var(--rd-ink-soft); }
+.rd-cp-name { font-family: var(--rd-font-heading); font-size: var(--rd-fs-hero); line-height: 1.3; color: var(--rd-accent); }
+.rd-cp-tags { display: flex; align-items: center; justify-content: center; gap: var(--rd-space-2); }
+.rd-cp-tag {
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-pill);
+  padding: 3px var(--rd-space-3); background: var(--rd-card);
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
+}
+/* 最近一次的状态（两行小字，点开是详细状态与活动记录） */
+.rd-cp-state {
+  margin-top: var(--rd-space-2); display: flex; flex-direction: column; gap: 2px;
+  align-items: center; width: 100%; padding: 0 var(--rd-space-2);
+  border: 0; background: transparent; color: inherit; font-family: inherit; text-align: center;
+}
+.rd-cp-state:active { opacity: 0.7; }
+.rd-cp-state-line { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.6; }
+
+/* 三格数字（中间竖线分开） */
+.rd-cp-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: var(--rd-space-4) 0; }
+.rd-cp-stat {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: var(--rd-space-2) 0; border: 0; background: transparent; color: inherit; font-family: inherit;
+}
+.rd-cp-stat + .rd-cp-stat { border-left: 1px solid var(--rd-rule); }
+.rd-cp-stat:active { opacity: 0.7; }
+.rd-cp-stat-num { font-family: var(--rd-font-heading); font-size: var(--rd-fs-title); line-height: 1.2; }
+.rd-cp-stat-cap { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+
+/* 整条那个开关（参考图里的「关注 / 已关注」）——
+   **两种状态的差别在底色**：没开 = 实心主色 + 反白字（像「关注」）；
+   开了 = 灰底 + 次要字（像「已关注」）。压一层 active 让它有按下去的手感。 */
+.rd-cp-follow {
+  display: block; width: 100%; text-align: center;
+  padding: var(--rd-space-3); border: 0; border-radius: var(--rd-r-md);
+  background: var(--rd-accent); color: var(--rd-on-accent);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-md); font-weight: 600;
+}
+.rd-cp-follow:active { opacity: 0.82; }
+.rd-cp-follow-on {
+  background: var(--rd-bg-2); color: var(--rd-ink-soft); font-weight: 400;
+}
+
+/* 书架卡：三栏 + 横着划的封面 + 查看书架 */
+.rd-cp-card { margin-top: var(--rd-space-4); padding: var(--rd-space-4); background: var(--rd-card); border-radius: var(--rd-r-lg); box-shadow: var(--rd-shadow-sm); }
+.rd-cp-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: var(--rd-space-4); }
+.rd-cp-tab {
+  position: relative; border: 0; background: transparent; color: var(--rd-ink-soft);
+  font-family: inherit; font-size: var(--rd-fs-sm); padding: var(--rd-space-2) 0;
+}
+.rd-cp-tab-on { color: var(--rd-accent); font-weight: 600; }
+.rd-cp-tab-on::after {
+  content: ''; position: absolute; left: 50%; bottom: 0; width: 24px; height: 2px;
+  margin-left: -12px; border-radius: var(--rd-r-pill); background: var(--rd-accent);
+}
+.rd-cp-now {
+  display: flex; align-items: center; gap: var(--rd-space-2); width: 100%; text-align: left;
+  border: 0; background: transparent; font-family: inherit; font-size: var(--rd-fs-sm);
+  color: var(--rd-ink-soft); padding: 0 0 var(--rd-space-4);
+}
+.rd-cp-now-book { color: var(--rd-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-cp-now-pct { margin-left: auto; flex: 0 0 auto; color: var(--rd-accent); font-variant-numeric: tabular-nums; }
+/* 主页那张卡里的三列封面（**不横划**：她 09-21「书架不要横着的」） */
+.rd-cp-grid { gap: var(--rd-space-3); }
+.rd-cp-more {
+  display: block; width: 100%; text-align: center; margin-top: var(--rd-space-4);
+  padding: var(--rd-space-3); border: 0; border-radius: var(--rd-r-md);
+  background: var(--rd-bg-2); color: var(--rd-ink); font-family: inherit; font-size: var(--rd-fs-sm);
+}
+
+/* 流水那一条：笔记(N) 讨论(N) 活动(N) + 筛选 */
+.rd-cp-feedhead { display: flex; align-items: center; gap: var(--rd-space-4); margin: var(--rd-space-5) 0 var(--rd-space-3); }
+.rd-cp-feedtab { border: 0; background: transparent; color: var(--rd-ink-soft); font-family: inherit; font-size: var(--rd-fs-md); padding: 0; }
+.rd-cp-feedtab-on { color: var(--rd-ink); font-weight: 600; }
+.rd-cp-feedhead .rd-icon-btn { margin-left: auto; }
+
+/* 一条笔记/讨论：收着只看到「他写的那段」，点一下才展开
+   （她 09-21：转发和查看原文都收进展开里，点表面不跳转） */
+.rd-fn { padding: var(--rd-space-3) var(--rd-space-4); }
+.rd-fn + .rd-fn { border-top: 1px solid var(--rd-rule-soft); }
+.rd-fn-head {
+  display: flex; align-items: flex-start; gap: var(--rd-space-3); width: 100%;
+  text-align: left; border: 0; background: transparent; color: inherit; font-family: inherit; padding: 0;
+}
+.rd-fn-dot { width: 8px; height: 8px; border-radius: var(--rd-r-pill); flex: 0 0 auto; margin-top: 6px; }
+.rd-fn-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rd-fn-meta { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); line-height: 1.5; }
+.rd-fn-text {
+  font-size: var(--rd-fs-sm); line-height: 1.7; white-space: pre-wrap;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+}
+/* 展开之后正文全放出来（不再截三行） */
+.rd-fn-open .rd-fn-text { display: block; overflow: visible; }
+.rd-fn-head .rd-fold-chev { margin-top: var(--rd-space-1); }
+.rd-fn-body {
+  margin-top: var(--rd-space-3); padding-left: var(--rd-space-4);
+  display: flex; flex-direction: column; gap: var(--rd-space-3);
+}
+.rd-fn-quote {
+  padding-left: var(--rd-space-3); border-left: 2px solid var(--rd-rule);
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.7;
+}
+.rd-fn-thread { display: flex; flex-direction: column; gap: var(--rd-space-3); }
+.rd-fn-msg { display: flex; flex-direction: column; gap: 2px; }
+.rd-fn-msg-me { align-items: flex-end; text-align: right; }
+.rd-fn-msg-head { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-fn-msg-text { font-size: var(--rd-fs-sm); line-height: 1.75; }
+.rd-fn-acts { display: flex; align-items: center; gap: var(--rd-space-5); }
+.rd-fn-act {
+  border: 0; background: transparent; padding: 0;
+  color: var(--rd-accent); font-family: inherit; font-size: var(--rd-fs-caption);
+}
+/* 摆在时间线上的那几行：时间线自己给缩进和圆点，这行就别再补左右留白了 */
+.rd-tl-body .rd-fn { padding: 0 0 var(--rd-space-4); }
+.rd-tl-body .rd-fn + .rd-fn { border-top: 0; }
+
+/* 时间线摆屏幕上（不在弹卡里）时，圆点外面那圈描边要跟屏幕底色走 */
+.rd-tl-screen .rd-tl-dot { box-shadow: 0 0 0 3px var(--rd-bg); }
+
+/* 书库页那行头像也是按钮（点它同样进个人页） */
+.rd-lib-open { border: 0; background: transparent; padding: 0; display: inline-flex; flex: 0 0 auto; color: inherit; }
+
+/* ── 「他在这本书上的记录」（参考图第三张：头像 + 封面 + 在读《…》 + 流水）
+      主页预览和书架上的封面都点进这一页，**不直接跳进书里**（她 09-21）──────── */
+.rd-bk-head2 { text-align: center; margin-bottom: var(--rd-space-4); }
+.rd-bk-owner { font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); line-height: 1.35; }
+.rd-bk-sub { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); margin-top: 2px; }
+.rd-bk-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--rd-space-4); }
+.rd-bk-who { display: flex; align-items: center; gap: var(--rd-space-3); padding-top: var(--rd-space-1); min-width: 0; }
+.rd-bk-name { font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); color: var(--rd-accent); }
+.rd-bk-cover {
+  /* position: relative 不能少：封面里那张纸样是 absolute inset:0，
+     没有定位祖先它会铺满整个屏幕盖住全页（拍出来一片空白，踩过） */
+  position: relative; width: 78px; flex: 0 0 auto; aspect-ratio: 2 / 3;
+  border-radius: var(--rd-r-sm); overflow: hidden; box-shadow: var(--rd-shadow-sm);
+}
+.rd-bk-line { margin-top: var(--rd-space-4); color: var(--rd-ink-soft); font-size: var(--rd-fs-md); }
+.rd-bk-book { color: var(--rd-ink); margin-left: 2px; }
+.rd-bk-stat {
+  display: flex; align-items: center; gap: var(--rd-space-2);
+  margin-top: var(--rd-space-3); padding-bottom: var(--rd-space-3);
+  border-bottom: 1px dashed var(--rd-rule);
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-sm);
+}
+.rd-bk-check { color: var(--rd-accent); }
+.rd-bk-tl { margin-top: var(--rd-space-5); }
+.rd-bk-act {
+  display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left;
+  border: 0; background: transparent; color: inherit; font-family: inherit; padding: 0;
+}
 
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }

@@ -12,11 +12,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { BookOpen, ChartBar, Gear, NoteBlank, SquaresFour } from '@phosphor-icons/react';
 import ReaderSkinPreset from './ReaderSkinPreset';
 import ReaderPage from './ReaderPage';
+import ReaderJobPill from './ReaderJobPill';
 import BookDetails from './BookDetails';
 import ImportSheet from './ImportSheet';
 import ReaderShelf from './tabs/ReaderShelf';
 import ReaderNotes from './tabs/ReaderNotes';
 import ReaderLibrary from './tabs/ReaderLibrary';
+import CharPage from './CharPage';
 import ReaderStats from './tabs/ReaderStats';
 import ReaderSettings from './tabs/ReaderSettings';
 import { useReaderPrefs, setLastBook } from './readerPrefs';
@@ -44,8 +46,12 @@ export default function ReaderApp({ onBack }: Props) {
     const [tab, setTab] = useState<TabKey>('shelf');
     /** 正在读的书（整屏阅读页） */
     const [reading, setReading] = useState<string | null>(null);
+    /** 「查看原文」的落点（章内章号 + 章内段号）；不设就是照常恢复上次读到哪 */
+    const [startAt, setStartAt] = useState<{ chapterIdx: number; paraIdx: number } | null>(null);
     /** 正在看的书详情（整屏书信息页） */
     const [details, setDetails] = useState<string | null>(null);
+    /** 正在看的角色个人页（整屏；从书库页点谁进谁） */
+    const [charPage, setCharPage] = useState<string | null>(null);
     const [refreshToken, setRefreshToken] = useState(0);
     const [toast, setToast] = useState<string | null>(null);
     const [importOpen, setImportOpen] = useState(false);
@@ -71,7 +77,15 @@ export default function ReaderApp({ onBack }: Props) {
             else setTab('shelf');
             return;
         }
-        if (target.startsWith('book:')) setReading(target.slice(5));
+        if (target.startsWith('book:')) {
+            // book:<id>@<章内章号>:<章内段号> —— 「查看原文」可以直接落在一句话上
+            const [id, at] = target.slice(5).split('@');
+            if (at) {
+                const [c, p] = at.split(':').map(Number);
+                if (Number.isFinite(c) && Number.isFinite(p)) setStartAt({ chapterIdx: c, paraIdx: p });
+            }
+            setReading(id);
+        }
         else if (TABS.some((t) => t.key === target)) setTab(target as TabKey);
         // 只在挂载时跑一次：prefs 变化不该重新跳页
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,6 +102,7 @@ export default function ReaderApp({ onBack }: Props) {
     }, [sweptRef]);
 
     const openBook = (bookId: string) => {
+        setStartAt(null);          // 普通打开：照常恢复上次读到哪
         setReading(bookId);
         setLastBook(bookId);
     };
@@ -95,6 +110,13 @@ export default function ReaderApp({ onBack }: Props) {
     const openBookFrom = (bookId: string) => {
         setDetails(null);
         openBook(bookId);
+    };
+
+    /** 落到书里某一句话上（笔记页和角色个人页的「查看原文」都走它） */
+    const openAt = (bookId: string, chapterIdx: number, paraIdx: number) => {
+        setStartAt({ chapterIdx, paraIdx });
+        setReading(bookId);
+        setLastBook(bookId);
     };
 
     const refresh = () => setRefreshToken((n) => n + 1);
@@ -107,12 +129,37 @@ export default function ReaderApp({ onBack }: Props) {
             <div className={rootClass}>
                 <ReaderSkinPreset />
                 <ReaderPage
+                    key={`${reading}${startAt ? `@${startAt.chapterIdx}:${startAt.paraIdx}` : ''}`}
                     bookId={reading}
+                    startAt={startAt}
                     notify={notify}
                     onOpenDetails={(id) => { setReading(null); setDetails(id); }}
                     onOpenStats={() => { setReading(null); setTab('stats'); }}
-                    onBack={() => { setReading(null); refresh(); if (onBack) onBack(); }}
+                    // 退出这本书 → 回书架（别往 app 外退：这行以前连调了 app 级 onBack，
+                    // 点一次直接退到手机桌面。她 2026-09-15 报的）
+                    onBack={() => { setReading(null); setTab('shelf'); refresh(); }}
                 />
+                <ReaderJobPill />
+                {toast && <div className="rd-toast">{toast}</div>}
+            </div>
+        );
+    }
+
+    // ── 整屏页：角色个人页 ──
+    if (charPage) {
+        return (
+            <div className={rootClass}>
+                <ReaderSkinPreset />
+                <CharPage
+                    charId={charPage}
+                    notify={notify}
+                    onBack={() => { setCharPage(null); setTab('library'); refresh(); }}
+                    onOpenAt={(bookId, chapterIdx, paraIdx) => {
+                        setCharPage(null);
+                        openAt(bookId, chapterIdx, paraIdx);
+                    }}
+                />
+                <ReaderJobPill />
                 {toast && <div className="rd-toast">{toast}</div>}
             </div>
         );
@@ -131,6 +178,7 @@ export default function ReaderApp({ onBack }: Props) {
                     onDeleted={() => { setDetails(null); refresh(); }}
                     onBack={() => { setDetails(null); refresh(); }}
                 />
+                <ReaderJobPill />
                 {toast && <div className="rd-toast">{toast}</div>}
             </div>
         );
@@ -139,6 +187,7 @@ export default function ReaderApp({ onBack }: Props) {
     return (
         <div className={rootClass}>
             <ReaderSkinPreset />
+            <ReaderJobPill />
 
             <div className="rd-body">
                 {tab === 'shelf' && (
@@ -151,8 +200,8 @@ export default function ReaderApp({ onBack }: Props) {
                         onExit={onBack}
                     />
                 )}
-                {tab === 'notes' && <ReaderNotes />}
-                {tab === 'library' && <ReaderLibrary />}
+                {tab === 'notes' && <ReaderNotes onOpenAt={openAt} notify={notify} />}
+                {tab === 'library' && <ReaderLibrary onOpenChar={(id) => setCharPage(id)} />}
                 {tab === 'stats' && <ReaderStats refreshToken={refreshToken} />}
                 {tab === 'settings' && <ReaderSettings />}
             </div>
@@ -164,7 +213,7 @@ export default function ReaderApp({ onBack }: Props) {
                         className={`rd-nav-btn${tab === key ? ' rd-nav-on' : ''}`}
                         onClick={() => setTab(key)}
                     >
-                        <Icon size={21} weight={tab === key ? 'fill' : 'regular'} />
+                        <Icon size={24} weight={tab === key ? 'fill' : 'regular'} />
                         <span>{label}</span>
                     </button>
                 ))}

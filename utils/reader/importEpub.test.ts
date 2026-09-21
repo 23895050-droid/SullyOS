@@ -170,3 +170,71 @@ describe('importEpub · 整条链路', () => {
         expect('error' in r).toBe(true);
     });
 });
+
+// 《在轮下》(黑塞) 那类书的形状（她 2026-09-16 拿真书报的「章节怎么分的」）：
+// 一个章拆成两个 spine 文件——**一个只有标题、一个才是正文**，目录只点前者。
+// 按「一 spine 文件一章」切，目录里会多出一堆「第 N 节」残条、章节数翻倍；
+// 现在的口径是**目录点到的开新章、没点到的并进上一章**。
+describe('importEpub · 章节跟着目录走', () => {
+    const SPLIT_OPF = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>在轮下</dc:title></metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="i0" href="cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="i1" href="c1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="i2" href="c1b.xhtml" media-type="application/xhtml+xml"/>
+    <item id="i3" href="c2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="i4" href="post.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="i0"/><itemref idref="i1"/><itemref idref="i2"/><itemref idref="i3"/><itemref idref="i4"/></spine>
+</package>`;
+    const SPLIT_NAV = `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body><nav epub:type="toc"><ol>
+  <li><a href="cover.xhtml">封面</a></li>
+  <li><a href="c1.xhtml">第一章</a></li>
+  <li><a href="c2.xhtml">第二章</a></li>
+</ol></nav></body></html>`;
+
+    async function buildSplitEpub(): Promise<Blob> {
+        const zip = new JSZip();
+        zip.file('mimetype', 'application/epub+zip');
+        zip.file('META-INF/container.xml', CONTAINER);
+        zip.file('OEBPS/content.opf', SPLIT_OPF);
+        zip.file('OEBPS/nav.xhtml', SPLIT_NAV);
+        zip.file('OEBPS/cover.xhtml', '<body><p>封面</p></body>');
+        zip.file('OEBPS/c1.xhtml', '<body><h1>第一章</h1></body>');           // 只有标题
+        zip.file('OEBPS/c1b.xhtml', '<body><p>正文一。</p><p>正文二。</p></body>'); // 目录没点到
+        zip.file('OEBPS/c2.xhtml', '<body><h1>第二章</h1><p>第二章正文。</p></body>');
+        zip.file('OEBPS/post.xhtml', '<body><p>译后记。</p></body>');          // 也没点到
+        return zip.generateAsync({ type: 'blob' });
+    }
+
+    it('标题文件 + 正文文件合成一章，没被目录点到的并进上一章', async () => {
+        const r = await parseEpub(await buildSplitEpub());
+        if ('error' in r) throw new Error(r.error);
+        expect(r.chapters.map((c) => c.title)).toEqual(['封面', '第一章', '第二章']);
+        expect(r.chapters[1].paras).toEqual(['第一章', '正文一。', '正文二。']);
+        expect(r.chapters[2].paras).toEqual(['第二章', '第二章正文。', '译后记。']);
+        expect(r.toc.map((t) => t.title)).toEqual(['封面', '第一章', '第二章']);
+        expect(r.chapterStartPara).toEqual([0, 1, 4]);
+    });
+
+    it('整本没有目录时退回「一个 spine 文件一章」（老行为）', async () => {
+        const zip = new JSZip();
+        zip.file('mimetype', 'application/epub+zip');
+        zip.file('META-INF/container.xml', CONTAINER);
+        zip.file('OEBPS/content.opf', SPLIT_OPF.replace(/<item id="nav"[^>]*\/>/, '').replace(SPLIT_NAV, ''));
+        zip.file('OEBPS/cover.xhtml', '<body><p>封面</p></body>');
+        zip.file('OEBPS/c1.xhtml', '<body><h1>第一章</h1></body>');
+        zip.file('OEBPS/c1b.xhtml', '<body><p>正文一。</p></body>');
+        zip.file('OEBPS/c2.xhtml', '<body><h1>第二章</h1><p>正文。</p></body>');
+        zip.file('OEBPS/post.xhtml', '<body><p>译后记。</p></body>');
+        const r = await parseEpub(await zip.generateAsync({ type: 'blob' }));
+        if ('error' in r) throw new Error(r.error);
+        expect(r.chapters).toHaveLength(5);
+        // 没有目录时章名只能从文档里找（h1/h2/title），都找不到就兜底「第 N 节」
+        expect(r.chapters.map((c) => c.title)).toEqual(['第 1 节', '第一章', '第 3 节', '第二章', '第 5 节']);
+    });
+});

@@ -3,11 +3,12 @@
 // 书目删掉时级联清干净、半截导入会被清扫。
 import { describe, expect, it } from 'vitest';
 import {
-    RD_STORE, anchorKeyOf, appendThreadMessage, chapterRowId, countChapters, deleteBookDeep,
-    getBook, getChapter, getProgress, getThreadByAnchor, listAnnotations, listBooks, listChapters,
-    listProgressByBook, patchBook, putAnnotation, putBook, putChapters, putProgress, rdId,
-    sweepStaleImports, threadRowId, type RdAnchor, type RdAnnotation, type RdBook, type RdChapter,
-    type RdThread,
+    RD_STORE, anchorKeyOf, appendRoamActivity, appendThreadMessage, canSee, chapterRowId, countChapters,
+    deleteBookDeep, deleteRoamActivity, getBook, getChapter, getProgress, getThreadByAnchor, listAnnotations,
+    listBooks, listChapters, listProgressByBook, listRecentRoamActivities, listRoamActivities, listRoamGroup,
+    newRoamGroup, patchBook, putAnnotation, putBook, putChapters, putProgress, rdId, sweepStaleImports,
+    threadRowId, updateRoamActivity, visibleAnnotationsFor, type RdAnchor, type RdAnnotation, type RdBook,
+    type RdChapter, type RdRoamActivity, type RdThread,
 } from './readerDb';
 import { DB } from '../db';
 
@@ -146,12 +147,19 @@ describe('readerDb · 级联删除与半截导入清扫', () => {
             percent: 1, readingSeconds: 0, sessionCount: 1, updatedAt: iso(),
         });
 
+        await appendRoamActivity({
+            id: rdId('rr'), charId: 'char_a', bookId: book.id, kind: 'readon',
+            group: newRoamGroup(), seq: 0,
+            summary: '读到第二段', feeling: '有点走神', tokens: 1200, mode: 'roam', createdAt: iso(),
+        });
+
         await deleteBookDeep(book.id);
 
         expect(await getBook(book.id)).toBeNull();
         expect(await listChapters(book.id)).toEqual([]);
         expect(await listAnnotations(book.id)).toEqual([]);
         expect(await listProgressByBook(book.id)).toEqual([]);
+        expect(await DB.getRowsByIndex(RD_STORE.roam, 'bookId', book.id)).toEqual([]);   // 活动记录跟着走
         const threads = await DB.getRowsByIndex(RD_STORE.threads, 'bookId', book.id);
         expect(threads).toEqual([]);
     });
@@ -172,5 +180,110 @@ describe('readerDb · 级联删除与半截导入清扫', () => {
         expect(await listChapters(stale.id)).toEqual([]);   // 章节跟着走，不留隐形重量
         expect(await getBook(fresh.id)).not.toBeNull();
         expect(await getBook(ready.id)).not.toBeNull();
+    });
+});
+
+describe('readerDb · 活动记录（rd_roam）', () => {
+    const mkRoam = (over: Partial<RdRoamActivity> = {}): RdRoamActivity => ({
+        id: rdId('rr'), charId: 'char_a', bookId: 'bk_1', kind: 'reread', summary: '重温这一页',
+        group: newRoamGroup(), seq: 0,
+        mode: 'roam', createdAt: iso(), ...over,
+    });
+
+    it('append-only 追加，按人取且新的在前', async () => {
+        await appendRoamActivity(mkRoam({ createdAt: '2026-09-01T10:00:00.000Z', summary: '早的' }));
+        await appendRoamActivity(mkRoam({ createdAt: '2026-09-02T10:00:00.000Z', summary: '晚的' }));
+        await appendRoamActivity(mkRoam({ charId: 'char_b', summary: '别人的' }));
+
+        const mine = await listRoamActivities('char_a');
+        expect(mine.map((r) => r.summary)).toEqual(['晚的', '早的']);
+        expect(await listRoamActivities('char_a', 1)).toHaveLength(1);
+        expect((await listRoamActivities('char_b')).map((r) => r.summary)).toEqual(['别人的']);
+    });
+
+    it('全局视图跨人跨书，旧的在后', async () => {
+        await appendRoamActivity(mkRoam({ charId: 'char_g1', bookId: 'bk_g1', createdAt: '2026-09-03T10:00:00.000Z' }));
+        await appendRoamActivity(mkRoam({ charId: 'char_g2', bookId: 'bk_g2', createdAt: '2026-09-04T10:00:00.000Z' }));
+
+        const all = await listRecentRoamActivities(2);
+        expect(all[0].createdAt > all[1].createdAt).toBe(true);
+        expect(await listRecentRoamActivities(1)).toHaveLength(1);
+    });
+
+    it('一次活动的多条调用挂同一个 group，按 seq 取回来', async () => {
+        const g = newRoamGroup();
+        await appendRoamActivity(mkRoam({ group: g, seq: 1, summary: '第二条' }));
+        await appendRoamActivity(mkRoam({ group: g, seq: 0, summary: '第一条' }));
+        await appendRoamActivity(mkRoam({ group: g, seq: 2, kind: 'summary', summary: '摘要' }));
+        await appendRoamActivity(mkRoam({ group: newRoamGroup(), summary: '别的活动' }));
+
+        const rows = await listRoamGroup(g);
+        expect(rows.map((r) => r.summary)).toEqual(['第一条', '第二条', '摘要']);
+    });
+
+    it('用户活动记录和角色记录同表：charId 写 user，能单独取出来', async () => {
+        const g1 = newRoamGroup();
+        const g2 = newRoamGroup();
+        await appendRoamActivity(mkRoam({ group: g1, charId: 'user', kind: 'read', mode: 'user', pages: 12, annCount: 3, replyCount: 1 }));
+        await appendRoamActivity(mkRoam({ group: g2, charId: 'char_u', summary: '角色那条' }));
+
+        const mine = await listRoamGroup(g1);
+        expect(mine).toHaveLength(1);
+        expect(mine[0].mode).toBe('user');
+        expect(mine[0].pages).toBe(12);
+        expect((await listRoamActivities('user')).some((r) => r.group === g1)).toBe(true);
+        expect((await listRoamActivities('char_u')).map((r) => r.group)).toEqual([g2]);
+    });
+
+    it('用户活动记录可改可删（角色的一律不改）', async () => {
+        const row = await appendRoamActivity(mkRoam({ charId: 'user', kind: 'read', mode: 'user', summary: '你读了《甲》' }));
+        await updateRoamActivity(row.id, { summary: '你读了《乙》', pages: 9 });
+        const after = await listRoamGroup(row.group);
+        expect(after).toHaveLength(1);
+        expect(after[0].summary).toBe('你读了《乙》');
+        expect(after[0].pages).toBe(9);
+        // id / charId 不许被 patch 改掉
+        expect(after[0].id).toBe(row.id);
+        expect(after[0].charId).toBe('user');
+
+        await deleteRoamActivity(row.id);
+        expect(await listRoamGroup(row.group)).toHaveLength(0);
+    });
+});
+
+describe('readerDb · 可见性', () => {
+    const mkAnn = (over: Partial<RdAnnotation> = {}): RdAnnotation => ({
+        id: rdId('an'), bookId: 'bk_1', ownerId: 'user', anchor: mkAnchor(), kind: 'highlight',
+        styleSlot: 1, contentRev: 'rev1', status: 'active', createdAt: iso(), updatedAt: iso(), ...over,
+    });
+
+    it('我什么都能看见（包括角色「他自己可见」的）', () => {
+        const anns = [
+            mkAnn({ ownerId: 'user', visibility: 'private' }),
+            mkAnn({ ownerId: 'char_b', visibility: 'self' }),
+            mkAnn({ ownerId: 'char_a', visibility: 'angel' }),
+        ];
+        expect(visibleAnnotationsFor(anns, 'user')).toHaveLength(3);
+    });
+
+    it('角色只看得到公开的 + 自己的', () => {
+        const minePublic = mkAnn({ ownerId: 'char_a', visibility: 'public' });
+        const mineSelf = mkAnn({ ownerId: 'char_a', visibility: 'self' });
+        const herPublic = mkAnn({ ownerId: 'user', visibility: 'public' });
+        const herPrivate = mkAnn({ ownerId: 'user', visibility: 'private' });
+        const otherSelf = mkAnn({ ownerId: 'char_b', visibility: 'self' });
+        const hisAngel = mkAnn({ ownerId: 'char_b', visibility: 'angel' });
+
+        const seen = visibleAnnotationsFor([minePublic, mineSelf, herPublic, herPrivate, otherSelf, hisAngel], 'char_a');
+        expect(seen).toEqual([minePublic, mineSelf, herPublic]);
+        // angel 档对别的角色是隐形的（她的口径：只有我能看到、不参与共读）
+        expect(canSee(hisAngel, 'char_a')).toBe(false);
+        expect(canSee(hisAngel, 'user')).toBe(true);
+    });
+
+    it('没写 visibility 的老数据默认公开', () => {
+        const legacy = mkAnn({ ownerId: 'char_b' });
+        expect(canSee(legacy, 'char_a')).toBe(true);
+        expect(canSee(legacy, 'user')).toBe(true);
     });
 });

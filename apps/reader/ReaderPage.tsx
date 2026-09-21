@@ -15,26 +15,35 @@
 // 参考图版式：顶栏（返回 + 章节名 + 功能键）／纸面正文／底栏三行
 //（阅读时长·剩余 → 进度滑轨 → 工具排：目录 / A- / 亮度 / A+ / 主题 / 更多）。
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
     ArrowLeft, BookmarkSimple, CaretLeft, CaretRight, ChatCircleDots, Copy, DotsThree, Highlighter,
-    Lightbulb, ListBullets, MagnifyingGlass, Palette, PencilSimple, ShareNetwork, TShirt, Trash, X,
+    Lightbulb, ListBullets, MagnifyingGlass, Palette, PencilSimple, ShareNetwork, TShirt, Trash,
+    UsersThree, X,
 } from '@phosphor-icons/react';
 import { isImagePara } from '../../utils/reader/importEpub';
 import type { RdAnnotationStyle } from '../../utils/reader/readerDb';
 import {
-    deleteAnnotation, getBook, getChapter, getProgress, listAnnotations, listChapters, putAnnotation,
-    putProgress, type RdAnchor, type RdAnnotation, type RdBook, type RdChapter, type RdProgress,
+    appendRoamActivity, deleteAnnotation, getBook, getChapter, getProgress, listAnnotations, listChapters,
+    listThreads, newRoamGroup, putAnnotation, putProgress, rdId, type RdAnchor, type RdAnnotation,
+    type RdBook, type RdChapter, type RdProgress, type RdThread,
 } from '../../utils/reader/readerDb';
+import { participantsOfParagraph } from '../../utils/reader/readerParticipants';
 import ReaderCover from './ReaderCover';
 import {
     columnCountOf, columnOfAnchor, flowOrigin, slicesForColumn, type PageSlice,
 } from '../../utils/reader/paginate';
 import {
-    clearHuntHistory, DEFAULT_TYPOGRAPHY, highlightColorOf, pushHuntHistory, readingModeFor,
-    setBookMode, setTheme, setTypography, useReaderPrefs,
+    clearHuntHistory, DEFAULT_TYPOGRAPHY, highlightColorOf, pushHuntHistory,
+    setTheme, setTypography, useReaderPrefs,
 } from './readerPrefs';
+import { useReaderCharPrefs } from './readerCharPrefs';
 import HighlightColorSheet from './HighlightColorSheet';
+import ReaderCoRead from './ReaderCoRead';
+import ReaderDiscuss from './ReaderDiscuss';
+import { useCoReadStore } from './coreadStore';
+import { useOS } from '../../context/OSContext';
+import TokenImg from '../../components/os/TokenImg';
 import { hexTriple, READER_SKINS } from './readerSkinPresets';
 import { useBlobRefUrl } from '../../utils/blobRef';
 import { recordReading } from '../../utils/reader/readerStats';
@@ -80,8 +89,13 @@ function ReaderFigure({ refText }: { refText: string }) {
 }
 
 const SAVE_DEBOUNCE = 900;
-/** 估「还要读多久」用的速度（字/秒）——按每分钟 400 字算 */
+/** 估「还要读多久」用的速度（字/秒）——按每分钟 400 字算。她 09-16 把那个倒计时删了，
+ *  这个常数先留着（以后要做「今日还剩」时还用得上） */
 const CHARS_PER_SEC = 400 / 60;
+/** 长按多久算「长按」（她选划线 vs 起讨论的分界） */
+const LONG_PRESS_MS = 450;
+/** 手指挪出这个距离就不算长按了 */
+const LONG_PRESS_SLOP = 10;
 
 interface Props {
     bookId: string;
@@ -89,6 +103,11 @@ interface Props {
     onOpenDetails: (bookId: string) => void;
     onOpenStats: () => void;
     onBack: () => void;
+    /**
+     * 「查看原文」（她 09-20 的笔记库页）：从笔记跳进来时直接落在这条笔记那一句上，
+     * 不走「上次读到哪」的进度（段号是**章内**段号）。不传就照常恢复进度。
+     */
+    startAt?: { chapterIdx: number; paraIdx: number } | null;
 }
 
 /** 秒 → 「3 小时 10 分」这种人话。
@@ -102,7 +121,8 @@ function fmtDuration(sec: number): string {
     return `${s} 秒`;
 }
 
-type Sheet = null | 'toc' | 'more' | 'book' | 'hl' | 'bright' | 'hunt';
+// 「总结设置」那页撤了——共读模式并入共读面板的「上下文」（她 09-15：合并，留后者）
+type Sheet = null | 'toc' | 'more' | 'hl' | 'bright' | 'hunt' | 'coread';
 /** 目录面板里的三个页签（参考图「左下一展开」：Chapters / Notes / Bookmarks） */
 type TocTab = 'chapters' | 'notes' | 'bookmarks';
 
@@ -199,8 +219,12 @@ function Excerpt({ text, at, len }: { text: string; at: number; len: number }) {
     );
 }
 
-export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats, onBack }: Props) {
+export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats, onBack, startAt }: Props) {
     const prefs = useReaderPrefs();
+    /** 角色自己的读书设置（笔色在这儿；重取阅读风格会动它，所以订阅上） */
+    const charPrefs = useReaderCharPrefs();
+    /** 角色表（顶栏共读头像要用） */
+    const { characters } = useOS();
     const [book, setBook] = useState<RdBook | null>(null);
     const [chapter, setChapter] = useState<RdChapter | null>(null);
     const [chapterIdx, setChapterIdx] = useState(0);
@@ -210,6 +234,18 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const [step, setStep] = useState(380);
     const [sheet, setSheet] = useState<Sheet>(null);
     const [panel, setPanel] = useState<Panel>(null);
+    /** 共读：会话开着就点亮；只选了人还没开始，顶栏先挂上他的头像（她 09-16 要的） */
+    const coRead = useCoReadStore();
+    const [coReadPicks, setCoReadPicks] = useState<string[]>([]);
+    const inCoRead = coRead.session?.bookId === bookId;
+    /** 顶栏那枚图标挂谁的头像：共读中挂第一个，只邀请还没开始就挂邀请的第一个 */
+    const coReadCharId = (inCoRead ? coRead.session?.charIds[0] : null) ?? coReadPicks[0];
+    const coReadChar = coReadCharId ? (characters.find((c) => c.id === coReadCharId) ?? null) : null;
+    /** 一次叫了不止一个人：顶栏改成「两个头像叠着，第二个蒙一层写人数」（她 09-20 给的样子） */
+    const coReadIds = inCoRead ? (coRead.session?.charIds ?? []) : coReadPicks;
+    const coReadCount = coReadIds.length;
+    const coReadMany = coReadCount > 1;
+    const coReadSecond = coReadIds[1] ? (characters.find((c) => c.id === coReadIds[1]) ?? null) : null;
     /** 主题面板的分组页签（参考图那条 Colors / Textures / Custom） */
     const [themeGroup, setThemeGroup] = useState<'color' | 'texture' | 'custom'>('color');
     const [error, setError] = useState<string | null>(null);
@@ -245,11 +281,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const [bar, setBar] = useState<{ x: number; y: number; text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
     /** 工具条上那条颜色排展开着没有（点划线图标切换） */
     const [barColors, setBarColors] = useState(false);
-    /** 笔记面板开着没有（照 #24：取消 / 笔记 / 存下 + 引文 + 文本框） */
-    const [noteOpen, setNoteOpen] = useState(false);
-    /** 这条笔记写在哪儿：已有划线（ann）或刚选中的一段话 */
-    const [noteTarget, setNoteTarget] = useState<{ text: string; anchor: RdAnchor; ann?: RdAnnotation } | null>(null);
-    const [noteDraft, setNoteDraft] = useState('');
     /** 这一章里每条划线的行矩形（覆盖层就照这些矩形画） */
     const [hlRects, setHlRects] = useState<Array<{ id: string; color: string; style: string; rects: Array<{ left: number; top: number; width: number; height: number }> }>>([]);
 
@@ -262,14 +293,60 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const draggingRef = useRef(false);
     /** 这一下触摸是选字的手势：别翻页，也别让后面补的那次点击翻页 */
     const suppressTapRef = useRef(false);
-    /** 章节切换后要落在哪一页（页码 / 锚点 / 章的百分之几——拖进度条跨章时用最后那个） */
-    const pendingRef = useRef<{ page?: number; anchor?: { paraIdx: number; charOffset: number }; ratio?: number } | null>(null);
+
+    // ── 长按一条划线 → 起讨论面板（她 09-15：点按出工具条，长按起讨论）──
+    // 手势三条分支互不打架的要点：**disarm 永远排在 early-return 前面**，不然
+    // 拖页/选字那条路会把定时器漏在那儿，松手之后突然弹出面板。
+    const longPressRef = useRef<{ timer: number; fired: boolean } | null>(null);
+    /** 这一时刻之前，不许「选中即划线」跟着启动（长按会带出原生选区） */
+    const selSuppressUntilRef = useRef(0);
+    /** 长按要用最新的 hitAnnAt，但手势闭包不能跟着它重建——用 ref 转一手 */
+    const hitAnnRef = useRef<(x: number, y: number) => RdAnnotation | null>(() => null);
+    /** 这一下按在一条划线上（原生 touchstart 记下来的；吃掉了 click 之后由 touchend 自己补） */
+    const tapHitRef = useRef<RdAnnotation | null>(null);
+    /** 讨论面板：长按命中的那条线 */
+    const [discuss, setDiscuss] = useState<RdAnnotation | null>(null);
+
+    const disarmLongPress = useCallback(() => {
+        if (longPressRef.current) window.clearTimeout(longPressRef.current.timer);
+        longPressRef.current = null;
+    }, []);
+
+    const armLongPress = useCallback((x: number, y: number) => {
+        disarmLongPress();
+        const timer = window.setTimeout(() => {
+            const lp = longPressRef.current;
+            if (!lp || lp.fired) return;
+            lp.fired = true;
+            // **只有真的按在一条划线上才动手**：空白处长按什么都不做，原生选字照旧
+            const hit = hitAnnRef.current(x, y);
+            if (!hit) return;
+            suppressTapRef.current = true;                    // 松手后补的那次点击别翻页
+            selSuppressUntilRef.current = Date.now() + 800;   // 顺带带出来的选区别划成线
+            window.getSelection()?.removeAllRanges();
+            setBar(null);
+            setPanel(null);
+            setDiscuss(hit);
+        }, LONG_PRESS_MS);
+        longPressRef.current = { timer, fired: false };
+    }, [disarmLongPress]);
+    /** 章节切换后要落在哪一页（页码 / 锚点 / 章的百分之几——拖进度条跨章时用最后那个）。
+     *  **必须带上目标章号**：chapterIdx 是先更新的、这一章的 DOM 是读完才来的，中间那几趟
+     *  量页拿到的是上一章的 flow——不带章号就没法判断「这趟该不该用掉它」（见下面量页那段）。 */
+    const pendingRef = useRef<{
+        chapterIdx?: number;
+        page?: number;
+        anchor?: { paraIdx: number; charOffset: number };
+        ratio?: number;
+    } | null>(null);
     /** 当前页覆盖的文本切片（V1 的数据口） */
     const currentSlicesRef = useRef<PageSlice[]>([]);
     /** 上一页的锚点：重排（字体就绪/转屏）时用它回位，别跳回第一页 */
     const lastAnchorRef = useRef<{ paraIdx: number; charOffset: number } | null>(null);
     /** 待落盘的进度（防抖写入，离开页面时立刻写掉——退出去不能丢） */
     const pendingSaveRef = useRef<RdProgress | null>(null);
+    /** 上一本书的进度恢复完了没（没好之前不许写存档，别把进门那一刻的空位置盖上去） */
+    const restoredRef = useRef(false);
     const sessionStartRef = useRef(Date.now());
     const baseSecondsRef = useRef(0);
     const sessionCountRef = useRef(1);
@@ -282,14 +359,28 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     /** 流水要记「读的是哪本书」，而 20 秒那跳的 effect deps 是空的——用 ref 取当前值 */
     const bookIdRef = useRef(bookId);
     bookIdRef.current = bookId;
+    /** 量页/RestoreObserver 里要读「现在是第几章」（那边 deps 是空的，闭包会拿旧值） */
+    const chapterIdxRef = useRef(chapterIdx);
+    chapterIdxRef.current = chapterIdx;
     /** 量列的 effect 只该在「章 / 排版 / 视口」变时跑；页码跟着变不能让它重跑
         （重跑时 lastAnchorRef 还指着上一页，会把刚翻过去的页算回来） */
     const pageIdxRef = useRef(pageIdx);
     pageIdxRef.current = pageIdx;
+    /** 这次进来翻到过哪些页（统计/书签） */
+    const pagesSeenRef = useRef<Set<string>>(new Set());
+    /** 「往后翻了几页」要的三个数：起点、最远的点、各章页数（跨章时把中间整章算进去） */
+    const startPosRef = useRef<{ chapterIdx: number; pageIdx: number } | null>(null);
+    const farPosRef = useRef<{ chapterIdx: number; pageIdx: number } | null>(null);
+    const pageCountsRef = useRef<Record<number, number>>({});
+    /** 用户活动记录只落一次（退出 / 页面被关 二选一，先到先算） */
+    const sessionLoggedRef = useRef(false);
 
     // ── 打开书：读书目 + 恢复进度 ──
     useEffect(() => {
         let alive = true;
+        // 恢复没落地之前，别让「进门那一刻的空位置」被当成存档写回去
+        //（她 09-16 报的「退出去再进来直接回第一章」——快进快出时那条空存档会盖掉真进度）
+        restoredRef.current = false;
         void (async () => {
             const b = await getBook(bookId);
             if (!alive) return;
@@ -302,17 +393,29 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             if (prog || b) recordReading({ open: true, bookId });
             baseSecondsRef.current = prog?.readingSeconds ?? 0;
             sessionCountRef.current = (prog?.sessionCount ?? 0) + 1;
-            const startChapter = prog?.chapterIdx ?? 0;
+            // 「查看原文」进来时落在这条笔记那一句上（不走上次读到哪）
+            const startChapter = startAt?.chapterIdx ?? prog?.chapterIdx ?? 0;
             setChapterIdx(Math.max(0, Math.min(startChapter, Math.max(0, b.chapterCount - 1))));
-            if (prog) pendingRef.current = { anchor: { paraIdx: prog.paraIdx, charOffset: prog.charOffset } };
-            else pendingRef.current = { page: 0 };
+            if (startAt) pendingRef.current = { chapterIdx: startAt.chapterIdx, anchor: { paraIdx: startAt.paraIdx, charOffset: 0 } };
+            else if (prog) pendingRef.current = { chapterIdx: startChapter, anchor: { paraIdx: prog.paraIdx, charOffset: prog.charOffset } };
+            else pendingRef.current = { chapterIdx: 0, page: 0 };
+            // 落点定下来了，这才允许写存档（见上面 restoredRef 那句）
+            restoredRef.current = true;
         })();
         return () => { alive = false; };
     }, [bookId]);
 
     // ── 批注（书签是其中 kind==='bookmark' 的那几条）：进页面读一次，加/删完再读一次 ──
+    const [threads, setThreads] = useState<RdThread[]>([]);
+
     const reloadAnns = useCallback(async () => {
-        try { setAnns(await listAnnotations(bookId)); } catch { /* 读不到就当没有，别挡住阅读 */ }
+        try {
+            const [rows, ths] = await Promise.all([listAnnotations(bookId), listThreads(bookId)]);
+            // 角色标成「他自己可见」的不上正文（她 09-15 定的三档可见性）——只在
+            // 他自己的详情页和笔记页（带锁）露面。我自己的和公开的照旧都画。
+            setAnns(rows.filter((a) => (a.visibility ?? 'public') !== 'self'));
+            setThreads(ths);
+        } catch { /* 读不到就当没有，别挡住阅读 */ }
     }, [bookId]);
     useEffect(() => { void reloadAnns(); }, [reloadAnns]);
 
@@ -360,6 +463,13 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         setStep(w);
         setPageCount(count);
         const pending = pendingRef.current;
+        // **落点只属于它自己那一章。** 恢复/跳转时 chapterIdx 先变，这一章的正文是异步读完
+        // 才渲染的——中间那几趟量页（字体就绪的补量、转屏重排）对上的还是**上一章**的 DOM，
+        // `[data-para-idx]` 找不到就返回第 0 列，锚点却被消费掉了，于是「退出去再进来落回本章
+        // 第一页」（她 09-16 报的，真书上复现：存档 第一章/第 9 段 → 进来停在第 1 页）。
+        // 判据用**真在 DOM 里的那一章**（chapter.idx），不是 chapterIdx——出事那趟 chapterIdx
+        // 早就已经跳到目标章了。章没到，就什么都别做、更别清 pending。
+        if (pending && pending.chapterIdx !== undefined && pending.chapterIdx !== chapter.idx) return;
         let idx = 0;
         if (pending?.anchor) idx = columnOfAnchor(flow, pending.anchor.paraIdx, pending.anchor.charOffset, w);
         else if (typeof pending?.page === 'number') idx = Math.max(0, Math.min(pending.page, count - 1));
@@ -425,7 +535,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             if (timer) window.clearTimeout(timer);
             timer = window.setTimeout(() => {
                 const anchor = anchorGetterRef.current();
-                if (anchor) pendingRef.current = { anchor };
+                if (anchor) pendingRef.current = { chapterIdx: chapterIdxRef.current, anchor };
                 setLayoutNonce((n) => n + 1);
             }, 150);
         });
@@ -467,7 +577,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         if (!book) return;
         const nextChapter = chapterIdx + delta;
         if (nextChapter < 0 || nextChapter >= book.chapterCount) return;
-        pendingRef.current = delta > 0 ? { page: 0 } : { page: Number.MAX_SAFE_INTEGER };
+        pendingRef.current = delta > 0
+            ? { chapterIdx: nextChapter, page: 0 }
+            : { chapterIdx: nextChapter, page: Number.MAX_SAFE_INTEGER };
         restoringRef.current = true;      // 换章别从左往右滑一遍，直接落位
         setChapterIdx(nextChapter);
     }, [pageCount, pageIdx, book, chapterIdx, pageChars]);
@@ -498,6 +610,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         setPageRange((prev) => (prev && prev.from === from && prev.to === to ? prev : (from === undefined || to === undefined ? null : { from, to })));
         const percent = bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount);
         const elapsed = Math.round((Date.now() - sessionStartRef.current) / 1000);
+        // 恢复还没落地：这一轮算出来的位置是「进门那一刻」的空位置，不能当存档
+        if (!restoredRef.current) return;
         pendingSaveRef.current = {
             bookId: book.id,
             ownerId: 'user',
@@ -513,6 +627,73 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         saveTimerRef.current = window.setTimeout(() => { void flushProgress(); }, SAVE_DEBOUNCE);
         return () => { if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current); };
     }, [pageIdx, chapterIdx, pageCount, book, chapter, anchorOfCurrentPage, flushProgress, bookPercent]);
+
+    // ── 这次阅读的足迹：翻到过哪些页（书签/统计用）──
+    useEffect(() => {
+        if (restoredRef.current) pagesSeenRef.current.add(`${chapterIdx}:${pageIdx}`);
+    }, [chapterIdx, pageIdx]);
+
+    /**
+     * 「往后翻了几页」——她 09-20 的口径：**往回翻不算**。
+     * 记两个点：进门那页 = 起点，这次到过的最远那页 = 终点；两个点之间的距离就是页数。
+     * （原来记的是「翻到过几个不同的页」，她往回翻也会加一，数字会虚高。）
+     */
+    useEffect(() => {
+        if (!restoredRef.current || pageCount === 0) return;
+        pageCountsRef.current[chapterIdx] = Math.max(pageCountsRef.current[chapterIdx] ?? 0, pageCount);
+        if (!startPosRef.current) startPosRef.current = { chapterIdx, pageIdx };
+        const far = farPosRef.current;
+        if (!far || chapterIdx > far.chapterIdx || (chapterIdx === far.chapterIdx && pageIdx > far.pageIdx)) {
+            farPosRef.current = { chapterIdx, pageIdx };
+        }
+    }, [chapterIdx, pageIdx, pageCount]);
+
+    /**
+     * 一次「进书 → 退出」= 一条**用户活动记录**（她 09-20 的活动记录口径）。
+     * 你自己读书不调 llm，所以这条是纯事件记录：读了多久 / 看了多少页 / 留了几条批注 /
+     * 参与多少回复。**不同步聊天**，可手动删改（入口在书库页的全局活动记录）。
+     * 挂在 render 上取最新值，交给一个 [] 依赖的卸载 effect 调——闭包不会拿到旧数组。
+     */
+    /** 进门那页 → 最远那页，中间隔了几页（跨章就把中间的整章算上；往回翻不扣） */
+    const pagesForward = (): number => {
+        const s = startPosRef.current;
+        const f = farPosRef.current;
+        if (!s || !f) return 1;
+        if (f.chapterIdx === s.chapterIdx) return Math.max(1, f.pageIdx - s.pageIdx + 1);
+        let n = Math.max(1, (pageCountsRef.current[s.chapterIdx] ?? s.pageIdx + 1) - s.pageIdx);
+        for (let c = s.chapterIdx + 1; c < f.chapterIdx; c += 1) n += pageCountsRef.current[c] ?? 1;
+        return Math.max(1, n + f.pageIdx + 1);
+    };
+
+    const sessionLoggerRef = useRef<() => void>(() => {});
+    sessionLoggerRef.current = () => {
+        // 恢复没落地 = 这一趟还没真的开始读（顺手挡住 StrictMode 的假卸载）
+        if (sessionLoggedRef.current || !restoredRef.current || !book) return;
+        sessionLoggedRef.current = true;
+        const since = new Date(sessionStartRef.current).toISOString();
+        void appendRoamActivity({
+            id: rdId('rr'), charId: 'user', bookId: book.id, kind: 'read',
+            group: newRoamGroup(), seq: 0,
+            pages: pagesForward(),
+            annCount: anns.filter((a) => a.ownerId === 'user' && a.createdAt >= since).length,
+            replyCount: threads.reduce(
+                (n, t) => n + t.messages.filter((m) => m.role === 'user' && m.createdAt >= since).length, 0),
+            summary: `你读了《${book.title}》`,
+            durationMs: Math.round((Date.now() - sessionStartRef.current) / 1000) * 1000,
+            mode: 'user',
+            createdAt: new Date().toISOString(),
+        });
+    };
+
+    // 退出阅读页 / 页面被整个关掉：把这次阅读落成一条用户活动记录（只落一次）
+    useEffect(() => {
+        const onPageHide = () => { sessionLoggerRef.current(); };
+        window.addEventListener('pagehide', onPageHide);
+        return () => {
+            window.removeEventListener('pagehide', onPageHide);
+            sessionLoggerRef.current();
+        };
+    }, []);
 
     // 退出书房 / 切后台 / 组件卸载：立刻落盘（只靠防抖的话，退出去那次就丢了）
     useEffect(() => {
@@ -536,6 +717,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     }, [pageIdx, step]);
 
     const onTouchStart = (e: React.TouchEvent) => {
+        // 讨论面板开着：底下一律不接手势（她 09-16：面板拉起来时后面别跟着翻页）
+        if (discuss) return;
         const t = e.touches[0];
         const sel = typeof window.getSelection === 'function' ? window.getSelection() : null;
         // 正在选字：这一下是选区的手势，不翻页，也别让 touchend 补的那次点击翻页
@@ -545,13 +728,17 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         draggingRef.current = false;
         const track = trackRef.current;
         if (track && !selBusy) track.style.transition = 'none';
+        if (!selBusy) armLongPress(t.clientX, t.clientY);
     };
     const onTouchMove = (e: React.TouchEvent) => {
         const start = touchRef.current;
-        if (!start || start.locked) return;
+        if (!start) { disarmLongPress(); return; }
         const t = e.touches[0];
         const dx = t.clientX - start.x;
         const dy = t.clientY - start.y;
+        // 手指动了就不算长按（disarm 排在 locked 的 early-return 前面）
+        if (Math.abs(dx) > LONG_PRESS_SLOP || Math.abs(dy) > LONG_PRESS_SLOP) disarmLongPress();
+        if (start.locked) return;
         if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) {   // 纵向 = 别的意图
             start.locked = true;
             snapBack();
@@ -569,10 +756,27 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         track.style.transform = `translateX(${-pageIdx * step + x}px)`;
     };
     const onTouchEnd = (e: React.TouchEvent) => {
+        const lpFired = !!longPressRef.current?.fired;
+        disarmLongPress();
         const start = touchRef.current;
         const dragging = draggingRef.current;
+        const tapHit = tapHitRef.current;
+        tapHitRef.current = null;
         touchRef.current = null;
         draggingRef.current = false;
+        // 按在划线上的一下轻点：原生那下被我们吃掉了（不起选区），工具条这里补上。
+        // 长按已经起了讨论面板的那次不算轻点。
+        if (tapHit && !lpFired && start && !start.locked && !dragging) {
+            const t = e.changedTouches[0];
+            const moved = Math.abs(t.clientX - start.x) > LONG_PRESS_SLOP || Math.abs(t.clientY - start.y) > LONG_PRESS_SLOP;
+            if (!moved) {
+                suppressTapRef.current = true;      // 万一浏览器还是补了 click，别再走一遍
+                window.getSelection()?.removeAllRanges();
+                liveRef.current = null;
+                openAnnBar(tapHit, start.x, start.y);
+                return;
+            }
+        }
         if (!start || start.locked || !dragging) return;
         const t = e.changedTouches[0];
         const dx = t.clientX - start.x;
@@ -584,6 +788,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         snapBack();
     };
     const onTouchCancel = () => {
+        disarmLongPress();
+        tapHitRef.current = null;
         touchRef.current = null;
         draggingRef.current = false;
         snapBack();
@@ -591,18 +797,43 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
 
     const atEnd = book ? chapterIdx >= book.chapterCount - 1 && pageIdx >= pageCount - 1 : false;
     const percent = book ? bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount) : 0;
+
+    /**
+     * 段落色条：这一段里有人标注/讨论过，左侧就挂一条色柱。
+     * 颜色按参与时间从上往下排；**≥3 人整条墨色**（她 09-15 定的）。
+     * 一个 gradient 硬分段搞定——不在 `.rd-para` 里加任何节点（加了分页就炸）。
+     */
+    const barByPara = useMemo(() => {
+        const out = new Map<number, string>();
+        if (!chapter) return out;
+        // 锚点是章内段号：先把这一章的数据滤出来，别在段落循环里重扫全书
+        const mine = anns.filter((a) => a.kind !== 'bookmark' && a.chapterIdx === chapterIdx);
+        const ths = threads.filter((t) => t.chapterIdx === chapterIdx);
+        if (mine.length === 0 && ths.length === 0) return out;
+        for (let i = 0; i < chapter.paras.length; i++) {
+            const ps = participantsOfParagraph(mine, ths, i);
+            if (ps.length === 0) continue;
+            if (ps.length >= 3) {
+                out.set(i, 'linear-gradient(to bottom, var(--rd-ink) 0 100%)');
+                continue;
+            }
+            const stops = ps.map((p, k) => {
+                const from = Math.round((k / ps.length) * 100);
+                const to = Math.round(((k + 1) / ps.length) * 100);
+                return `${highlightColorOf(prefs, p.ownerId)} ${from}% ${to}%`;
+            });
+            out.set(i, `linear-gradient(to bottom, ${stops.join(', ')})`);
+        }
+        return out;
+    }, [chapter, anns, threads, chapterIdx, prefs]);
     const elapsedTotal = baseSecondsRef.current + Math.round((Date.now() - sessionStartRef.current) / 1000);
-    const remainSec = book
-        ? Math.max(0, (book.totalChars * (1 - percent / 100)) / CHARS_PER_SEC)
-        : 0;
     /** 页脚那行时间（20 秒一跳的 tick 会让它自己走） */
     const nowD = new Date();
     const clockText = `${nowD.getHours()}:${String(nowD.getMinutes()).padStart(2, '0')}`;
-    const bookMode = readingModeFor(prefs, bookId);
 
     const jumpChapter = (idx: number) => {
         if (idx !== chapterIdx) recordReading({ pages: 1, chars: pageChars(), bookId });
-        pendingRef.current = { page: 0 };
+        pendingRef.current = { chapterIdx: idx, page: 0 };
         setChapterIdx(idx);
         setSheet(null);
     };
@@ -623,14 +854,14 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             if (target !== pageIdx) setPageIdx(target);
             return;
         }
-        pendingRef.current = { ratio: within };
+        pendingRef.current = { chapterIdx: ci, ratio: within };
         setChapterIdx(ci);
     };
 
     /** 从一条命中/书签回到它落的那一页 */
     const jumpToAnchor = (ci: number, paraIdx: number, charOffset: number) => {
         setSheet(null);
-        pendingRef.current = { anchor: { paraIdx, charOffset } };
+        pendingRef.current = { chapterIdx: ci, anchor: { paraIdx, charOffset } };
         if (ci === chapterIdx) setLayoutNonce((n) => n + 1);   // 同一章：再量一次就是落位
         else setChapterIdx(ci);
     };
@@ -667,10 +898,46 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const at = paraAt(flow, caret.startContainer);
         if (!at) return null;
         const off = caret.startOffset;
+        // 段号是章内的 → 命中也要限定在**这一章**（不然第二章第 0 段会点到第一章那条线）
         return anns.find((a) => (a.kind === 'highlight' || a.kind === 'note')
+            && a.chapterIdx === chapterIdx
             && (at.idx > a.anchor.startPara || (at.idx === a.anchor.startPara && off >= a.anchor.startOffset))
             && (at.idx < a.anchor.endPara || (at.idx === a.anchor.endPara && off <= a.anchor.endOffset))) ?? null;
-    }, [anns]);
+    }, [anns, chapterIdx]);
+
+    // 长按的回调里用它——存最新的那份，手势闭包就不用跟着 anns 重建
+    useEffect(() => { hitAnnRef.current = hitAnnAt; }, [hitAnnAt]);
+
+    /**
+     * 划过线的字底下**不许再选字**（她 09-15 要的）：按在一条线上就把这一下的默认行为吃掉，
+     * 于是手势落到的永远是「那条线」，不是底下的文字。
+     * 必须挂原生非 passive 的监听——React 在根节点上把 touchstart 当 passive，synthetic
+     * 事件里 preventDefault() 是不生效的（只会打一条 console 警告）。
+     * 代价：这一下浏览器不会再补 click，所以轻点开工具条改由 touchend 自己补（见 onTouchEnd）。
+     * 鼠标这边 preventDefault(mousedown) 只挡选区，不影响 click。
+     */
+    useEffect(() => {
+        const vp = viewportRef.current;
+        if (!vp) return;
+        const onNativeTouchStart = (e: TouchEvent) => {
+            tapHitRef.current = null;
+            const t = e.touches[0];
+            if (!t) return;
+            const hit = hitAnnRef.current(t.clientX, t.clientY);
+            if (!hit) return;
+            e.preventDefault();
+            tapHitRef.current = hit;
+        };
+        const onNativeMouseDown = (e: MouseEvent) => {
+            if (hitAnnRef.current(e.clientX, e.clientY)) e.preventDefault();
+        };
+        vp.addEventListener('touchstart', onNativeTouchStart, { passive: false });
+        vp.addEventListener('mousedown', onNativeMouseDown);
+        return () => {
+            vp.removeEventListener('touchstart', onNativeTouchStart);
+            vp.removeEventListener('mousedown', onNativeMouseDown);
+        };
+    }, []);
 
     /** 段号 → 第几章（老批注没记章节号，用书目里的段起点倒推） */
     const chapterOfPara = useCallback((para: number) => {
@@ -726,6 +993,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         const onSelChange = () => {
             const flow = flowRef.current;
             const s = typeof window.getSelection === 'function' ? window.getSelection() : null;
+            // 长按刚起过讨论面板：那一下带出来的选区不是「要划线」，别跟着划
+            if (Date.now() < selSuppressUntilRef.current) { liveRef.current = null; return; }
             if (!flow || !s || s.rangeCount === 0 || s.isCollapsed) { liveRef.current = null; return; }
             const range = s.getRangeAt(0);
             if (!flow.contains(range.startContainer) || !flow.contains(range.endContainer)) return;
@@ -750,6 +1019,21 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         };
     };
 
+    /**
+     * 点中一条划线 → 出工具条。
+     * 两条路都走它：鼠标走 viewport 的 onClick，手指走 touchend
+     * （划线上的 touchstart 被我们 preventDefault 掉了，浏览器不补 click）。
+     */
+    const openAnnBar = (hit: RdAnnotation, x: number, y: number) => {
+        setPanel(null);
+        const rects = hitRectsOf(hit);
+        const at = rects.length > 0
+            ? barAt(rects)
+            : { x: Math.max(120, Math.min(window.innerWidth - 120, x)), y: Math.max(140, y - 12) };
+        setBar({ ...at, text: hit.anchor.text, anchor: hit.anchor, ann: hit });
+        setBarColors(false);
+    };
+
     /** 划线编辑里改这一条（颜色 / 线条类型都走它；没改过的还是 owner 那支笔） */
     const editAnn = async (patch: { color?: string; style?: RdAnnotationStyle }) => {
         if (!bar?.ann) return;
@@ -758,42 +1042,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         setBar({ ...bar, ann: { ...bar.ann, ...patch } });
     };
     const recolourAnn = (hex: string) => void editAnn({ color: hex });
-
-    /** 写想法（划线上的批注：已有的那条改文本，选区的当场划一条再写） */
-    const saveNote = async () => {
-        if (!noteTarget) return;
-        const note = noteDraft.trim();
-        const target = noteTarget.ann;
-        if (target) {
-            await putAnnotation({
-                ...target,
-                note: note || undefined,
-                kind: note ? 'note' : 'highlight',
-                updatedAt: new Date().toISOString(),
-            });
-        } else if (note && book) {
-            const now = new Date().toISOString();
-            await putAnnotation({
-                id: uid(), bookId, ownerId: 'user', anchor: noteTarget.anchor, kind: 'note',
-                styleSlot: 1, note, contentRev: book.contentRev, status: 'active',
-                chapterIdx, percent: bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount),
-                createdAt: now, updatedAt: now,
-            });
-        }
-        window.getSelection()?.removeAllRanges();
-        setNoteOpen(false);
-        setBar(null);
-        await reloadAnns();
-        if (note || target) notify(note ? '笔记写上了' : '笔记清掉了');
-    };
-
-    /** 打开笔记面板（照 #24）：引文 + 文本框，取消/存下 */
-    const openNote = (target: { text: string; anchor: RdAnchor; ann?: RdAnnotation }) => {
-        setNoteTarget(target);
-        setNoteDraft(target.ann?.note ?? '');
-        setNoteOpen(true);
-        setBar(null);
-    };
 
     const dropAnn = async () => {
         if (!bar?.ann) return;
@@ -806,7 +1054,11 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     // ── 划线覆盖层：按行矩形画（不包 <mark>，锚点就不会漂） ──
     useLayoutEffect(() => {
         const flow = flowRef.current;
-        const marks = anns.filter((a) => (a.kind === 'highlight' || a.kind === 'note') && a.anchor.startPara < Number.MAX_SAFE_INTEGER);
+        // ⚠️ **必须按章过滤**：锚点里的段号是**章内**段号，不带章号的话
+        // 第一章第 0 段划的线会在每一章的第 0 段都长出来（她 09-16 报的）。
+        const marks = anns.filter((a) => (a.kind === 'highlight' || a.kind === 'note')
+            && a.chapterIdx === chapterIdx
+            && a.anchor.startPara < Number.MAX_SAFE_INTEGER);
         if (!flow || marks.length === 0) { setHlRects([]); return; }
         const origin = flowOrigin(flow);
         const out: Array<{ id: string; color: string; style: string; rects: Array<{ left: number; top: number; width: number; height: number }> }> = [];
@@ -830,14 +1082,17 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
             if (rects.length > 0) out.push({ id: a.id, color: a.color ?? highlightColorOf(prefs, a.ownerId), style: a.style ?? 'full', rects });
         }
         setHlRects(out);
-    }, [anns, chapter, step, layoutNonce, prefs.highlightColors]);
+        // charPrefs 进依赖：角色自己挑的笔色（penColor）变了，他划过的线要跟着换色
+    }, [anns, chapter, step, layoutNonce, prefs.highlightColors, charPrefs]);
 
     // ── 书签：夹在当前这一页上，再点一次拿掉（参考图：夹上了右上角挂条红丝带） ──
     const markHere = useMemo(() => {
         if (!pageRange) return null;
+        // 同上：书签也按章过滤，否则第一章夹的书签会在后面每章同一页都亮着
         return anns.find((a) => a.kind === 'bookmark'
+            && a.chapterIdx === chapterIdx
             && a.anchor.startPara >= pageRange.from && a.anchor.startPara <= pageRange.to) ?? null;
-    }, [anns, pageRange]);
+    }, [anns, pageRange, chapterIdx]);
     const bookmarked = !!markHere;
 
     const toggleBookmark = async () => {
@@ -910,7 +1165,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         { key: 'stat', label: '统计', on: true, run: () => { setSheet(null); onOpenStats(); } },
         { key: 'share', label: '分享', on: false, run: () => notify('转发卡片在第三批，先欠着') },
         { key: 'detail', label: '书本详情', on: true, run: () => { setSheet(null); onOpenDetails(bookId); } },
-        { key: 'book', label: '总结设置', on: true, run: () => setSheet('book') },
         { key: 'hl', label: '划线设置', on: true, run: () => setSheet('hl') },
         { key: 'style', label: '排版设置', on: true, run: () => { setSheet(null); setPanel('style'); } },
         { key: 'theme', label: '背景主题', on: true, run: () => { setSheet(null); setPanel('theme'); } },
@@ -944,6 +1198,36 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     </div>
                     {/* 目录在底栏第一格、更多在底栏最后一格，顶栏右边只留搜索和书签 */}
                     <div className="rd-reader-bar-tools">
+                        {/* 一个人读 → 挂他的头像；**两个人以上 → 头像 + 人数**（她 09-20 给的样子） */}
+                        {coReadMany ? (
+                            <button
+                                className="rd-icon-btn rd-coread-stack"
+                                aria-label={`一起读书 · ${coReadCount} 个人`}
+                                onClick={() => { setPanel(null); setSheet('coread'); }}
+                            >
+                                {coReadChar && <TokenImg value={coReadChar.avatar} className="rd-coread-stack-face" />}
+                                <span className="rd-coread-stack-second">
+                                    {coReadSecond && <TokenImg value={coReadSecond.avatar} className="rd-coread-stack-face" />}
+                                    <span className="rd-coread-stack-count">{coReadCount}</span>
+                                </span>
+                            </button>
+                        ) : coReadChar ? (
+                            <button
+                                className="rd-icon-btn"
+                                aria-label={`一起读书 · ${coReadChar.name}`}
+                                onClick={() => { setPanel(null); setSheet('coread'); }}
+                            >
+                                <TokenImg value={coReadChar.avatar} className="rd-coread-avatar-img" />
+                            </button>
+                        ) : (
+                            <button
+                                className="rd-icon-btn"
+                                aria-label="一起读书"
+                                onClick={() => { setPanel(null); setSheet('coread'); }}
+                            >
+                                <UsersThree size={19} />
+                            </button>
+                        )}
                         <button
                             className="rd-icon-btn"
                             aria-label="书内搜索"
@@ -965,6 +1249,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 className="rd-reader-viewport"
                 ref={viewportRef}
                 onClick={(e) => {
+                    // 讨论面板开着：点外面的那一下只负责关面板，不许再拿它翻页（她 09-16）
+                    if (discuss) return;
                     // 选字那一下松手后浏览器会补一次点击：那不是在翻页
                     if (suppressTapRef.current) { suppressTapRef.current = false; return; }
                     // 点在一条已有的划线上：出工具栏（复制 / 笔记 / 搜索 / 分享 / 删掉 + 改这条的颜色）
@@ -972,11 +1258,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     liveRef.current = null;
                     const hit = hitAnnAt(e.clientX, e.clientY);
                     if (hit) {
-                        setPanel(null);
-                        const rects = hitRectsOf(hit);
-                        const at = rects.length > 0 ? barAt(rects) : { x: Math.max(120, Math.min(window.innerWidth - 120, e.clientX)), y: Math.max(140, e.clientY - 12) };
-                        setBar({ ...at, text: hit.anchor.text, anchor: hit.anchor, ann: hit });
-                        setBarColors(false);
+                        openAnnBar(hit, e.clientX, e.clientY);
                         return;
                     }
                     setBar(null);
@@ -1005,11 +1287,20 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     >
                         <div className="rd-reader-flow" ref={flowRef}>
                             {chapter && <div className="rd-reader-chapter">{chapter.title}</div>}
-                            {chapter?.paras.map((p, i) => (
-                                <p className="rd-para" key={i} data-para-idx={i}>
-                                    {isImagePara(p) ? <ReaderFigure refText={p} /> : p}
-                                </p>
-                            ))}
+                            {chapter?.paras.map((p, i) => {
+                                const bar = barByPara.get(i);
+                                return (
+                                    <p
+                                        className="rd-para"
+                                        key={i}
+                                        data-para-idx={i}
+                                        data-rd-bar={bar ? '' : undefined}
+                                        style={bar ? ({ '--rd-bar': bar } as CSSProperties) : undefined}
+                                    >
+                                        {isImagePara(p) ? <ReaderFigure refText={p} /> : p}
+                                    </p>
+                                );
+                            })}
                         </div>
                         <div className="rd-hl-layer" aria-hidden>
                             {hlRects.map((h) => h.rects.map((r, i) => (
@@ -1147,9 +1438,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         </div>
                     )}
 
+                    {/* 右下角那个「剩余 X 分读完」的倒计时她 09-16 让删了——只留阅读时长 */}
                     <div className="rd-reader-stat">
                         <span>阅读时长 {fmtDuration(elapsedTotal)}</span>
-                        <span>剩余 {fmtDuration(remainSec)}</span>
                     </div>
 
                     {/* 工具排：目录 / 进度条 / 亮度 / 排版(A) / 主题 / 更多
@@ -1220,7 +1511,10 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                             {tocTab === 'notes' && (notes.length === 0
                                 ? <div className="rd-hunt-empty">这本书上还没有划线批注。</div>
                                 : notes.map((a) => {
-                                    const ci = chapterOfPara(a.anchor.startPara);
+                                    // 锚点里的段号是**章内**段号，不能拿去查全书表（她 09-16：
+                                    // 「第二章做的笔记，定位显示成封面」就是这么来的）——
+                                    // 章号以批注自己存的 chapterIdx 为准，老的没存才退回查表。
+                                    const ci = a.chapterIdx ?? chapterOfPara(a.anchor.startPara);
                                     return (
                                         <button key={a.id} className="rd-toc-row" onClick={() => jumpToAnchor(ci, a.anchor.startPara, a.anchor.startOffset)}>
                                             <div className="rd-toc-row-head">
@@ -1329,27 +1623,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-            {/* ── 本书设置（单书设置，v3 §4.6：共读模式在这里，不在大设置页） ── */}
-            {sheet === 'book' && (
-                <div className="rd-sheet-mask" onClick={() => setSheet(null)}>
-                    <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
-                        <div className="rd-sheet-grip" />
-                        <div className="rd-sheet-title">总结设置</div>
-                        <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-3)' }}>{book?.title}</div>
-
-                        <div className="rd-row-label" style={{ marginBottom: 'var(--rd-space-2)' }}>共读模式（只对这本书）</div>
-                        <div className="rd-btn-row" style={{ marginBottom: 'var(--rd-space-2)' }}>
-                            <button className={bookMode === 'focus' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => setBookMode(bookId, 'focus')}>专注</button>
-                            <button className={bookMode === 'casual' ? 'rd-btn rd-btn-primary' : 'rd-btn'} onClick={() => setBookMode(bookId, 'casual')}>随心</button>
-                        </div>
-                        <div className="rd-muted">
-                            专注：上下文以当前页正文为主，只带这本书最近几条批注；<br />
-                            随心：保留正常聊天上下文，读书只是其中一件事。
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* ── 划线设置：跟书详情、设置页共用同一张弹卡 ── */}
             {sheet === 'hl' && <HighlightColorSheet onClose={() => setSheet(null)} />}
 
@@ -1403,29 +1676,31 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                                     </button>
                                 ))}
                             </div>
-                            {prefs.highlightPalette.map((c) => (
-                                <button
-                                    key={c}
-                                    aria-label={c}
-                                    className={`rd-bar-tb-dot${(bar.ann!.color ?? highlightColorOf(prefs, 'user')) === c ? ' rd-bar-tb-dot-on' : ''}`}
-                                    style={{ background: c }}
-                                    onClick={() => void recolourAnn(c)}
+                            {/* 这条的颜色：**照情侣页调色台**——原生取色框，点开系统色轮随便调
+                                （她 09-16：原来那排固定色卡换成这个调法） */}
+                            <label className="rd-bar-tb-pick">
+                                <span>这条</span>
+                                <input
+                                    className="rd-color-in"
+                                    type="color"
+                                    aria-label="这条划线的颜色"
+                                    value={bar.ann!.color ?? highlightColorOf(prefs, 'user')}
+                                    onChange={(e) => void recolourAnn(e.target.value)}
                                 />
-                            ))}
+                            </label>
                         </div>
                     )}
                     <div className="rd-bar-tb">
-                        <button className="rd-bar-tb-item" onClick={() => void copyToClipboard(bar.text)}>
+                        <button
+                            className="rd-bar-tb-item"
+                            onClick={() => {
+                                void copyToClipboard(bar.text).then((ok) => notify(ok ? '复制好了' : '没复制上，再试一次'));
+                            }}
+                        >
                             <Copy size={18} weight="bold" /><span>复制</span>
-                        </button>
-                        <button className="rd-bar-tb-item" onClick={() => openNote({ text: bar.text, anchor: bar.anchor, ann: bar.ann })}>
-                            <PencilSimple size={18} weight="bold" /><span>{bar.ann.note ? '改想法' : '写想法'}</span>
                         </button>
                         <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
                             <ShareNetwork size={18} weight="bold" /><span>分享书摘</span>
-                        </button>
-                        <button className="rd-bar-tb-item" onClick={() => notify('讨论（不是问答）在下一批')}>
-                            <ChatCircleDots size={18} weight="bold" /><span>讨论</span>
                         </button>
                         <button
                             className="rd-bar-tb-item"
@@ -1441,23 +1716,46 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 </div>
             )}
 
-            {/* ── 笔记面板（照她给的 Edit Note 参考图：取消 / 笔记 / 存下 + 引文 + 文本框） ── */}
-            {noteOpen && noteTarget && (
-                <div className="rd-notepanel" data-rd-page="notepanel">
-                    <div className="rd-notepanel-head">
-                        <button className="rd-notepanel-btn" onClick={() => setNoteOpen(false)}>取消</button>
-                        <span className="rd-notepanel-title">笔记</span>
-                        <button className="rd-notepanel-btn rd-notepanel-save" onClick={() => void saveNote()}>存下</button>
-                    </div>
-                    <div className="rd-notepanel-quote">{noteTarget.text}</div>
-                    <textarea
-                        className="rd-notepanel-area"
-                        autoFocus
-                        placeholder="写点什么…"
-                        value={noteDraft}
-                        onChange={(e) => setNoteDraft(e.target.value)}
-                    />
-                </div>
+            {/* ── 讨论面板（长按划线拉起来；写想法/讨论两个旧按钮并到这里） ── */}
+            {discuss && book && chapter && (
+                <ReaderDiscuss
+                    book={book}
+                    chapterIdx={chapterIdx}
+                    chapterTitle={chapter.title}
+                    chapterParas={chapter.paras}
+                    percent={percent}
+                    ann={discuss}
+                    notify={notify}
+                    onClose={() => setDiscuss(null)}
+                    onChanged={() => void reloadAnns()}
+                />
+            )}
+
+            {/* ── 一起读书（共读会话；右上角那枚图标拉起来的） ── */}
+            {sheet === 'coread' && book && chapter && pageRange && (
+                <ReaderCoRead
+                    book={book}
+                    chapterIdx={chapterIdx}
+                    chapterTitle={chapter.title}
+                    pageParas={chapter.paras
+                        .slice(pageRange.from, pageRange.to + 1)
+                        .map((t, i) => ({ paraIdx: pageRange.from + i, text: t }))}
+                    chapterParas={chapter.paras}
+                    /* 「每次读几页」要往后多给几页的正文。页段数按当前页估——够稳，
+                       反正是给模型读文本，不需要跟分栏严丝合缝对齐。 */
+                    parasAhead={(pages) => {
+                        const perPage = Math.max(1, pageRange.to - pageRange.from + 1);
+                        const to = Math.min(chapter.paras.length - 1, pageRange.to + Math.max(0, pages - 1) * perPage);
+                        return chapter.paras.slice(pageRange.from, to + 1)
+                            .map((t, i) => ({ paraIdx: pageRange.from + i, text: t }));
+                    }}
+                    percent={percent}
+                    notify={notify}
+                    onClose={() => setSheet(null)}
+                    onChanged={() => void reloadAnns()}
+                    pickedCharIds={coReadPicks}
+                    onPick={setCoReadPicks}
+                />
             )}
 
         </div>

@@ -9,7 +9,9 @@
 // node 测试环境也没有（装了 jsdom 也只为几个别的用例）。EPUB 里的 XML/XHTML 都是
 // 良构的，用属性正则 + 标签剥离足够稳，而且能在纯 node 里跑测试。
 //
-// 产出与 TXT 线共用 ImportedPayload：一章 = spine 里一个 XHTML 文档（EPUB 的惯例），
+// 产出与 TXT 线共用 ImportedPayload。**章节跟着目录走**（2026-09-16 改，她报「章节怎么分的」）：
+// 目录点到的 spine 文件开新章，没被点到的（只有标题的半截文件、postface 之类）并进上一章；
+// 一个文件里被目录点了多个锚点就在锚点处切几章；整本没有目录时退回「一个 spine 文件一章」。
 // 章名优先取目录，其次取文档里第一个 h1-h6，最后兜底「第 N 节」。
 //
 // 2026-09-15 两处修补（她报「章节目录乱」「epub 解析没图像」）：
@@ -271,8 +273,14 @@ export async function parseEpub(
             if (list) list.push(l); else linksByPath.set(l.path, [l]);
         }
 
-        // 正文：一个 spine 文件里被目录点了多个锚点，就在锚点处切成几章
+        // 正文：**章节跟着目录走**（她 2026-09-16 报「章节怎么分的」）。
+        // 不少书（比如《在轮下》）一个章拆成两个 spine 文件：一个只有标题、一个才是正文，
+        // 目录只点前者。按 spine 一文件一章的话，目录里就会多出一堆「第 N 节」残条、
+        // 章节数也翻倍。现在的口径：**目录点到的文件开新章，没被点到的并进上一章**。
+        // 一本书没有目录（nav/ncx 都读不到）时退回「一个 spine 文件一章」。
+        const hasToc = links.length > 0;
         const chapters: RawChapter[] = [];
+        let openChapter: RawChapter | null = null;
         for (const item of spine) {
             const path = resolvePath(opfPath, item.href);
             const xhtml = await readText(path);
@@ -312,7 +320,15 @@ export async function parseEpub(
                     })
                     .filter((p) => p !== '');
                 if (finalParas.length === 0) continue;
-                chapters.push({ title: heading.trim(), paras: finalParas, images: blobs.length > 0 ? blobs : undefined });
+                const isTocTarget = !hasToc || piece.title !== '';
+                if (isTocTarget || !openChapter) {
+                    openChapter = { title: heading.trim(), paras: finalParas, images: blobs.length > 0 ? blobs : undefined };
+                    chapters.push(openChapter);
+                } else {
+                    // 目录没点到的后续文件（半截正文、postface 这类）并进上一章
+                    openChapter.paras.push(...finalParas);
+                    if (blobs.length > 0) openChapter.images = [...(openChapter.images ?? []), ...blobs];
+                }
             }
         }
         if (chapters.length === 0) return { error: 'EPUB 里没抽出任何正文段落' };

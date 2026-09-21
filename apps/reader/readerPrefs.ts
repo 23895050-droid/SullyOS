@@ -5,6 +5,7 @@
 // 用 apps/couple/coupleStoreBase 的工厂：订阅/持久化/备份导入重读三件套直接继承。
 
 import { createCoupleStore } from '../couple/coupleStoreBase';
+import { getCharReadPrefs } from './readerCharPrefs';
 
 // grid  = 三列封面网格
 // list   = 纯文字列表（参考图 List View）
@@ -13,7 +14,6 @@ import { createCoupleStore } from '../couple/coupleStoreBase';
 export type ShelfLayout = 'grid' | 'list' | 'thumb' | 'detail';
 /** 书架排序键（参考图那个 Sort 组） */
 export type ShelfSort = 'lastRead' | 'addTime' | 'fileSize' | 'fileName';
-export type ReadingMode = 'focus' | 'casual';
 
 export interface ReaderTypography {
     /** 正文/标题用哪套字体（'serif' | 'sans' | 'hand' 或用户上传字体的族名） */
@@ -51,12 +51,11 @@ export interface ReaderPrefs {
     /** **每支笔的颜色：ownerId → hex**。'user' 是她自己的；角色各自的等书库页做
      *  （她 2026-09-15：只需要区分好用户的划线颜色和各角色划线颜色）。 */
     highlightColors: Record<string, string>;
-    /** 默认共读模式（没单独设过的书用它） */
-    readingMode: ReadingMode;
-    /** 单书共读模式：bookId → 'focus' | 'casual'（v3 §4.6 的单书设置） */
-    bookModes: Record<string, ReadingMode>;
-    /** 允许读书的角色（书库页只列开了开关的；V9 的多游标也按这个名单） */
-    readingChars: string[];
+    /** 允许读书的角色（书库页只列开了开关的）。
+     *  **已搬家**（2026-09-20）→ `readerCharPrefs.ts` 的 `CharReadPrefs.readEnabled`：
+     *  它本来就是「每个角色一个布尔」，跟着角色自己的设置走更顺。这里只剩老数据，
+     *  首次启动时 `readerCharPrefs` 会自动把它迁过去，不用手动管。 */
+    readingChars?: string[];
     /** 皮肤层用户 CSS：全局 + 分页（页 key 用 'shelf' | 'reader' | 'notes' ...） */
     cssGlobal: string;
     cssPages: Record<string, string>;
@@ -89,8 +88,6 @@ export const DEFAULT_PREFS: ReaderPrefs = {
     huntHistory: [],
     highlightPalette: DEFAULT_HIGHLIGHT_PALETTE,
     highlightColors: { user: DEFAULT_HIGHLIGHT_PALETTE[0] },
-    readingMode: 'focus',
-    bookModes: {},
     readingChars: [],
     cssGlobal: '',
     cssPages: {},
@@ -108,7 +105,6 @@ const store = createCoupleStore<ReaderPrefs>('reader_prefs_v1', 1, DEFAULT_PREFS
         ...(parsed.highlightColors || {}),
     },
     cssPages: { ...(parsed.cssPages || {}) },
-    bookModes: { ...(parsed.bookModes || {}) },
 }));
 
 export const readerPrefsStore = store;
@@ -179,9 +175,21 @@ export function removeHighlightColor(hex: string): void {
 /** 谁划的 → 用哪支笔。没设过的角色给一支默认色（书库页做好之前先有个区分度）。 */
 export const DEFAULT_CHAR_HIGHLIGHT = '#7fc8a9';
 
+/**
+ * 谁划的 → 用哪支笔。优先级（她 09-20）：
+ *   ① **手动设过的**（`prefs.highlightColors`，划线设置里给人挑的颜色）——人手挑的永远最大；
+ *   ② **他自己挑的那支笔**（`readerCharPrefs.penColor`，第一次读书前分析出来的；重取会跟着换，
+ *      所以他**以前划过的线也会跟着换颜色**——只有单独改过色的那一条不动，那个由调用处优先）；
+ *   ③ 兜底色。
+ */
 export function highlightColorOf(prefs: ReaderPrefs, ownerId: string): string {
-    return prefs.highlightColors?.[ownerId]
-        ?? (ownerId === 'user' ? (prefs.highlightPalette[0] ?? DEFAULT_CHAR_HIGHLIGHT) : DEFAULT_CHAR_HIGHLIGHT);
+    const manual = prefs.highlightColors?.[ownerId];
+    if (manual) return manual;
+    if (ownerId !== 'user') {
+        const pen = getCharReadPrefs(ownerId).penColor;
+        if (pen) return pen;
+    }
+    return ownerId === 'user' ? (prefs.highlightPalette[0] ?? DEFAULT_CHAR_HIGHLIGHT) : DEFAULT_CHAR_HIGHLIGHT;
 }
 
 /** 搜索历史：去重、新的在前、最多留 12 条。 */
@@ -195,32 +203,8 @@ export function clearSearchHistory(): void {
     store.set((s) => ({ ...s, searchHistory: [] }));
 }
 
-export function setReadingMode(readingMode: ReadingMode): void {
-    store.set((s) => ({ ...s, readingMode }));
-}
-
-/** 单书共读模式（书详情的「本书设置」里改，v3 §4.6）。 */
-export function setBookMode(bookId: string, mode: ReadingMode): void {
-    store.set((s) => ({ ...s, bookModes: { ...s.bookModes, [bookId]: mode } }));
-}
-
-/** 这本书的共读模式：没单独设过就落回默认值。 */
-export function readingModeFor(prefs: ReaderPrefs, bookId: string): ReadingMode {
-    return prefs.bookModes?.[bookId] ?? prefs.readingMode;
-}
-
 export function setLastBook(bookId: string | undefined): void {
     store.set((s) => ({ ...s, lastBookId: bookId }));
-}
-
-/** 角色读书开关（书库页）。默认关——开了才进书库、才能被喊来共读。 */
-export function setReadingChar(charId: string, on: boolean): void {
-    store.set((s) => ({
-        ...s,
-        readingChars: on
-            ? Array.from(new Set([...s.readingChars, charId]))
-            : s.readingChars.filter((id) => id !== charId),
-    }));
 }
 
 export function setCssGlobal(cssGlobal: string): void {

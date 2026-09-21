@@ -1,40 +1,25 @@
-// 读书模块 · 划线设置（2026-09-15）
+// 读书模块 · 划线设置（2026-09-15；09-16 换成「调色台」那套）
 //
 // 她那天说的是两件事：① 别在选中文字的浮层里摆一排色卡（「跟眼影盘一样」）——
 // 划线颜色去设置里改；② 划线颜色**四处都没打通**。
-//
 // 所以这里就是**唯一那一个**改颜色的地方，三处入口共用同一个弹卡：
 //   阅读页「更多 → 划线设置」/ 书详情「划线设置」/ 设置页「阅读设置 → 划线设置」
 // 名字一律叫「划线设置」（她 2026-09-15：「我的颜色是啥，划线设置就叫划线设置」）。
 //
-// 颜色模型也跟着收敛成一条：**谁划的 → 用谁那支笔**（prefs.highlightColors[ownerId]）。
+// **她 09-16 又改了口径**：别搞色相/明度两条滑杆，**照情侣页调色台的样子来**——
+// 一个原生取色框（点开系统色轮随便调），下面配一排存下来的颜色。
+// 所以 huelum 那套滑杆（和拼渐变的 hslHex）整块删掉了。
+//
+// 颜色模型没变：**谁划的 → 用谁那支笔**（prefs.highlightColors[ownerId]）。
 // 这个弹卡改的是她自己那支（'user'）；角色各自的笔等书库页做（那页会全改一遍）。
 
-import { useState } from 'react';
 import {
     highlightColorOf, removeHighlightColor, saveHighlightColor, setHighlightColor, useReaderPrefs,
 } from './readerPrefs';
 
-/** HSL → #rrggbb。运行时算，骨架层/组件里都不写死色值（守卫测试盯着这条）。 */
-export function hslHex(h: number, s: number, l: number): string {
-    const a = s * Math.min(l, 1 - l);
-    const f = (n: number): string => {
-        const k = (n + h / 30) % 12;
-        const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-        return Math.round(255 * c).toString(16).padStart(2, '0');
-    };
-    return `#${f(0)}${f(8)}${f(4)}`;
-}
-
-/** 色相条：直接拿色相环上的点拼渐变（写死色值会被守卫测试拦） */
-const HUE_STRIP = `linear-gradient(90deg, ${[0, 60, 120, 180, 240, 300, 360].map((h) => hslHex(h, 1, 0.5)).join(', ')})`;
-
 export default function HighlightColorSheet({ onClose }: { onClose: () => void }) {
     const prefs = useReaderPrefs();
     const mine = highlightColorOf(prefs, 'user');
-    const [hue, setHue] = useState(45);
-    const [lum, setLum] = useState(0.62);
-    const draft = hslHex(hue, 0.75, lum);
 
     return (
         <div className="rd-sheet-mask" onClick={onClose}>
@@ -42,12 +27,27 @@ export default function HighlightColorSheet({ onClose }: { onClose: () => void }
                 <div className="rd-sheet-grip" />
                 <div className="rd-sheet-title">划线设置</div>
 
+                {/* 我的笔：取色框（系统色轮）+ 预览——照情侣页调色台那种调法 */}
                 <div className="rd-row">
-                    <span className="rd-row-label">现在这支</span>
-                    <span className="rd-hl-preview" style={{ background: mine }} />
+                    <span className="rd-row-label">
+                        我的笔
+                        <span className="rd-muted" style={{ display: 'block' }}>点右边的色块，系统色轮里随便调</span>
+                    </span>
+                    <span className="rd-row-pick">
+                        <span className="rd-hl-preview" style={{ background: mine }} />
+                        <input
+                            className="rd-color-in"
+                            type="color"
+                            value={mine}
+                            aria-label="我的划线颜色"
+                            onChange={(e) => setHighlightColor(e.target.value)}
+                        />
+                    </span>
                 </div>
 
-                <div className="rd-group-head"><span>我的颜色</span><span>{prefs.highlightPalette.length} 支</span></div>
+                <div className="rd-group-head" style={{ marginTop: 'var(--rd-space-4)' }}>
+                    <span>存下来的颜色</span><span>{prefs.highlightPalette.length} 支</span>
+                </div>
                 <div className="rd-hunt-hist">
                     {prefs.highlightPalette.map((c) => (
                         <button
@@ -60,29 +60,12 @@ export default function HighlightColorSheet({ onClose }: { onClose: () => void }
                         />
                     ))}
                 </div>
-                <div className="rd-muted" style={{ marginTop: 8 }}>
-                    点一支就用它；再点一下当前那支（或长按/右键）可以从库里删掉。划线时用的就是这支。
-                </div>
 
-                <div className="rd-group-head" style={{ marginTop: 'var(--rd-space-4)' }}><span>调一支新的</span></div>
-                <div className="rd-row" style={{ marginBottom: 'var(--rd-space-2)' }}>
-                    <span className="rd-row-label">颜色</span>
-                    <span className="rd-hl-preview" style={{ background: draft }} />
-                </div>
-                <input
-                    className="rd-slider rd-slider-hue"
-                    type="range" min={0} max={360} step={1} value={hue}
-                    onChange={(e) => setHue(Number(e.target.value))}
-                    style={{ background: HUE_STRIP }}
-                />
-                <input
-                    className="rd-slider"
-                    type="range" min={20} max={90} step={1} value={Math.round(lum * 100)}
-                    onChange={(e) => setLum(Number(e.target.value) / 100)}
-                />
                 <div className="rd-btn-row" style={{ marginTop: 'var(--rd-space-3)' }}>
-                    <button className="rd-btn rd-btn-primary" onClick={() => saveHighlightColor(draft)}>存进我的颜色</button>
-                    <button className="rd-btn" onClick={() => setHighlightColor(draft)}>直接用它</button>
+                    <button className="rd-btn" onClick={() => saveHighlightColor(mine)}>把现在这支存进库</button>
+                </div>
+                <div className="rd-muted" style={{ marginTop: 'var(--rd-space-2)' }}>
+                    点一支就用它；再点一下当前那支（或长按/右键）可以从库里删掉。划线时用的就是这支。
                 </div>
 
                 <div className="rd-muted" style={{ marginTop: 'var(--rd-space-3)' }}>

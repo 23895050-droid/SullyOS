@@ -1941,6 +1941,57 @@ const MessageItem = React.memo(({
             );
         }
 
+        // 共读卡片（reader_coread 三态：邀请 / 摘要 / 结束共读）
+        // 她的文档钉的口径：开始【xx 邀请 xx 一起读书】→（摘要 1）（摘要 2）… →【结束共读】（共读期间活动记录）
+        if (m.metadata?.source === 'reader_coread') {
+            const card = (m.metadata.coread || {}) as {
+                title?: string; opened?: boolean; closed?: boolean;
+                summary?: string; brief?: string[];
+            };
+            const SERIF = "Georgia, 'Times New Roman', 'Songti SC', 'STKaiti', 'KaiTi', serif";
+            const KIND = card.opened ? '邀请一起读书' : card.closed ? '结束共读' : '共读摘要';
+            const ICON = card.opened ? '📖' : card.closed ? '🔖' : '🖋️';
+            // 摘要走 content（`[共读：书名] 正文`）；邀请也走 content；结束共读的流水在 metadata.brief
+            const body = (displayText || '').replace(/^\[共读：[^\]]*\]\s*/, '').trim();
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div
+                            className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md"
+                            style={{ border: '1px solid rgba(120,113,108,0.22)', background: 'linear-gradient(180deg, #faf8f5 0%, #fffefc 32%, #f4f1ec 100%)' }}
+                        >
+                            <div className="px-4 pt-3 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(120,113,108,0.14)' }}>
+                                <span className="text-base">{ICON}</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[9px] tracking-[0.18em] uppercase" style={{ color: '#a8a29e' }}>{KIND}</div>
+                                    <div className="text-[13px] truncate" style={{ color: '#44403c', fontFamily: SERIF }}>《{card.title || ''}》</div>
+                                </div>
+                            </div>
+                            <div className="px-4 py-3">
+                                <div className="text-[12px] leading-relaxed whitespace-pre-wrap" style={{ color: '#57534e', fontFamily: SERIF }}>
+                                    {body || '（这一次没有留下文字）'}
+                                </div>
+                                {card.closed && Array.isArray(card.brief) && card.brief.length > 0 && (
+                                    <div className="mt-2.5 pt-2.5" style={{ borderTop: '1px dashed rgba(120,113,108,0.28)' }}>
+                                        {card.brief.map((line, i) => (
+                                            <div key={i} className="text-[10.5px] leading-relaxed" style={{ color: '#78716c' }}>{line}</div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         // Camera a2 一起看照片摘要 — 漂亮的卡片，可编辑
         if (m.metadata?.source === 'camera_a2') {
             const lines = displayText.split('\n').filter(Boolean);
@@ -2109,6 +2160,57 @@ const MessageItem = React.memo(({
                                     <div className="mt-2 pt-2" style={{ borderTop: '1px dashed rgba(139,110,80,0.2)' }}>
                                         <div className="text-[9px] font-bold tracking-wider" style={{ color: '#b08a5a', marginBottom: 3 }}>感受记录</div>
                                         <div className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: '#6a5a4e' }}>{card.feelings}</div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 书房笔记转发卡片（reader_forward：原文那句 + 批注 + 讨论；纸色卡 + 留笔记那个人的笔色左缘条）
+        if (m.metadata?.source === 'reader_forward') {
+            const card = (m.metadata.forwardCard || {}) as { kind?: string; title?: string; subtitle?: string; quote?: string; note?: string; thread?: string[]; color?: string };
+            const SERIF = "Georgia, 'Times New Roman', 'Songti SC', 'STKaiti', 'KaiTi', serif";
+            const accent = card.color || '#a9946f';
+            return (
+                <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
+                    {selectionMode && (
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer z-20" onClick={() => onToggleSelect(m.id)}>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white/80'}`}>
+                                {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                            </div>
+                        </div>
+                    )}
+                    <div className="w-full px-4 my-3" {...interactionProps}>
+                        <div
+                            className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md relative"
+                            style={{ border: '1.5px solid #e6dfd0', background: 'linear-gradient(180deg, #fdfcf8 0%, #f7f2e8 100%)' }}
+                        >
+                            <div className="absolute left-0 top-0 bottom-0 pointer-events-none" style={{ width: 3, background: accent }} />
+                            <div className="relative pl-4 pr-3 pt-2.5 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,120,90,0.14)' }}>
+                                <span className="text-base">📖</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#8a7a5e' }}>笔记 · {card.kind || '批注'}</div>
+                                    <div className="text-[11px] font-semibold truncate" style={{ color: '#4a4436', fontFamily: SERIF }}>{card.title || ''}</div>
+                                </div>
+                                {card.subtitle && <div className="text-[9px] shrink-0 max-w-[45%] truncate" style={{ color: '#b3a68f' }}>{card.subtitle}</div>}
+                            </div>
+                            <div className="relative pl-4 pr-3 py-2.5">
+                                {card.quote ? (
+                                    <div className="text-[11px] leading-relaxed" style={{ color: '#5c5648', fontFamily: SERIF }}>
+                                        <span style={{ color: accent }}>“</span>{card.quote}<span style={{ color: accent }}>”</span>
+                                    </div>
+                                ) : null}
+                                {card.note ? (
+                                    <div className="text-[11px] leading-relaxed mt-2" style={{ color: '#3f3a30' }}>{card.note}</div>
+                                ) : null}
+                                {card.thread && card.thread.length > 0 ? (
+                                    <div className="mt-2 pt-2 flex flex-col gap-1" style={{ borderTop: '1px dashed rgba(139,120,90,0.28)' }}>
+                                        {card.thread.map((line, i) => (
+                                            <div key={i} className="text-[10px] leading-relaxed" style={{ color: '#7d7360' }}>{line}</div>
+                                        ))}
                                     </div>
                                 ) : null}
                             </div>

@@ -13,16 +13,17 @@
 // 所以这里贴的规则永远不需要 !important（v3 的 V5）。
 
 import { useState, type ReactNode } from 'react';
-import { ArrowLeft, BookOpen, PaintBrush, Pen, Code, TextAa } from '@phosphor-icons/react';
+import { ArrowLeft, BookOpen, PaintBrush, Pen, Code, TextAa, ChatCircleDots } from '@phosphor-icons/react';
 import {
     DEFAULT_TYPOGRAPHY, setCssGlobal, setShelfAsc, setShelfGrouped, setShelfLayout,
     setTheme, setTypography, useReaderPrefs, type ShelfLayout,
 } from '../readerPrefs';
 import { READER_SKINS } from '../readerSkinPresets';
 import HighlightColorSheet from '../HighlightColorSheet';
+import ReaderPromptsSheet from '../ReaderPromptsSheet';
 import { highlightColorOf } from '../readerPrefs';
 
-type Sheet = null | 'size' | 'font' | 'lineHeight' | 'paraGap' | 'indent' | 'margin' | 'layout' | 'hl' | 'css';
+type Sheet = null | 'size' | 'font' | 'lineHeight' | 'paraGap' | 'indent' | 'margin' | 'layout' | 'hl' | 'css' | 'prompts';
 type Page = 'root' | 'read' | 'look';
 
 const LAYOUT_OPTS: Array<{ key: ShelfLayout; label: string }> = [
@@ -67,7 +68,7 @@ function SliderRow({ label, value, children }: { label: string; value: string; c
     );
 }
 
-const ico = (n: 1 | 2 | 3 | 4, node: ReactNode) => (
+const ico = (n: 1 | 2 | 3 | 4 | 5, node: ReactNode) => (
     <span className={`rd-row-ico${n > 1 ? ` rd-row-ico-${n}` : ''}`}>{node}</span>
 );
 
@@ -209,6 +210,14 @@ export default function ReaderSettings() {
                 </div>
             </div>
 
+            {/* 她 09-16：共读/摘要的提示词放这儿改（面板里只留「什么时候总结」的规则） */}
+            <div className="rd-section-title">一起读书</div>
+            <div className="rd-card rd-card-flush">
+                <div className="rd-list">
+                    <Row label="读书提示词" value="共读三条" onClick={() => setSheet('prompts')} icon={ico(5, <ChatCircleDots size={16} weight="bold" />)} />
+                </div>
+            </div>
+
             <div className="rd-muted" style={{ marginTop: 'var(--rd-space-4)' }}>
                 共读模式（专注 / 随心）是单书设置——在那本书的信息页右上角 ⚙ 里改。
             </div>
@@ -288,6 +297,7 @@ function SheetHost({ sheet, setSheet, t, prefs, cssDraft, setCssDraft }: {
     }
 
     if (sheet === 'hl') return <HighlightColorSheet onClose={close} />;
+    if (sheet === 'prompts') return <ReaderPromptsSheet onClose={close} />;
 
     // css
     return (

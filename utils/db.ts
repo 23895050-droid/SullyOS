@@ -28,7 +28,8 @@ const DB_NAME = 'AetherOS_Data';
 // v70：剧场面具箱（原创人物面具）；角色面具仍只存 characterId，不复制神经链接资料。
 // v71：角色小红书伪主页；发帖归属与可删除的自由活动日志分离。
 // v72：image_receipts 近期接收 — 生图独立备份站（fork 自有 store，与聊天消息解耦）。
-const DB_VERSION = 73; // v73: 读书模块（fork 自建）新增 rd_* 五张表
+// v74：读书互动 —— 角色自主阅读的活动记录 rd_roam（语义见 utils/reader/readerDb.ts）。
+const DB_VERSION = 74; // v74: 读书互动新增 rd_roam；v73: 读书模块 rd_* 五张表
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -500,6 +501,14 @@ export const openDB = (): Promise<IDBDatabase> => {
       if (!db.objectStoreNames.contains('rd_progress')) {
           const rpStore = db.createObjectStore('rd_progress', { keyPath: ['bookId', 'ownerId'] });
           rpStore.createIndex('bookId', 'bookId', { unique: false });
+      }
+
+      // ─── 读书互动（角色自主阅读）v74 ──────────────────────────────
+      // 角色每次互动的活动记录（含内心活动）；语义见 utils/reader/readerDb.ts。
+      if (!db.objectStoreNames.contains('rd_roam')) {
+          const rrStore = db.createObjectStore('rd_roam', { keyPath: 'id' });
+          rrStore.createIndex('bookId', 'bookId', { unique: false });
+          rrStore.createIndex('charId', 'charId', { unique: false });
       }
     };
   });
