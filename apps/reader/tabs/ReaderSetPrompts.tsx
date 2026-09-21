@@ -132,7 +132,7 @@ export default function ReaderSetPrompts({ onBack, notify }: Props) {
     const curName = presetNameOf(editing, presetStore);
 
     return (
-        <div className="rd-screen" data-rd-page="settings-prompts">
+        <div className="rd-screen page-focus-once" data-rd-page="settings-prompts">
             <div className="rd-headbar">
                 <button className="rd-back" onClick={onBack}><ArrowLeft size={18} />设置</button>
                 <div className="rd-headbar-title">读书提示词</div>

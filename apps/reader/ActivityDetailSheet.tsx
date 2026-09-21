@@ -6,9 +6,9 @@
 //
 // 角色个人页的「最近状态」弹窗也走这张卡：多给一个 title、往期挂在 extra 里。
 
-import type { ReactNode } from 'react';
-import { X } from '@phosphor-icons/react';
+import { useState, type ReactNode } from 'react';
 import type { RdRoamActivity } from '../../utils/reader/readerDb';
+import { deleteRoamActivity } from '../../utils/reader/readerDb';
 import { fmtTok } from '../../utils/reader/readerDigest';
 
 // 数字口径（1.2k / 3.4w）现在住在 utils/reader/readerDigest，这里只是**转发**一下
@@ -93,15 +93,33 @@ interface Props {
     retrying?: boolean;
     /** 补摘的结果 / 为什么补不了，写在按钮下面 */
     retryNote?: string;
+    /**
+     * 这条活动记录删掉之后叫一声（父组件负责关卡片 + 重新翻一遍）。
+     * **传了才有删除入口**——一次活动 = 这个 group 下的所有调用记录，一起删（她 09-21）。
+     */
+    onDeleted?: () => void;
     onClose: () => void;
 }
 
 export default function ActivityDetailSheet({
-    calls, ownerName, bookTitle, title, extra, onRetry, retrying, retryNote, onClose,
+    calls, ownerName, bookTitle, title, extra, onRetry, retrying, retryNote, onDeleted, onClose,
 }: Props) {
     const first = calls[0];
     const mine = first?.charId === 'user';
     const hasSummary = calls.some((a) => a.kind === 'summary');
+    const [deleting, setDeleting] = useState(false);
+
+    const doDelete = async () => {
+        setDeleting(true);
+        try {
+            // 一次活动 = 一个 group 下的每一条调用，一起删干净（留着半条会让活动卡少一行）
+            for (const a of calls) await deleteRoamActivity(a.id);
+            onDeleted?.();
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     return (
         <div className="rd-sheet-mask" onClick={onClose}>
             <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
@@ -128,11 +146,15 @@ export default function ActivityDetailSheet({
 
                 {extra}
 
-                <div className="rd-actions">
-                    <button className="rd-btn rd-btn-block" onClick={onClose}>
-                        <X size={14} /> 关掉
-                    </button>
-                </div>
+                {/* 原来这儿有一颗「关掉」——点外面、点上面那根把手都能关，是多余的（她 09-21 删的）。
+                    换成删除。 */}
+                {onDeleted && (
+                    <div className="rd-actions" style={{ marginTop: 'var(--rd-space-4)' }}>
+                        <button className="rd-btn rd-btn-danger rd-btn-block" onClick={() => void doDelete()} disabled={deleting}>
+                            {deleting ? '正在删…' : '删掉这次活动记录'}
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );

@@ -204,7 +204,7 @@ export default function ReaderSetMount({ onBack }: { onBack: () => void }) {
 
     if (characters.length === 0) {
         return (
-            <div className="rd-screen" data-rd-page="settings-mount">
+            <div className="rd-screen page-focus-once" data-rd-page="settings-mount">
                 <div className="rd-headbar">
                     <button className="rd-back" onClick={onBack}><ArrowLeft size={18} />设置</button>
                     <div className="rd-headbar-title">挂到聊天里</div>
@@ -215,7 +215,7 @@ export default function ReaderSetMount({ onBack }: { onBack: () => void }) {
     }
 
     return (
-        <div className="rd-screen" data-rd-page="settings-mount">
+        <div className="rd-screen page-focus-once" data-rd-page="settings-mount">
             <div className="rd-headbar">
                 <button className="rd-back" onClick={onBack}><ArrowLeft size={18} />设置</button>
                 <div className="rd-headbar-title">挂到聊天里</div>

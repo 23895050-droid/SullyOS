@@ -349,12 +349,14 @@ export default function ReaderNotes({ onOpenAt, notify }: Props) {
 
                                             {opened && (
                                                 <div className="rd-nb-body">
-                                                    {/* 批注与原文 */}
+                                                    {/* 批注（衬线大字，跟下面接话那几条在字体上分开——她 09-21） */}
                                                     <div className="rd-nb-note">
                                                         {n.ann.note || <span className="rd-muted">这条只划了线，没写批注。</span>}
                                                     </div>
+                                                    {/* 展开里**不再重复原文**：收着的那一行已经是原文了
+                                                        （她 09-21：「第二行还有原文挺奇怪的，因为表面已经有了」）。
+                                                        这一行现在只放动作。 */}
                                                     <div className="rd-nb-src">
-                                                        <span className="rd-nb-src-text">“{n.ann.anchor.text}”</span>
                                                         <button
                                                             className="rd-nb-goto"
                                                             onClick={() => setForwarding({ book: g.book, row: n })}
@@ -371,7 +373,7 @@ export default function ReaderNotes({ onOpenAt, notify }: Props) {
                                                         )}
                                                     </div>
 
-                                                    {/* 讨论内容 */}
+                                                    {/* 讨论内容（完整记录：谁说的都在，不挑人） */}
                                                     <div className="rd-nb-thread">
                                                         {msgs.length === 0
                                                             ? <div className="rd-muted">这条下面还没人接话。</div>

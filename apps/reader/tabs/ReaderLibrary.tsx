@@ -330,6 +330,7 @@ export default function ReaderLibrary({ onOpenChar, onOpenActs, notify }: Props)
                     bookTitle={titleOf(statusHead.bookId)}
                     title={`${nameOf(statusHead.charId)} 的状态`}
                     onClose={() => setStatusOpen(false)}
+                    onDeleted={() => { setStatusOpen(false); setToken((n) => n + 1); }}
                     {...retryProps(statusGroup)}
                     extra={past.length > 0 ? (
                         <div style={{ marginTop: 'var(--rd-space-5)' }}>
@@ -364,6 +365,7 @@ export default function ReaderLibrary({ onOpenChar, onOpenActs, notify }: Props)
                     ownerName={nameOf(act.ownerId)}
                     bookTitle={titleOf(act.bookId)}
                     onClose={() => { setAct(null); setRetryNote(''); }}
+                    onDeleted={() => { setAct(null); setToken((n) => n + 1); }}
                     {...retryProps(act.calls)}
                 />
             )}

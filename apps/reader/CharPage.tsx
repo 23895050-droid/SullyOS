@@ -400,9 +400,9 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
     const noteFoldOf = (n: NoteRow, mode: Feed, withDot = false) => {
         const msgs = n.thread?.messages ?? [];
         const said = msgs.filter((m) => m.role === 'char' && m.charId === charId);
-        const text = n.made
-            ? (n.ann.note || n.ann.anchor.text)
-            : (said[said.length - 1]?.content ?? n.ann.anchor.text);
+        // 表面那行「他写的/他说的」：他自己的笔记就是批注，参与的讨论就是他最后接的那句。
+        // **不再拿原文兜底**——原文现在有自己的那一行（她 09-21：个人页表面也要看得见原文）
+        const text = n.made ? (n.ann.note ?? '') : (said[said.length - 1]?.content ?? '');
         const at = n.made ? n.at : n.mineAt;
         return (
             <NoteFold
@@ -413,8 +413,19 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                     `第 ${n.chapterIdx + 1} 章`,
                     fmtDay(at),
                 ].filter(Boolean).join(' · ')}
-                text={text}
                 quote={n.ann.anchor.text}
+                text={text}
+                /* 展开里那块**原批注**：挂的是别人（你 / 别的角色）的批注时才补——
+                   他自己的笔记已经在表面那行了，再摆一遍就是重复（她 09-21 的截图：
+                   她那条「连钓鱼都让人良心不安吗」原来整个不在展开里）。 */
+                note={!n.made ? (
+                    <div className="rd-fn-note">
+                        <div className="rd-fn-note-head">{nameOf(n.ann.ownerId)} 的批注</div>
+                        <div className="rd-fn-note-text">
+                            {n.ann.note || <span className="rd-muted">只划了线，没写批注。</span>}
+                        </div>
+                    </div>
+                ) : undefined}
                 thread={msgs.length > 0 ? (
                     <div className="rd-fn-thread">
                         {msgs.map((m) => (
@@ -469,7 +480,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
     // ── 内页：个人书架（照参考图：2 行标题 + 三栏 + 三列网格，**不横着划**）──
     if (view === 'shelf') {
         return (
-            <div className="rd-screen" data-rd-page="char-shelf">
+            <div className="rd-screen" data-rd-page="char-shelf" key={view}>
                 <div className="rd-headbar">
                     <button className="rd-back" onClick={() => setView('main')}><ArrowLeft size={18} />返回</button>
                 </div>
@@ -526,7 +537,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
         const book = s?.book ?? notes.find((n) => n.book.id === bookId)?.book ?? null;
         if (!book) {
             return (
-                <div className="rd-screen" data-rd-page="char-book">
+                <div className="rd-screen" data-rd-page="char-book" key={view}>
                     <div className="rd-headbar">
                         <button className="rd-back" onClick={() => setView(bookFrom)}><ArrowLeft size={18} />返回</button>
                     </div>
@@ -569,7 +580,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
         ].sort((a, b) => b.at.localeCompare(a.at));
 
         return (
-            <div className="rd-screen" data-rd-page="char-book">
+            <div className="rd-screen" data-rd-page="char-book" key={view}>
                 <div className="rd-headbar">
                     <button className="rd-back" onClick={() => setView(bookFrom)}><ArrowLeft size={18} />返回</button>
                 </div>
@@ -620,7 +631,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
             api: { baseUrl: '', apiKey: '', model: '', ...(p.api ?? {}), ...patch },
         });
         return (
-            <div className="rd-screen" data-rd-page="char-api">
+            <div className="rd-screen" data-rd-page="char-api" key={view}>
                 <div className="rd-headbar">
                     <button className="rd-back" onClick={() => setView('settings')}><ArrowLeft size={18} />设置</button>
                     <div className="rd-headbar-title">{name} 自己的模型</div>
@@ -674,7 +685,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
     // ── 内页：他的设置（右上角那个齿轮进来的；主页上不放设置项）──
     if (view === 'settings') {
         return (
-            <div className="rd-screen" data-rd-page="char-settings">
+            <div className="rd-screen" data-rd-page="char-settings" key={view}>
                 <div className="rd-headbar">
                     <button className="rd-back" onClick={() => setView('main')}><ArrowLeft size={18} />{name}</button>
                     <div className="rd-headbar-title">他的设置</div>
@@ -816,7 +827,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
     const feedCount = { notes: feedNotes.length, talk: feedTalk.length, acts: feedActs.length };
 
     return (
-        <div className="rd-screen" data-rd-page="char">
+        <div className="rd-screen" data-rd-page="char" key={view}>
             <div className="rd-headbar">
                 <button className="rd-back" onClick={onBack}><ArrowLeft size={18} />书库</button>
                 <button className="rd-icon-btn rd-headbar-end" aria-label="他的设置" onClick={() => setView('settings')}>
@@ -996,6 +1007,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                     bookTitle={titleOf(latestHead.bookId)}
                     title={`${name} 的状态`}
                     onClose={() => setStateOpen(false)}
+                    onDeleted={() => { setStateOpen(false); setReload((n) => n + 1); }}
                     extra={groups.length > 1 ? (
                         <div style={{ marginTop: 'var(--rd-space-5)' }}>
                             <div className="rd-row-label">往期</div>
@@ -1028,6 +1040,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                     ownerName={name}
                     bookTitle={titleOf(act[0]?.bookId)}
                     onClose={() => { setAct(null); setRetryNote(''); }}
+                    onDeleted={() => { setAct(null); setRetryNote(''); setReload((n) => n + 1); }}
                     // 摘要没配 / 那一趟失败 → 这里能补摘（她 09-20 定的位置）
                     {...(canRetrySummary(act)
                         ? { onRetry: () => void doRetry(act), retrying, retryNote }

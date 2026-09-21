@@ -39,7 +39,7 @@ export default function ReaderSetApi({ onBack, onOpenChar }: Props) {
     };
 
     return (
-        <div className="rd-screen" data-rd-page="settings-api">
+        <div className="rd-screen page-focus-once" data-rd-page="settings-api">
             <div className="rd-headbar">
                 <button className="rd-back" onClick={onBack}><ArrowLeft size={18} />设置</button>
                 <div className="rd-headbar-title">模型与接口</div>

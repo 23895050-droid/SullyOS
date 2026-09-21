@@ -107,7 +107,7 @@ export default function ReaderSetData({ onBack, notify }: Props) {
     };
 
     return (
-        <div className="rd-screen" data-rd-page="settings-data">
+        <div className="rd-screen page-focus-once" data-rd-page="settings-data">
             <div className="rd-headbar">
                 <button className="rd-back" onClick={onBack}><ArrowLeft size={18} />设置</button>
                 <div className="rd-headbar-title">数据导入导出</div>

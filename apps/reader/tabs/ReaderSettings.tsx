@@ -131,7 +131,7 @@ export default function ReaderSettings({ onOpenChar, notify, page: pageProp, onP
     // ── 子页 · 阅读设置（图 11 的 LAYOUT / APPEARANCE / INTERACTION）──
     if (page === 'read') {
         return (
-            <div className="rd-screen rd-screen-tight page-focus-once" data-rd-page="settings-read">
+            <div className="rd-screen rd-screen-tight page-focus-once" data-rd-page="settings-read" key={page}>
                 {head('阅读设置', '')}
 
                 <div className="rd-section-title">版式</div>
@@ -168,7 +168,7 @@ export default function ReaderSettings({ onOpenChar, notify, page: pageProp, onP
     // ── 子页 · 外观设置（图 9 的 SHELF / THEME / APPEARANCE）──
     if (page === 'look') {
         return (
-            <div className="rd-screen rd-screen-tight page-focus-once" data-rd-page="settings-look">
+            <div className="rd-screen rd-screen-tight page-focus-once" data-rd-page="settings-look" key={page}>
                 {head('外观设置', '')}
 
                 <div className="rd-section-title">书架</div>
@@ -235,7 +235,7 @@ export default function ReaderSettings({ onOpenChar, notify, page: pageProp, onP
 
     // ── 首页（图 10 的排版：分组 + 彩图标 + 右箭头）──
     return (
-        <div className="rd-screen" data-rd-page="settings">
+        <div className="rd-screen" data-rd-page="settings" key={page}>
             <div className="rd-head">
                 <div className="rd-head-main">
                     <div className="rd-head-title">设置</div>

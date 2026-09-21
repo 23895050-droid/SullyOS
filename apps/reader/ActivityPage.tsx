@@ -330,6 +330,7 @@ export default function ActivityPage({ notify, onBack }: Props) {
                     ownerName={nameOf(act.ownerId)}
                     bookTitle={titleOf(act.bookId)}
                     onClose={() => { setAct(null); setRetryNote(''); }}
+                    onDeleted={() => { setAct(null); setToken((n) => n + 1); }}
                     {...(canRetrySummary(act.calls)
                         ? { onRetry: () => void doRetry(act.calls), retrying, retryNote }
                         : {})}

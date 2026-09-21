@@ -48,6 +48,11 @@ export const READER_SKELETON_CSS = `
      映射见 ReaderSkinPreset.typographyVars。 */
   --rd-font-heading: Georgia, "Songti SC", "Noto Serif SC", serif;
   --rd-font-body: -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  /* 界面/接话那一路的无衬线栈，**不跟着「字体」设置变**。
+     为什么单独一个：默认排版下 --rd-font-body 和 --rd-font-heading 都是 Georgia，
+     于是「批注用衬线、接话用无衬线」这个区分会两边一模一样（她 09-21 要的字体区分）。
+     接话是聊天，本来就该是无衬线。 */
+  --rd-font-ui: -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
   --rd-fs-hero: 30px;
   --rd-fs-title: 24px;
   --rd-fs-lg: 20px;
@@ -139,6 +144,25 @@ export const READER_SKELETON_CSS = `
 .rd-screen::-webkit-scrollbar { width: 0; }
 .rd-screen-flush { padding-left: 0; padding-right: 0; }
 .rd-screen-tight { padding-top: calc(var(--chrome-top, 0px) + 6px); }
+
+/* ── 页面入场：聚焦式（她 09-21 反馈：点进去没有过渡，退出去才有）────────
+   挂在 .rd-screen 上 = **整屏页（他的个人页 / 活动记录 / 书详情）自动有**，不用逐个记得加。
+   ⚠️ 但**页签那两层里的页面根不自己播**——那两层本来就在做交叉转场
+   （旧页失焦淡出 + 新页聚焦淡入），两边都播就是糊两层。
+   ⚠️ 这条抑制**不能写成「转场那 490ms 里 animation:none」**：转场一结束规则失效，
+   animation 从 none 变回 keyframes = 浏览器当成一条新动画从头播一遍，
+   于是「过渡多出现一次」（她 09-21 报的，就是这么来的）。所以按结构抑制、不随时间变。
+   页签里的**内页**（设置子页、书架搜索那种）想要自己那一下，就在根上挂 page-focus-once。
+   ⚠️ 动效类不带 fill：播完 filter 自动消失，不留常驻 containing block。
+   ⚠️ **同一个组件里 early-return 出来的两个 .rd-screen，React 复用的是同一个 DOM 节点**
+   （元素类型和 key 都没变）——不重挂就不重播。所以「页内换页」还得给根上挂 key
+   （CharPage 的 key={view} / ReaderSettings 的 key={page}）才会有那一下。 */
+.rd-screen { animation: focusIn 340ms cubic-bezier(0.33, 0.7, 0.4, 1); }
+.rd-tab .rd-screen { animation: none; }
+.rd-tab .rd-screen.page-focus-once { animation: focusIn 340ms cubic-bezier(0.33, 0.7, 0.4, 1); }
+@media (prefers-reduced-motion: reduce) {
+    .rd-screen, .rd-tab .rd-screen.page-focus-once { animation-duration: 1ms; }
+}
 
 /* 带返回键的窄顶栏（书详情用；阅读页那根在下面 .rd-reader-bar） */
 .rd-headbar { position: relative; display: flex; align-items: center; gap: 2px; margin-bottom: var(--rd-space-4); }
@@ -250,6 +274,8 @@ export const READER_SKELETON_CSS = `
 .rd-btn:active { background: var(--rd-bg-2); }
 .rd-btn-primary { background: var(--rd-accent); border-color: var(--rd-accent); color: var(--rd-on-accent); }
 .rd-btn-soft { background: var(--rd-accent-soft); border-color: transparent; color: var(--rd-accent); }
+/* 危险动作（删一条记录这种）：描边红字，别做成实心大红——它不是主按钮 */
+.rd-btn-danger { background: transparent; border-color: var(--rd-danger); color: var(--rd-danger); }
 /* 通栏按钮：字号跟 .rd-btn 一样（15px）——以前是 20px，她 09-16 说「字太巨大了」 */
 .rd-btn-block { display: block; width: 100%; text-align: center; padding: var(--rd-space-3); font-size: var(--rd-fs-md); border-radius: var(--rd-r-md); }
 .rd-btn:disabled { opacity: 0.45; }
@@ -633,13 +659,14 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
   padding: var(--rd-space-3) var(--rd-space-3) var(--rd-space-4);
   margin-bottom: var(--rd-space-3);
 }
-.rd-nb-note { font-size: var(--rd-fs-sm); line-height: 1.75; }
+.rd-nb-note {
+  /* 批注用**标题那套衬线**，跟下面接话的聊天气泡在字体上分开（她 09-21） */
+  font-family: var(--rd-font-heading); font-size: var(--rd-fs-md); line-height: 1.75;
+}
 .rd-nb-src {
   display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--rd-space-2) var(--rd-space-3);
   padding-top: var(--rd-space-3); border-top: 1px solid var(--rd-rule-soft);
 }
-/* 原文自己占一整行——不然「转发 / 查看原文」会插进引文中间（长句子时字和按钮缠在一起） */
-.rd-nb-src-text { flex: 1 1 100%; min-width: 0; color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.65; }
 .rd-nb-goto {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px;
   border: 0; background: transparent; color: var(--rd-accent);
@@ -651,8 +678,8 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 }
 .rd-nb-msg { display: flex; flex-direction: column; gap: var(--rd-space-1); }
 .rd-nb-msg-me { align-items: flex-end; text-align: right; }
-.rd-nb-msg-head { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
-.rd-nb-msg-text { font-size: var(--rd-fs-sm); line-height: 1.75; }
+.rd-nb-msg-head { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-family: var(--rd-font-ui); }
+.rd-nb-msg-text { font-size: var(--rd-fs-sm); line-height: 1.75; font-family: var(--rd-font-ui); }
 
 /* 阅读风格（气质 / 偏好）那两段正文 */
 .rd-style-text { font-size: var(--rd-fs-sm); line-height: 1.75; white-space: pre-wrap; }
@@ -1521,6 +1548,29 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 .rd-css-ref-row:active { background: var(--rd-bg-2); }
 .rd-css-ref-name { font-family: var(--rd-font-heading); font-size: var(--rd-fs-sm); flex: 0 0 auto; min-width: 116px; }
 .rd-css-ref-what { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); flex: 1 1 auto; min-width: 0; }
+
+/* ── 小圆圈问号（她 09-21：解释全收进这儿）────────────────────────────
+   界面上不再写解释性的散文和括号；一枚小问号，点一下在原地展开。
+   展开那块 flex: 1 1 100% = 在 flex 行里自己换到下一行（标题旁边也能用）。 */
+.rd-help {
+  width: 18px; height: 18px; flex: 0 0 auto; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-pill);
+  background: transparent; color: var(--rd-ink-soft);
+  align-self: center;
+}
+.rd-help-on { background: var(--rd-accent-soft); border-color: transparent; color: var(--rd-accent); }
+.rd-help-body {
+  flex: 1 1 100%; min-width: 0; margin-top: var(--rd-space-2);
+  padding: var(--rd-space-3); border-radius: var(--rd-r-md);
+  background: var(--rd-bg-2); color: var(--rd-ink-soft);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-sm); line-height: 1.7;
+}
+/* 标题 + 右边那枚问号（放在 .rd-sheet-title 上，标题就不会被问号顶成两行） */
+.rd-title-row { display: flex; align-items: center; gap: var(--rd-space-2); flex-wrap: wrap; }
+/* 段与段之间空一行（问号里的说明常常是好几条） */
+.rd-help-body p { margin: 0 0 var(--rd-space-2); }
+.rd-help-body p:last-child { margin-bottom: 0; }
 .rd-hunt-chip {
   border: 0; border-radius: var(--rd-r-pill); background: var(--rd-card);
   color: var(--rd-ink); font-family: inherit; font-size: var(--rd-fs-sm);
@@ -1631,6 +1681,11 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 .rd-fn-dot { width: 8px; height: 8px; border-radius: var(--rd-r-pill); flex: 0 0 auto; margin-top: 6px; }
 .rd-fn-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .rd-fn-meta { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); line-height: 1.5; }
+/* 收着那行的原文：压在正文上面的一小段引文（她 09-21：个人页表面也要看得见原文） */
+.rd-fn-quote-line {
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.6;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 .rd-fn-text {
   font-size: var(--rd-fs-sm); line-height: 1.7; white-space: pre-wrap;
   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
@@ -1642,15 +1697,15 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
   margin-top: var(--rd-space-3); padding-left: var(--rd-space-4);
   display: flex; flex-direction: column; gap: var(--rd-space-3);
 }
-.rd-fn-quote {
-  padding-left: var(--rd-space-3); border-left: 2px solid var(--rd-rule);
-  color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); line-height: 1.7;
-}
+/* 展开里那块**原批注**（讨论的根）——衬线，跟下面接话的聊天气泡分开（她 09-21） */
+.rd-fn-note { display: flex; flex-direction: column; gap: var(--rd-space-1); }
+.rd-fn-note-head { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-fn-note-text { font-family: var(--rd-font-heading); font-size: var(--rd-fs-md); line-height: 1.75; }
 .rd-fn-thread { display: flex; flex-direction: column; gap: var(--rd-space-3); }
 .rd-fn-msg { display: flex; flex-direction: column; gap: 2px; }
 .rd-fn-msg-me { align-items: flex-end; text-align: right; }
-.rd-fn-msg-head { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
-.rd-fn-msg-text { font-size: var(--rd-fs-sm); line-height: 1.75; }
+.rd-fn-msg-head { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-family: var(--rd-font-ui); }
+.rd-fn-msg-text { font-size: var(--rd-fs-sm); line-height: 1.75; font-family: var(--rd-font-ui); }
 .rd-fn-acts { display: flex; align-items: center; gap: var(--rd-space-5); }
 .rd-fn-act {
   border: 0; background: transparent; padding: 0;

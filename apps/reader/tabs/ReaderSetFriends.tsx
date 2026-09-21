@@ -37,7 +37,7 @@ export default function ReaderSetFriends({ onBack, onOpenChar }: Props) {
     const onCount = characters.filter((c) => charPrefsOf(charPrefs, c.id).readEnabled).length;
 
     return (
-        <div className="rd-screen" data-rd-page="settings-friends">
+        <div className="rd-screen page-focus-once" data-rd-page="settings-friends">
             <div className="rd-headbar">
                 <button className="rd-back" onClick={onBack}><ArrowLeft size={18} />设置</button>
                 <div className="rd-headbar-title">使用书库的朋友</div>
