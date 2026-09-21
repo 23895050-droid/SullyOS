@@ -19,6 +19,7 @@ import ReaderShelf from './tabs/ReaderShelf';
 import ReaderNotes from './tabs/ReaderNotes';
 import ReaderLibrary from './tabs/ReaderLibrary';
 import CharPage from './CharPage';
+import ActivityPage from './ActivityPage';
 import ReaderStats from './tabs/ReaderStats';
 import ReaderSettings from './tabs/ReaderSettings';
 import { useReaderPrefs, setLastBook } from './readerPrefs';
@@ -52,6 +53,8 @@ export default function ReaderApp({ onBack }: Props) {
     const [details, setDetails] = useState<string | null>(null);
     /** 正在看的角色个人页（整屏；从书库页点谁进谁） */
     const [charPage, setCharPage] = useState<string | null>(null);
+    /** 活动记录整屏页（书库页的「查看全部」翻进来） */
+    const [actPage, setActPage] = useState(false);
     const [refreshToken, setRefreshToken] = useState(0);
     const [toast, setToast] = useState<string | null>(null);
     const [importOpen, setImportOpen] = useState(false);
@@ -165,6 +168,18 @@ export default function ReaderApp({ onBack }: Props) {
         );
     }
 
+    // ── 整屏页：活动记录 ──
+    if (actPage) {
+        return (
+            <div className={rootClass}>
+                <ReaderSkinPreset />
+                <ActivityPage notify={notify} onBack={() => { setActPage(false); setTab('library'); refresh(); }} />
+                <ReaderJobPill />
+                {toast && <div className="rd-toast">{toast}</div>}
+            </div>
+        );
+    }
+
     // ── 整屏页：书详情 ──
     if (details) {
         return (
@@ -201,7 +216,13 @@ export default function ReaderApp({ onBack }: Props) {
                     />
                 )}
                 {tab === 'notes' && <ReaderNotes onOpenAt={openAt} notify={notify} />}
-                {tab === 'library' && <ReaderLibrary onOpenChar={(id) => setCharPage(id)} />}
+                {tab === 'library' && (
+                    <ReaderLibrary
+                        onOpenChar={(id) => setCharPage(id)}
+                        onOpenActs={() => setActPage(true)}
+                        notify={notify}
+                    />
+                )}
                 {tab === 'stats' && <ReaderStats refreshToken={refreshToken} />}
                 {tab === 'settings' && <ReaderSettings />}
             </div>

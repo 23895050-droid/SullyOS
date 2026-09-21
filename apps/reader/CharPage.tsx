@@ -38,6 +38,7 @@ import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '
 import ReaderCover from './ReaderCover';
 import ReaderCharStyleSheet from './ReaderCharStyleSheet';
 import ActivityDetailSheet, { RoamCalls, fmtTok } from './ActivityDetailSheet';
+import { canRetrySummary, retrySummaryFor } from './coreadRetry';
 import NoteForwardSheet from './NoteForwardSheet';
 import NoteFold from './NoteFold';
 import { chapterOf } from './tabs/ReaderNotes';
@@ -152,7 +153,7 @@ type View = 'main' | 'settings' | 'api' | 'shelf' | 'book';
 type Feed = 'notes' | 'talk' | 'acts';
 
 export default function CharPage({ charId, onBack, notify, onOpenAt }: Props) {
-    const { characters, userProfile, apiPresets } = useOS();
+    const { characters, userProfile, apiPresets, apiConfig } = useOS();
     const full = characters.find((c) => c.id === charId) ?? null;
     const name = full?.name ?? charId;
 
@@ -176,6 +177,9 @@ export default function CharPage({ charId, onBack, notify, onOpenAt }: Props) {
     const [stateOpen, setStateOpen] = useState(false);
     const [act, setAct] = useState<RdRoamActivity[] | null>(null);
     const [openPast, setOpenPast] = useState<Set<string>>(new Set());
+    const [reload, setReload] = useState(0);
+    const [retrying, setRetrying] = useState(false);
+    const [retryNote, setRetryNote] = useState('');
     const [forwarding, setForwarding] = useState<NoteRow | null>(null);
     /** 书架那一栏：书架 / 读完 / 一起读的 */
     const [shelfTab, setShelfTab] = useState<ShelfTab>('all');
@@ -236,7 +240,8 @@ export default function CharPage({ charId, onBack, notify, onOpenAt }: Props) {
             setRoam(await listRoamActivities(charId, 60));
             setLoading(false);
         })();
-    }, [charId]);
+        // reload：补摘成功之后把这一页重新翻一遍（记录里多了那条摘要）
+    }, [charId, reload]);
 
     /** 他留下的（按互动时间倒序） */
     const made = useMemo(
@@ -298,6 +303,21 @@ export default function CharPage({ charId, onBack, notify, onOpenAt }: Props) {
 
     const filtering = !!word || bookIds.length > 0;
     const clearFilters = () => { setQ(''); setBookIds([]); };
+
+    /** 补摘（T5）：这里只负责把结果说出来，攒 ctx 的活在 coreadRetry 里 */
+    const doRetry = async (calls: RdRoamActivity[]) => {
+        setRetrying(true);
+        setRetryNote('');
+        const out = await retrySummaryFor(calls, apiConfig);
+        setRetrying(false);
+        if (out.ok) {
+            setAct(null);
+            notify(out.message);
+            setReload((n) => n + 1);
+        } else {
+            setRetryNote(out.message);
+        }
+    };
 
     const shelfShown = useMemo(() => {
         if (shelfTab === 'done') return shelf.filter((s) => s.percent >= 99);
@@ -899,7 +919,11 @@ export default function CharPage({ charId, onBack, notify, onOpenAt }: Props) {
                     calls={act}
                     ownerName={name}
                     bookTitle={titleOf(act[0]?.bookId)}
-                    onClose={() => setAct(null)}
+                    onClose={() => { setAct(null); setRetryNote(''); }}
+                    // 摘要没配 / 那一趟失败 → 这里能补摘（她 09-20 定的位置）
+                    {...(canRetrySummary(act)
+                        ? { onRetry: () => void doRetry(act), retrying, retryNote }
+                        : {})}
                 />
             )}
 

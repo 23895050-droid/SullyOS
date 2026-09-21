@@ -1638,6 +1638,149 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
   border: 0; background: transparent; color: inherit; font-family: inherit; padding: 0;
 }
 
+/* ── 书库页（T5）：最近的状态 / 阅读排行榜 / 全局活动记录 ────────── */
+
+/* 时间线那一条可点（她 09-21：活动记录做成时间线样式）——把 button 的默认样式按回去，
+   padding-bottom 交给 .rd-tl-item（:last-child 那条仍然盖得住） */
+.rd-tl-tap {
+  display: block; width: 100%; border: 0; background: transparent; color: inherit;
+  font-family: inherit; font-size: inherit; text-align: left;
+  padding: 0 0 var(--rd-space-5);
+}
+.rd-tl-body { flex: 1 1 auto; min-width: 0; }
+
+/* 日期条：一排能点的天（她 09-21 照参考图要的，比一排胶囊直观） */
+.rd-days { display: flex; align-items: flex-end; gap: 2px; margin-bottom: var(--rd-space-4); }
+.rd-day-cell {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  border: 0; background: transparent; color: inherit; font-family: inherit; padding: 0;
+}
+.rd-day-w { font-size: var(--rd-fs-tab); color: var(--rd-ink-soft); line-height: 1; }
+.rd-day-n {
+  min-width: 32px; height: 32px; padding: 0 var(--rd-space-1);
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--rd-r-pill); color: var(--rd-ink);
+  font-size: var(--rd-fs-md); font-variant-numeric: tabular-nums;
+}
+.rd-day-all { font-size: var(--rd-fs-sm); }
+.rd-day-cell-on .rd-day-n { background: var(--rd-chip-on-bg); color: var(--rd-chip-on-ink); }
+.rd-day-cell-on .rd-day-w { color: var(--rd-ink); }
+
+/* 小标题右边挂一颗按钮那种行（排行榜换口径） */
+.rd-sec-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-3);
+  margin: var(--rd-space-5) 0 var(--rd-space-2);
+}
+.rd-sec-row .rd-section-title { margin: 0; }
+
+/* 搜索 + 筛选开关那一行 */
+.rd-act-tools { display: flex; align-items: center; gap: var(--rd-space-2); margin-bottom: var(--rd-space-3); }
+.rd-act-tools .rd-search-input { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.rd-flt-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--rd-space-1);
+  height: 36px; padding: 0 var(--rd-space-3);
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-md);
+  background: var(--rd-card); color: var(--rd-ink-soft); font-family: inherit; font-size: var(--rd-fs-sm);
+}
+.rd-flt-btn-on { border-color: var(--rd-accent); color: var(--rd-accent); }
+/* 有几个条件在生效（筛起来的时候看一眼就知道） */
+.rd-flt-count {
+  min-width: 16px; height: 16px; border-radius: var(--rd-r-pill);
+  background: var(--rd-accent); color: var(--rd-on-accent);
+  font-size: var(--rd-fs-tab); line-height: 16px; text-align: center;
+}
+
+/* 按天分组的那行标题（「今天 · 3 条」）——比小字重一点，撑起层次 */
+.rd-day { display: flex; align-items: baseline; gap: var(--rd-space-2); margin-bottom: var(--rd-space-3); }
+.rd-day-name { font-family: var(--rd-font-heading); font-size: var(--rd-fs-md); }
+.rd-day-count { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+
+/* 活动记录的一条：卡片 + 左边一道**他自己的笔色**，三层文本（动作 / 谁和书 / 数字） */
+.rd-ag-card {
+  background: var(--rd-card); border-radius: var(--rd-r-md);
+  border-left: 3px solid var(--rd-accent);
+  box-shadow: var(--rd-shadow-sm);
+  padding: var(--rd-space-3) var(--rd-space-4);
+}
+.rd-ag-head { display: flex; align-items: baseline; gap: var(--rd-space-2); }
+.rd-ag-title { flex: 1 1 auto; min-width: 0; font-size: var(--rd-fs-md); font-weight: 600; line-height: 1.45; }
+.rd-ag-time { flex: 0 0 auto; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums; }
+.rd-ag-sub {
+  display: flex; align-items: center; gap: var(--rd-space-2);
+  margin-top: var(--rd-space-2); color: var(--rd-ink-soft); font-size: var(--rd-fs-sm);
+}
+.rd-ag-book { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-ag-meta { margin-top: var(--rd-space-2); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+
+/* 筛选那几排：左边一个小标签，右边胶囊 */
+.rd-flt { display: flex; align-items: flex-start; gap: var(--rd-space-3); margin-bottom: var(--rd-space-2); }
+.rd-flt-label {
+  flex: 0 0 auto; width: 32px; padding-top: 7px;
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
+}
+.rd-flt .rd-chips { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+
+/* 「查看全部」那种通栏次级按钮（和书架卡的「查看书架」一个样子） */
+.rd-more {
+  display: block; width: 100%; text-align: center; margin-top: var(--rd-space-4);
+  padding: var(--rd-space-3); border: 0; border-radius: var(--rd-r-md);
+  background: var(--rd-bg-2); color: var(--rd-ink); font-family: inherit; font-size: var(--rd-fs-sm);
+}
+
+/* 圆头像：宽度由调用方给（书库页 38、活动记录那条 32），其余都在这儿 */
+.rd-face {
+  flex: 0 0 auto; aspect-ratio: 1 / 1; border-radius: var(--rd-r-pill); overflow: hidden;
+  background: var(--rd-bg-2); display: flex; align-items: center; justify-content: center;
+  color: var(--rd-ink-soft); font-family: var(--rd-font-heading);
+}
+.rd-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* 摘要那行：没摘成时右边挂一颗「补摘」（她 09-20 定的位置） */
+.rd-sum-miss { display: flex; align-items: center; gap: var(--rd-space-3); margin-top: var(--rd-space-3); }
+.rd-sum-miss .rd-muted { flex: 1 1 auto; }
+.rd-sum-miss .rd-btn { flex: 0 0 auto; padding: 2px var(--rd-space-3); font-size: var(--rd-fs-sm); }
+
+/* 最近的状态：**感受是主角**（这就是它和活动记录的差别），所以衬线、大一号、行距松开 */
+.rd-st {
+  display: block; width: 100%; text-align: left; border: 0; color: inherit; font-family: inherit;
+  background: var(--rd-card); border-radius: var(--rd-r-lg); box-shadow: var(--rd-shadow-sm);
+  padding: var(--rd-space-4);
+}
+.rd-st:active { background: var(--rd-bg-2); }
+.rd-st-top { display: flex; align-items: center; gap: var(--rd-space-3); }
+.rd-st-who { flex: 1 1 auto; min-width: 0; }
+.rd-st-name { font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); line-height: 1.3; }
+.rd-st-verb { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); margin-top: 2px; }
+.rd-st-time { flex: 0 0 auto; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums; }
+.rd-st-feel {
+  margin-top: var(--rd-space-4); padding-top: var(--rd-space-4);
+  border-top: 1px solid var(--rd-rule-soft);
+  font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); line-height: 1.75;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical;
+}
+.rd-st-hint { margin-top: var(--rd-space-3); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+
+/* 活动记录那一条：**第二行（书名 + 那串小字）占满整行**——
+   挤在右边那列里会把「进度 13%」拆成两行（拍出来看过）。 */
+.rd-act {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+  gap: 2px var(--rd-space-3); width: 100%;
+  padding: var(--rd-space-3) var(--rd-space-4);
+  border: 0; background: transparent; color: var(--rd-ink);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-md); text-align: left;
+}
+.rd-act + .rd-act { border-top: 1px solid var(--rd-rule); }
+.rd-act:active { background: var(--rd-bg-2); }
+.rd-act-face { grid-row: 1 / span 2; align-self: center; display: flex; }
+.rd-act-who { grid-column: 2; min-width: 0; }
+.rd-act-time { grid-column: 3; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); font-variant-numeric: tabular-nums; }
+.rd-act-sub { grid-column: 2 / span 2; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); line-height: 1.6; }
+
+/* 六个胶囊一排会横着藏起来 → 让它换行 */
+.rd-chips-wrap { flex-wrap: wrap; overflow: visible; }
+.rd-rank-no { flex: 0 0 auto; width: 18px; color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); font-variant-numeric: tabular-nums; }
+.rd-rank-val { flex: 0 0 auto; color: var(--rd-accent); font-size: var(--rd-fs-md); font-variant-numeric: tabular-nums; }
+
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }
 `;

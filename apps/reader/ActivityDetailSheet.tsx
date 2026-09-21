@@ -9,6 +9,11 @@
 import type { ReactNode } from 'react';
 import { X } from '@phosphor-icons/react';
 import type { RdRoamActivity } from '../../utils/reader/readerDb';
+import { fmtTok } from '../../utils/reader/readerDigest';
+
+// 数字口径（1.2k / 3.4w）现在住在 utils/reader/readerDigest，这里只是**转发**一下
+// （角色个人页一直从这里 import，别让它改道）
+export { fmtTok };
 
 const KIND_LABEL: Record<string, string> = {
     annotate: '读了一段',
@@ -27,13 +32,6 @@ export const fmtFull = (iso?: string): string => {
     if (Number.isNaN(d.getTime())) return '';
     const p = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
-
-export const fmtTok = (n?: number): string => {
-    const v = Number(n ?? 0) || 0;
-    if (v >= 10000) return `${(v / 10000).toFixed(1)}w`;
-    if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
-    return String(v);
 };
 
 /** 一次活动里的每条调用，排成时间线（详情弹卡和角色个人页共用） */
@@ -66,7 +64,6 @@ export function RoamCalls({ calls }: { calls: RdRoamActivity[] }) {
                                         a.pages ? `读了 ${a.pages} 页` : '',
                                         a.annCount ? `留下 ${a.annCount} 条批注` : '',
                                         a.replyCount ? `回了 ${a.replyCount} 条讨论` : '',
-                                        a.durationMs ? `${Math.max(1, Math.round(a.durationMs / 60000))} 分钟` : '',
                                     ].filter(Boolean).join(' · ') || '读了一段',
                                 (a.tokensIn || a.tokensOut || a.tokens)
                                     ? `${fmtTok(a.tokens)} token（读进去 ${fmtTok(a.tokensIn)} / 吐出来 ${fmtTok(a.tokensOut)}）`
@@ -90,11 +87,21 @@ interface Props {
     title?: string;
     /** 垫在下面的东西（角色个人页在这里挂「往期」） */
     extra?: ReactNode;
+    /** 摘要那行上的「补摘」（T5）——不传就是不显示（比如你自己读的那条） */
+    onRetry?: () => void;
+    /** 正在补（按钮变成「正在补…」） */
+    retrying?: boolean;
+    /** 补摘的结果 / 为什么补不了，写在按钮下面 */
+    retryNote?: string;
     onClose: () => void;
 }
 
-export default function ActivityDetailSheet({ calls, ownerName, bookTitle, title, extra, onClose }: Props) {
+export default function ActivityDetailSheet({
+    calls, ownerName, bookTitle, title, extra, onRetry, retrying, retryNote, onClose,
+}: Props) {
     const first = calls[0];
+    const mine = first?.charId === 'user';
+    const hasSummary = calls.some((a) => a.kind === 'summary');
     return (
         <div className="rd-sheet-mask" onClick={onClose}>
             <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
@@ -106,11 +113,18 @@ export default function ActivityDetailSheet({ calls, ownerName, bookTitle, title
 
                 <RoamCalls calls={calls} />
 
-                {!calls.some((a) => a.kind === 'summary') && (
-                    <div className="rd-muted" style={{ marginTop: 'var(--rd-space-3)' }}>
-                        这一次没有总结记录。
+                {/* 摘要那行：没摘成时这儿就是补摘的入口（她 09-20 定的位置） */}
+                {!hasSummary && !mine && (
+                    <div className="rd-sum-miss">
+                        <div className="rd-muted">这一次没有总结记录。</div>
+                        {onRetry && (
+                            <button className="rd-btn rd-btn-soft" onClick={onRetry} disabled={retrying}>
+                                {retrying ? '正在补…' : '补摘'}
+                            </button>
+                        )}
                     </div>
                 )}
+                {retryNote && <div className="rd-muted" style={{ marginTop: 'var(--rd-space-2)' }}>{retryNote}</div>}
 
                 {extra}
 
