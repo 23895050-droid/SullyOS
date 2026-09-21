@@ -21,7 +21,7 @@ import ReaderLibrary from './tabs/ReaderLibrary';
 import CharPage from './CharPage';
 import ActivityPage from './ActivityPage';
 import ReaderStats from './tabs/ReaderStats';
-import ReaderSettings from './tabs/ReaderSettings';
+import ReaderSettings, { type SettingsPage } from './tabs/ReaderSettings';
 import { useReaderPrefs, setLastBook } from './readerPrefs';
 import { sweepStaleImports } from '../../utils/reader/readerDb';
 import { consumeReaderDeepLink, READER_DEEPLINK_KEY, type ReaderDeepLink } from './readerDeepLink';
@@ -53,6 +53,11 @@ export default function ReaderApp({ onBack }: Props) {
     const [details, setDetails] = useState<string | null>(null);
     /** 正在看的角色个人页（整屏；从书库页点谁进谁） */
     const [charPage, setCharPage] = useState<string | null>(null);
+    /** 从哪儿进的他的页面（设置页进来的，返回要回设置页；默认回书库） */
+    const [charFrom, setCharFrom] = useState<'library' | 'settings'>('library');
+    const [charView, setCharView] = useState<'main' | 'settings' | 'api'>('main');
+    /** 设置页停在哪个内页（进他的页面再回来还在那一页） */
+    const [setPage, setSetPage] = useState<SettingsPage>('root');
     /** 活动记录整屏页（书库页的「查看全部」翻进来） */
     const [actPage, setActPage] = useState(false);
     const [refreshToken, setRefreshToken] = useState(0);
@@ -155,8 +160,9 @@ export default function ReaderApp({ onBack }: Props) {
                 <ReaderSkinPreset />
                 <CharPage
                     charId={charPage}
+                    initialView={charView}
                     notify={notify}
-                    onBack={() => { setCharPage(null); setTab('library'); refresh(); }}
+                    onBack={() => { setCharPage(null); setTab(charFrom === 'settings' ? 'settings' : 'library'); refresh(); }}
                     onOpenAt={(bookId, chapterIdx, paraIdx) => {
                         setCharPage(null);
                         openAt(bookId, chapterIdx, paraIdx);
@@ -218,13 +224,20 @@ export default function ReaderApp({ onBack }: Props) {
                 {tab === 'notes' && <ReaderNotes onOpenAt={openAt} notify={notify} />}
                 {tab === 'library' && (
                     <ReaderLibrary
-                        onOpenChar={(id) => setCharPage(id)}
+                        onOpenChar={(id) => { setCharFrom('library'); setCharView('main'); setCharPage(id); }}
                         onOpenActs={() => setActPage(true)}
                         notify={notify}
                     />
                 )}
                 {tab === 'stats' && <ReaderStats refreshToken={refreshToken} />}
-                {tab === 'settings' && <ReaderSettings />}
+                {tab === 'settings' && (
+                    <ReaderSettings
+                        notify={notify}
+                        page={setPage}
+                        onPage={setSetPage}
+                        onOpenChar={(id, view) => { setCharFrom('settings'); setCharView(view ?? 'settings'); setCharPage(id); }}
+                    />
+                )}
             </div>
 
             <nav className="rd-nav">

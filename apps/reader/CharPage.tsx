@@ -23,7 +23,7 @@
 // **设置项全部搬去右上角那页**（读书开关 / 提示词套 / 每次读几页 / 每次笔记上限 /
 // 回复模式 / 阅读风格 / 他自己的模型），主页上只留「能看出他是个什么样的人」的东西。
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ArrowLeft, CaretDown, CaretRight, FunnelSimple, Gear, MagnifyingGlass, X,
 } from '@phosphor-icons/react';
@@ -38,6 +38,9 @@ import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '
 import ReaderCover from './ReaderCover';
 import ReaderCharStyleSheet from './ReaderCharStyleSheet';
 import ActivityDetailSheet, { RoamCalls, fmtTok } from './ActivityDetailSheet';
+import {
+    CHAR_EXPORT_SCOPE, applyReaderImport, buildReaderExport, downloadReaderBundle, isReaderBundle,
+} from '../../utils/reader/readerExport';
 import { canRetrySummary, retrySummaryFor } from './coreadRetry';
 import NoteForwardSheet from './NoteForwardSheet';
 import NoteFold from './NoteFold';
@@ -52,6 +55,8 @@ interface Props {
     notify: (msg: string) => void;
     /** 查看原文：跳到书里那一句上（章号与段号都是章内的） */
     onOpenAt?: (bookId: string, chapterIdx: number, paraIdx: number) => void;
+    /** 从哪一页进来（设置页点「他的模型」直接落在 api 页；默认主页） */
+    initialView?: 'main' | 'settings' | 'api';
 }
 
 /** 一条和这个人有关的笔记 */
@@ -152,17 +157,51 @@ function Face({ avatar, name, size }: { avatar?: string; name: string; size?: nu
 type View = 'main' | 'settings' | 'api' | 'shelf' | 'book';
 type Feed = 'notes' | 'talk' | 'acts';
 
-export default function CharPage({ charId, onBack, notify, onOpenAt }: Props) {
+export default function CharPage({ charId, onBack, notify, onOpenAt, initialView = 'main' }: Props) {
     const { characters, userProfile, apiPresets, apiConfig } = useOS();
     const full = characters.find((c) => c.id === charId) ?? null;
     const name = full?.name ?? charId;
+
+    /** 把他的那份（笔记 + 活动记录 + 他自己的设置）导成一个文件 */
+    const exportMine = async () => {
+        setDataBusy(true);
+        try {
+            const bundle = await buildReaderExport({ scope: CHAR_EXPORT_SCOPE, owners: [charId] });
+            notify(`导出好了：${downloadReaderBundle(bundle, name)}`);
+        } catch (e) {
+            notify(`导出没成：${e instanceof Error ? e.message : '未知错误'}`);
+        }
+        setDataBusy(false);
+    };
+
+    const importMine = async (file: File) => {
+        setDataBusy(true);
+        try {
+            const data: unknown = JSON.parse(await file.text());
+            if (!isReaderBundle(data)) throw new Error('这不是书房导出的文件');
+            const r = await applyReaderImport(data);
+            const bits = [
+                r.annotations ? `${r.annotations} 条批注` : '',
+                r.threads ? `${r.threads} 个讨论` : '',
+                r.progress ? `${r.progress} 条进度` : '',
+                r.roam ? `${r.roam} 条活动记录` : '',
+                r.books ? `${r.books} 本书` : '',
+                r.settings ? '设置' : '',
+            ].filter(Boolean);
+            notify(bits.length > 0 ? `导进来了：${bits.join(' · ')}` : '文件是空的，什么都没导');
+            setReload((n) => n + 1);
+        } catch (e) {
+            notify(`导入没成：${e instanceof Error ? e.message : '文件读不出来'}`);
+        }
+        setDataBusy(false);
+    };
 
     const charPrefs = useReaderCharPrefs();
     const prefs = useReaderPrefs();
     const p = charPrefsOf(charPrefs, charId);
     const pen = p.penColor ?? highlightColorOf(prefs, charId);
 
-    const [view, setView] = useState<View>('main');
+    const [view, setView] = useState<View>(initialView);
     const [feed, setFeed] = useState<Feed>('notes');
     /** 正在看的那本书的「他在这本书上的记录」（从主页预览或书架点封面进来） */
     const [bookId, setBookId] = useState<string | null>(null);
@@ -183,6 +222,9 @@ export default function CharPage({ charId, onBack, notify, onOpenAt }: Props) {
     const [forwarding, setForwarding] = useState<NoteRow | null>(null);
     /** 书架那一栏：书架 / 读完 / 一起读的 */
     const [shelfTab, setShelfTab] = useState<ShelfTab>('all');
+    /** 他自己的数据（导出/导入） */
+    const [dataBusy, setDataBusy] = useState(false);
+    const dataFileRef = useRef<HTMLInputElement | null>(null);
     /** 筛东西那张卡 */
     const [filterOpen, setFilterOpen] = useState(false);
     const [q, setQ] = useState('');
@@ -689,6 +731,31 @@ export default function CharPage({ charId, onBack, notify, onOpenAt }: Props) {
                             </span>
                             <span className="rd-item-chev"><CaretRight size={14} /></span>
                         </button>
+                        <button className="rd-item rd-item-tap" disabled={dataBusy} onClick={() => void exportMine()}>
+                            <span className="rd-item-label">
+                                导出他的数据
+                                <div className="rd-muted">他的笔记、讨论、活动记录和设置，导成一个文件</div>
+                            </span>
+                            <span className="rd-item-chev"><CaretRight size={14} /></span>
+                        </button>
+                        <button className="rd-item rd-item-tap" disabled={dataBusy} onClick={() => dataFileRef.current?.click()}>
+                            <span className="rd-item-label">
+                                导入他的数据
+                                <div className="rd-muted">把导出的文件挑回来（按 id 覆盖，不会翻倍）</div>
+                            </span>
+                            <span className="rd-item-chev"><CaretRight size={14} /></span>
+                        </button>
+                        <input
+                            ref={dataFileRef}
+                            type="file"
+                            accept="application/json,.json"
+                            style={{ display: 'none' }}
+                            onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                e.target.value = '';
+                                if (f) void importMine(f);
+                            }}
+                        />
                     </div>
                 </div>
 

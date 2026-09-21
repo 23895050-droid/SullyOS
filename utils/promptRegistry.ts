@@ -639,4 +639,7 @@ export const resetPrompt = (label: string) => {
 };
 
 export const getPromptEntries = (): PromptEntry[] => PROMPT_ENTRIES;
-export const isPromptOverridden = (label: string): boolean => label in loadOverrides();
+
+/** 这条（这一套里的这条）被改过吗。preset 省略 = 默认套 */
+export const isPromptOverridden = (label: string, preset = ''): boolean =>
+  promptKey(label, preset) in loadOverrides();

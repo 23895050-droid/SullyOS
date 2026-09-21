@@ -15,6 +15,7 @@ import type { CharacterProfile, UserProfile } from '../../types';
 import { ContextBuilder } from '../context';
 import { DB } from '../db';
 import { getPrompt } from '../promptRegistry';
+import { promptForPreset } from '../../apps/reader/readerPromptPresets';
 import { extractJson, safeResponseJson } from '../safeApi';
 import { normalizeMessageContent } from '../messageFormat';
 import {
@@ -282,9 +283,12 @@ const cleanMarks = (raw: unknown, limit = 6): CoReadMark[] => {
         .slice(0, Math.max(1, limit));
 };
 
-/** 取这套提示词并展开名字。preset 空 = 默认套（「你正在……」写法），'rp' = 角色扮演套。 */
+/**
+ * 取这套提示词并展开名字。preset 空 = 默认套（「你正在……」写法），'rp' = 角色扮演套，
+ * 其余 = 设置页里她自己新建的套（正文住 readerPromptPresets，没写这条就回落默认套）。
+ */
 const expand = (label: string, char: CharacterProfile, user: UserProfile, book: RdBook, preset = ''): string =>
-    getPrompt(label, preset)
+    promptForPreset(preset, label)
         .replace(/\{\{char\}\}/g, char.name)
         .replace(/\{\{user\}\}/g, user.name)
         .replace(/\{\{book\}\}/g, book.title);

@@ -1781,6 +1781,43 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 .rd-rank-no { flex: 0 0 auto; width: 18px; color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); font-variant-numeric: tabular-nums; }
 .rd-rank-val { flex: 0 0 auto; color: var(--rd-accent); font-size: var(--rd-fs-md); font-variant-numeric: tabular-nums; }
 
+/* ── 设置页 · 挂载规则（2026-09-21 T6）────────────────────────────
+   预览框是「现在会注入什么」那块：底色比卡片深一点点（bg-2），字小一号，
+   跟卡片的区分靠底色和那行小标题，不靠边框（书房的规矩：边线尽量少）。 */
+.rd-preview {
+  margin-top: var(--rd-space-2); padding: var(--rd-space-3) var(--rd-space-4);
+  background: var(--rd-bg-2); border-radius: var(--rd-r-md);
+}
+.rd-preview-head {
+  display: flex; align-items: center; gap: var(--rd-space-1);
+  color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
+}
+.rd-preview-body {
+  margin-top: var(--rd-space-2); color: var(--rd-ink);
+  font-size: var(--rd-fs-caption); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.rd-mt-params { margin-top: var(--rd-space-3); }
+.rd-mt-params .rd-row { display: flex; align-items: center; justify-content: space-between; gap: var(--rd-space-3); }
+.rd-select {
+  flex: 0 0 auto; max-width: 60%; background: var(--rd-bg-2); color: var(--rd-ink);
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-sm);
+  padding: var(--rd-space-1) var(--rd-space-2); font-family: inherit; font-size: var(--rd-fs-sm);
+}
+/* 命中测试那一行：图标 + 输入框 + 「测」（都在一行里，不换行） */
+.rd-hit-row { display: flex; align-items: center; gap: var(--rd-space-2); margin-top: var(--rd-space-3); }
+.rd-hit-row > svg { flex: 0 0 auto; color: var(--rd-ink-soft); }
+.rd-hit-row .rd-field { flex: 1 1 auto; min-width: 0; }
+.rd-hit-row .rd-btn { flex: 0 0 auto; }
+/* 逐行的小字说明（一行一句，不挤成一段） */
+.rd-hint-list { display: flex; flex-direction: column; gap: var(--rd-space-1); margin-top: var(--rd-space-3); }
+.rd-hint-list > .rd-muted { line-height: 1.6; }
+/* 命中测试那枚结果小标：命中了是主色，没命中是灰的 */
+.rd-hit {
+  flex: 0 0 auto; border-radius: var(--rd-r-pill); padding: 2px var(--rd-space-2);
+  background: var(--rd-bg-2); color: var(--rd-ink-soft); font-size: var(--rd-fs-caption);
+}
+.rd-hit-on { background: var(--rd-accent-soft); color: var(--rd-accent); }
+
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }
 `;

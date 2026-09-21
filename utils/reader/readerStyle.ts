@@ -11,7 +11,7 @@
 
 import type { CharacterProfile, UserProfile } from '../../types';
 import { ContextBuilder } from '../context';
-import { getPrompt } from '../promptRegistry';
+import { promptForPreset } from '../../apps/reader/readerPromptPresets';
 import { extractJson } from '../safeApi';
 import { setCharReadPrefs, getCharReadPrefs } from '../../apps/reader/readerCharPrefs';
 import { setCharStyle, getCharStyle, type CharStylePref, type CharStyleVibe } from '../../apps/reader/readerCharStyle';
@@ -98,7 +98,7 @@ export async function analyzeCharStyle(input: {
 
     /** 一次调用（提示词走注册表，宏展开） */
     const call = async (label: string, extra: string, maxTokens: number): Promise<Record<string, unknown> | null> => {
-        const prompt = getPrompt(label, getCharReadPrefs(char.id).promptPreset)
+        const prompt = promptForPreset(getCharReadPrefs(char.id).promptPreset, label)
             .replace(/\{\{char\}\}/g, char.name)
             .replace(/\{\{user\}\}/g, user.name);
         const reply = await postReaderChat(api, {

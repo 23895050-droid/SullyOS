@@ -10,13 +10,14 @@
 //      按时间线摆、时间精确到分钟；「查看全部」翻进活动记录页（按天 / 谁 / 书 / 性质筛，只留最近一周）。
 //      同一个人同一本书连着做的几件事**并成一条**（`mergeRuns`，纯展示层，库里一条没动）；
 //      点开 = 这条里每一次调用 + 摘要记录 + 补摘入口
-//   ④ 谁能读书 —— 开关（她 09-21 说这堆开关以后搬去设置页：T6）
+//   ④ 谁能读书 —— 开关**已搬去设置页**（2026-09-21 T6 ④：设置 · 一起读书 · 使用书库的朋友）。
+//      书库页从此只是一面墙，不再是一堆开关。
 //
 // 与笔记页的分工不变（v3 §4.4）：笔记页按书组织，看「这本书上留下了什么痕迹」；
 // 书库页按人组织，看「谁在读书」。
 
 import { useEffect, useMemo, useState } from 'react';
-import { CaretDown, SquaresFour } from '@phosphor-icons/react';
+import { CaretDown } from '@phosphor-icons/react';
 import { useOS } from '../../../context/OSContext';
 import { useBlobRefUrl } from '../../../utils/blobRef';
 import {
@@ -27,7 +28,7 @@ import {
     BOARDS, RUN_KEEP_DAYS, buildBoards, fmtRank, groupByDay, mergeRuns, roamVerb, runMeta, runVerbs,
     withinDays, type BoardKey, type RoamRun,
 } from '../../../utils/reader/readerDigest';
-import { charPrefsOf, readingCharIds, setReadEnabled, useReaderCharPrefs } from '../readerCharPrefs';
+import { charPrefsOf, readingCharIds, useReaderCharPrefs } from '../readerCharPrefs';
 import { highlightColorOf, useReaderPrefs } from '../readerPrefs';
 import ActivityDetailSheet, { RoamCalls } from '../ActivityDetailSheet';
 import { canRetrySummary, retrySummaryFor } from '../coreadRetry';
@@ -318,48 +319,6 @@ export default function ReaderLibrary({ onOpenChar, onOpenActs, notify }: Props)
                     <button className="rd-more" onClick={onOpenActs}>
                         查看全部{runs.length > 8 ? `（${runs.length} 条）` : ''}
                     </button>
-                </>
-            )}
-
-            {/* ④ 谁能读书（她 09-21：这堆开关以后搬去设置页） */}
-            <div className="rd-section-title">谁能读书</div>
-            {characters.length === 0 ? (
-                <div className="rd-empty">
-                    <SquaresFour size={44} weight="thin" />
-                    <div className="rd-empty-text">还没有角色</div>
-                </div>
-            ) : (
-                <>
-                    <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-3)' }}>
-                        开了开关的角色才上排行榜，也才能被喊来一起读。默认是关的。点名字进他的个人页。
-                    </div>
-                    <div className="rd-card rd-card-flush" data-rd-part="chars">
-                        <div className="rd-list">
-                            {characters.map((c) => {
-                                const on = charPrefsOf(charPrefs, c.id).readEnabled;
-                                return (
-                                    <div className="rd-item" key={c.id}>
-                                        <button className="rd-lib-open" onClick={() => onOpenChar(c.id)} aria-label={`进 ${c.name} 的个人页`}>
-                                            <Face avatar={c.avatar} name={c.name} size={38} />
-                                        </button>
-                                        <button className="rd-item-label rd-lib-name" onClick={() => onOpenChar(c.id)}>
-                                            {c.name}
-                                            <div className="rd-muted" style={{ fontSize: 'var(--rd-fs-caption)' }}>
-                                                {on ? '可以一起读' : '还没开'}
-                                            </div>
-                                        </button>
-                                        <button
-                                            className={`rd-switch${on ? ' rd-switch-on' : ''}`}
-                                            aria-label={`${c.name} 允许读书`}
-                                            onClick={() => setReadEnabled(c.id, !on)}
-                                        >
-                                            <span className="rd-switch-knob" />
-                                        </button>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
                 </>
             )}
 

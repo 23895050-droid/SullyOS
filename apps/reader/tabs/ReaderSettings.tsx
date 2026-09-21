@@ -9,22 +9,41 @@
 // 共读模式**不在这里**——它是单书设置，住那本书信息页右上角的小设置（v3 §4.6，
 // 见 apps/reader/BookDetails.tsx）。大设置页只放全局的。
 //
+// **2026-09-21（T6）**：全局设置里补上「一起读书」那一组四个内页——
+//   模型与接口（四档 api + 每个角色自己的模型）/ 读书提示词（套 + 谁在用 + 给谁用）/
+//   挂到聊天里（按角色的关键词挂载规则）/ 使用书库的朋友（书库页那堆开关搬过来）/
+//   数据导入导出（范围勾选 + 分角色）。
+//
 // 自定义 CSS 是皮肤层的最后一层：先注入的骨架层同权重会被它盖掉，
 // 所以这里贴的规则永远不需要 !important（v3 的 V5）。
 
 import { useState, type ReactNode } from 'react';
-import { ArrowLeft, BookOpen, PaintBrush, Pen, Code, TextAa, ChatCircleDots } from '@phosphor-icons/react';
+import { ArrowLeft, BookOpen, PaintBrush, Pen, Code, TextAa, ChatCircleDots, Plugs, Broadcast, Users, DownloadSimple } from '@phosphor-icons/react';
 import {
     DEFAULT_TYPOGRAPHY, setCssGlobal, setShelfAsc, setShelfGrouped, setShelfLayout,
     setTheme, setTypography, useReaderPrefs, type ShelfLayout,
 } from '../readerPrefs';
 import { READER_SKINS } from '../readerSkinPresets';
 import HighlightColorSheet from '../HighlightColorSheet';
-import ReaderPromptsSheet from '../ReaderPromptsSheet';
+import ReaderSetApi from './ReaderSetApi';
+import ReaderSetPrompts from './ReaderSetPrompts';
+import ReaderSetMount from './ReaderSetMount';
+import ReaderSetFriends from './ReaderSetFriends';
+import ReaderSetData from './ReaderSetData';
 import { highlightColorOf } from '../readerPrefs';
 
-type Sheet = null | 'size' | 'font' | 'lineHeight' | 'paraGap' | 'indent' | 'margin' | 'layout' | 'hl' | 'css' | 'prompts';
-type Page = 'root' | 'read' | 'look';
+type Sheet = null | 'size' | 'font' | 'lineHeight' | 'paraGap' | 'indent' | 'margin' | 'layout' | 'hl' | 'css';
+
+export type SettingsPage = 'root' | 'read' | 'look' | 'api' | 'prompts' | 'mount' | 'friends' | 'data';
+
+interface Props {
+    /** 进某个角色的页面（设置里点名字：落在他的设置页 / 他的模型页） */
+    onOpenChar?: (charId: string, view?: 'settings' | 'api') => void;
+    notify?: (msg: string) => void;
+    /** 停在哪个内页（外壳拿着它——进角色页再回来还是那一页） */
+    page?: SettingsPage;
+    onPage?: (p: SettingsPage) => void;
+}
 
 const LAYOUT_OPTS: Array<{ key: ShelfLayout; label: string }> = [
     { key: 'grid', label: '封面网格' },
@@ -72,9 +91,11 @@ const ico = (n: 1 | 2 | 3 | 4 | 5, node: ReactNode) => (
     <span className={`rd-row-ico${n > 1 ? ` rd-row-ico-${n}` : ''}`}>{node}</span>
 );
 
-export default function ReaderSettings() {
+export default function ReaderSettings({ onOpenChar, notify, page: pageProp, onPage }: Props) {
     const prefs = useReaderPrefs();
-    const [page, setPage] = useState<Page>('root');
+    const [ownPage, setOwnPage] = useState<SettingsPage>('root');
+    const page: SettingsPage = pageProp ?? ownPage;
+    const setPage = (p: SettingsPage) => { setOwnPage(p); onPage?.(p); };
     const [sheet, setSheet] = useState<Sheet>(null);
     const [cssDraft, setCssDraft] = useState<string | null>(null);
     const t = prefs.typography;
@@ -190,6 +211,13 @@ export default function ReaderSettings() {
         );
     }
 
+    // ── 内页：一起读书那四页（T6，都自带返回）──
+    if (page === 'api') return <ReaderSetApi onBack={() => setPage('root')} onOpenChar={(id) => onOpenChar?.(id, 'api')} />;
+    if (page === 'prompts') return <ReaderSetPrompts onBack={() => setPage('root')} notify={notify} />;
+    if (page === 'mount') return <ReaderSetMount onBack={() => setPage('root')} />;
+    if (page === 'friends') return <ReaderSetFriends onBack={() => setPage('root')} onOpenChar={(id) => onOpenChar?.(id, 'settings')} />;
+    if (page === 'data') return <ReaderSetData onBack={() => setPage('root')} notify={notify ?? (() => {})} />;
+
     // ── 首页（图 10 的排版：分组 + 彩图标 + 右箭头）──
     return (
         <div className="rd-screen" data-rd-page="settings">
@@ -210,11 +238,16 @@ export default function ReaderSettings() {
                 </div>
             </div>
 
-            {/* 她 09-16：共读/摘要的提示词放这儿改（面板里只留「什么时候总结」的规则） */}
+            {/* 她 09-16：共读/摘要的提示词放这儿改（面板里只留「什么时候总结」的规则）
+                她 09-21（T6）：这一组补齐——模型四档、提示词套、挂载规则、谁在读书、导入导出 */}
             <div className="rd-section-title">一起读书</div>
             <div className="rd-card rd-card-flush">
                 <div className="rd-list">
-                    <Row label="读书提示词" value="共读三条" onClick={() => setSheet('prompts')} icon={ico(5, <ChatCircleDots size={16} weight="bold" />)} />
+                    <Row label="模型与接口" value="共读 · 回复 · 单独读 · 摘要" onClick={() => setPage('api')} icon={ico(1, <Plugs size={16} weight="bold" />)} />
+                    <Row label="读书提示词" value="谁在用哪一套" onClick={() => setPage('prompts')} icon={ico(2, <ChatCircleDots size={16} weight="bold" />)} />
+                    <Row label="挂到聊天里" value="按角色配关键词" onClick={() => setPage('mount')} icon={ico(3, <Broadcast size={16} weight="bold" />)} />
+                    <Row label="使用书库的朋友" value="谁可以一起读" onClick={() => setPage('friends')} icon={ico(4, <Users size={16} weight="bold" />)} />
+                    <Row label="数据导入导出" value="范围勾选 · 分角色" onClick={() => setPage('data')} icon={ico(5, <DownloadSimple size={16} weight="bold" />)} />
                 </div>
             </div>
 
@@ -297,7 +330,6 @@ function SheetHost({ sheet, setSheet, t, prefs, cssDraft, setCssDraft }: {
     }
 
     if (sheet === 'hl') return <HighlightColorSheet onClose={close} />;
-    if (sheet === 'prompts') return <ReaderPromptsSheet onClose={close} />;
 
     // css
     return (
