@@ -138,13 +138,25 @@ const QUOTE_MAX = 200;
  * 角色抄回来的原文 → 锚点（章内段号口径，与阅读页的 data-para-idx 一致）。
  * 先逐段原样找；找不到再退到「忽略空白」的找法。找不到返回 null——调用方丢掉这一条。
  */
-export function locateQuote(paras: string[], quote: string, chapterIdx: number): RdAnchor | null {
+export function locateQuote(
+    paras: string[],
+    quote: string,
+    chapterIdx: number,
+    /**
+     * 只在这一段段号里找。**共读写字的时候一定要给**（她 09-21）：他抄的句子
+     * 一定来自他读过的那几页，拿它去整章里找第一个对得上的，短句子要是在前面
+     * 也出现过，线就画到他根本没读的页上去了。
+     */
+    range?: { from?: number; to?: number },
+): RdAnchor | null {
     const q = quote.trim().slice(0, QUOTE_MAX);
     if (!q) return null;
     const qSquashed = squashWithMap(q).text;
     if (!qSquashed) return null;
 
-    for (let i = 0; i < paras.length; i++) {
+    const lo = Math.max(0, range?.from ?? 0);
+    const hi = Math.min(paras.length - 1, range?.to ?? paras.length - 1);
+    for (let i = lo; i <= hi; i++) {
         const para = paras[i];
         if (!para) continue;
 
@@ -187,8 +199,8 @@ const coReadProtocol = (book: RdBook, chapterTitle: string, charName: string, us
 你不是在聊天，你是在和 ${userName} 并排读同一本书《${book.title}》。当前章节「${chapterTitle}」。
 你说的话会以「批注」和「讨论」的形式落在书页上，${userName} 会看到。
 
-- 你只看到**当前这一页**的正文。不要假装读过别的页、不要编造书里没有的情节。
-- 划线只能从这一页正文里原样抄句子（连标点一起），一个字都不要改。
+- 你看到的就是这几页的正文，你说的每一句都从这几页里来。
+- 划线从这几页正文里原样抄句子（连标点一起），一个字都不要改。
 - 批注是你**对这段文字的理解**，不是读后感、也不是对 ${userName} 说的客套话。
 - 内心活动（feeling）是你私人的感受，写给自己的，${userName} 只在你的状态里看得到。
 - ${VISIBILITY_RULE}`;
@@ -302,16 +314,14 @@ export interface ReadPageInput {
     /** 这一页压着的段落（章内段号 + 正文） */
     paras: Array<{ paraIdx: number; text: string }>;
     session: { contextMode: CoReadContextMode };
-    /** 这本书最近的批注（防划重）——[ownerName] 原文 → 批注 */
-    recent: string[];
     chatLines: string;
     /** 这一次最多留几条批注（角色自己的设置；不给就用默认） */
     noteLimit?: number;
     /**
-     * 回复模式（她 09-20）：书上新冒出来、他还没回过的批注 + 他参与过的批注下别人的新话。
-     * 开着就不必她点 ⚡——他自己决定回不回、要不要接着往下读。
+     * 回复模式（她 09-21 定稿）：**他读的那几页上所有的批注**（当风景看也行，感兴趣的自己接）
+     * ＋ 他参与过的讨论里别人接着说他的话。开着就不必她点 ⚡——他自己决定回不回、要不要往下读。
      */
-    replyFeed?: { pending: string[]; followUps: string[] };
+    replyFeed?: { notes: string[]; followUps: string[] };
     /** 用哪套提示词（'' = 默认套；'rp' = 角色扮演套）。来自角色自己的读书设置 */
     preset?: string;
     api: ReaderCallRuntime;
@@ -319,7 +329,7 @@ export interface ReadPageInput {
 
 /** 角色读当前这一页（共读的手动动作「让他读这一页」）。 */
 export async function readCoReadPage(input: ReadPageInput): Promise<CoReadPageRead> {
-    const { char, user, book, chapterIdx, chapterTitle, paras, session, recent, chatLines, replyFeed, api } = input;
+    const { char, user, book, chapterIdx, chapterTitle, paras, session, chatLines, replyFeed, api } = input;
     const pageText = paras
         .map((p) => `[${p.paraIdx}] ${p.text}`)
         .join('\n');
@@ -334,22 +344,22 @@ export async function readCoReadPage(input: ReadPageInput): Promise<CoReadPageRe
     const instruction = expand('共读·读书', char, user, book, input.preset ?? '');
 
     const userBlock = [
-        `《${book.title}》· ${chapterTitle} · 这一页（段号是它在章节里的位置）：`,
+        `《${book.title}》· ${chapterTitle} · 你正在读的这几页（段号是它在章节里的位置）：`,
         '',
         pageText,
         '',
-        recent.length > 0 ? `这一页/附近已经有人说过的（别重复划同一句）：\n${recent.join('\n')}` : '',
         session.contextMode === 'immersive' && chatLines ? `\n你们最近在聊天里说的话：\n${chatLines}` : '',
-        replyFeed && replyFeed.pending.length > 0
-            ? `\n你不在的时候，书上新留了这些批注（你还没回过的）：\n${replyFeed.pending.join('\n')}` : '',
+        // 他读的这几页上原本就有的批注（她 09-21：读哪页就看到哪页，当风景看也行）
+        replyFeed && replyFeed.notes.length > 0
+            ? `\n这几页上已经留着的批注（当风景看也行，想接哪句就接）：\n${replyFeed.notes.join('\n')}` : '',
         replyFeed && replyFeed.followUps.length > 0
             ? `\n你参与过的那几条下面，大家接着说：\n${replyFeed.followUps.join('\n')}` : '',
-        replyFeed && (replyFeed.pending.length > 0 || replyFeed.followUps.length > 0)
+        replyFeed && (replyFeed.notes.length > 0 || replyFeed.followUps.length > 0)
             ? '\n想接哪句就写进 replies：quote 原样抄那句话，lines 里一句一条，像聊天那样连着说；这次一句都不想接就留一个空数组。'
             : '',
         input.noteLimit ? `这次最多划 ${input.noteLimit} 条。` : '',
         '',
-        `你读到的是第 ${chapterIdx + 1} 章的这一页，读完按格式回复。`,
+        `你读到的是第 ${chapterIdx + 1} 章的这几页，读完按格式回复。`,
     ].filter(Boolean).join('\n');
 
     const reply = await postReaderChat(api, {
@@ -438,11 +448,15 @@ export async function writeCoReadMarks(opts: {
     /** 这一页的逐段正文（下标 = 章内段号） */
     paras: string[];
     marks: CoReadMark[];
+    /** 只在这一段段号里找位置（= 他这次读过的那几页）；不给就是整章找 */
+    searchFrom?: number;
+    searchTo?: number;
 }): Promise<RdAnnotation[]> {
     const now = new Date().toISOString();
     const written: RdAnnotation[] = [];
     for (const mark of opts.marks) {
-        const anchor = locateQuote(opts.paras, mark.quote, opts.chapterIdx);
+        const anchor = locateQuote(opts.paras, mark.quote, opts.chapterIdx,
+            { from: opts.searchFrom, to: opts.searchTo });
         if (!anchor) continue;
         const row: RdAnnotation = {
             id: rdId('an'),

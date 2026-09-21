@@ -20,8 +20,14 @@ export interface CharReadPrefs {
     api?: CoReadApiConfig;
     /** 用哪套提示词：'' = 默认套（不提角色扮演）；'rp' = 角色扮演套 */
     promptPreset: string;
-    /** 每次读几页 [a, b]（默认 1-1，就是「读这一页」） */
-    pages: [number, number];
+    /**
+     * 每次读几页（默认 1，就是「读这一页」）。
+     * **她 09-21 从一个区间 [a, b] 改成一个数**：区间那两个框既难填（想从 5 改成 17
+     * 得先打 51 再删 5）又容易被当成「从第 a 页读到第 b 页」（程序其实只拿差值当页数，
+     * 起点永远是你眼下这一页）。存的是**页数**，不是页码。
+     * 老数据（区间）在 charPrefsOf 里一次性换算过来，不用清盘。
+     */
+    pages: number;
     /** 一次最多留几条批注 */
     noteLimit: number;
     /** 回复模式：开了就不必手动 ⚡，他自己决定回不回、要不要往下读 */
@@ -40,7 +46,7 @@ export interface ReaderCharPrefsStore {
 export const CHAR_PREF_DEFAULTS: CharReadPrefs = {
     readEnabled: false,
     promptPreset: '',
-    pages: [1, 1],
+    pages: 1,
     // 默认跟以前一样是一次最多 6 条（原来写死在 cleanMarks 里的上限），不悄悄改行为
     noteLimit: 6,
     replyMode: false,
@@ -79,9 +85,31 @@ const hadStored = typeof localStorage !== 'undefined' && !!localStorage.getItem(
 const store = createCoupleStore<ReaderCharPrefsStore>(KEY, 1, seedFromLegacy());
 if (!hadStored) store.set((s) => s);   // 首启把种下来的一份写进盘，后面就按它走
 
+/** 每次读几页：收进合法范围（至少 1 页，最多 30 页——她定的单次上限）。 */
+export const clampPageCount = (n: unknown): number => {
+    const v = Math.round(Number(n));
+    if (!Number.isFinite(v)) return 1;
+    return Math.max(1, Math.min(30, v));
+};
+
+/**
+ * 页数读数：新数据就是一个数，老数据（09-21 之前）是 [从, 到] 区间——
+ * 那时候页数 = 到 − 从 + 1，这儿一次性换算，老盘不用清。
+ */
+const pageCountOf = (raw: unknown): number => {
+    if (Array.isArray(raw)) {
+        const a = Math.round(Number(raw[0])) || 1;
+        const b = Math.round(Number(raw[1])) || a;
+        return clampPageCount(Math.max(1, b - a + 1));
+    }
+    return clampPageCount(raw);
+};
+
 /** 这个角色的设置（没建过就返回一份默认的，不落盘）。 */
-export const charPrefsOf = (s: ReaderCharPrefsStore, charId: string): CharReadPrefs =>
-    ({ ...CHAR_PREF_DEFAULTS, ...(s.chars[charId] ?? {}) });
+export const charPrefsOf = (s: ReaderCharPrefsStore, charId: string): CharReadPrefs => {
+    const merged = { ...CHAR_PREF_DEFAULTS, ...(s.chars[charId] ?? {}) };
+    return { ...merged, pages: pageCountOf(merged.pages as unknown) };
+};
 
 /** 非 React 代码读用（AI 管线、归档那些地方）。 */
 export const getCharReadPrefs = (charId: string): CharReadPrefs => charPrefsOf(store.get(), charId);
@@ -101,13 +129,6 @@ export function setCharReadPrefs(charId: string, patch: Partial<CharReadPrefs>):
 /** 书库页那个开关（原来的 setReadingChar）。 */
 export const setReadEnabled = (charId: string, on: boolean): void =>
     setCharReadPrefs(charId, { readEnabled: on });
-
-/** 每次读几页：a-b 收进合法范围（至少 1 页，最多 30 页——她定的单次上限）。 */
-export const clampPages = (a: number, b: number): [number, number] => {
-    const lo = Math.max(1, Math.min(30, Math.round(a) || 1));
-    const hi = Math.max(lo, Math.min(30, Math.round(b) || lo));
-    return [lo, hi];
-};
 
 export const useReaderCharPrefs = (): ReaderCharPrefsStore => store.use();
 export const getReaderCharPrefsStore = (): ReaderCharPrefsStore => store.get();

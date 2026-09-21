@@ -1753,6 +1753,9 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         return chapter.paras.slice(pageRange.from, to + 1)
                             .map((t, i) => ({ paraIdx: pageRange.from + i, text: t }));
                     }}
+                    /* 你眼下翻到第几页 / 本章一共几页——活动记录里写「读了第几页到第几页」用 */
+                    pageNo={pageIdx + 1}
+                    pageCount={pageCount}
                     percent={percent}
                     notify={notify}
                     onClose={() => setSheet(null)}

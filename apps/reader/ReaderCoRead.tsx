@@ -27,15 +27,16 @@ import { CaretDown, Check, Circle, Plus, UsersThree } from '@phosphor-icons/reac
 import { useOS } from '../../context/OSContext';
 import type { CharacterProfile } from '../../types';
 import {
-    getProgress, listAnnotations, listRoamActivities, listThreads, appendRoamActivity, newRoamGroup,
-    putProgress, rdId, type RdBook, type RdRoamActivity,
+    canSee, getProgress, listAnnotations, listRoamActivities, listThreads, appendRoamActivity,
+    newRoamGroup, putProgress, rdId, type RdBook, type RdRoamActivity,
 } from '../../utils/reader/readerDb';
 import { recentChatLines, readCoReadPage, resolveReadApi, writeCoReadMarks, writeCoReadReplies, type ReaderCallRuntime } from '../../utils/reader/readerChat';
 import { analyzeCharStyle, needStyleAnalysis } from '../../utils/reader/readerStyle';
 import { threadKeyOf } from '../../utils/reader/readerParticipants';
 import { DB } from '../../utils/db';
 import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '../../utils/apiConfigNormalize';
-import { charPrefsOf, clampPages, setCharReadPrefs, useReaderCharPrefs, type CharReadPrefs } from './readerCharPrefs';
+import { charPrefsOf, clampPageCount, setCharReadPrefs, useReaderCharPrefs, type CharReadPrefs } from './readerCharPrefs';
+import RdNumField from './RdNumField';
 import { highlightColorOf, useReaderPrefs } from './readerPrefs';
 import { runArchive } from './coreadArchive';
 import ReaderCharStyleSheet from './ReaderCharStyleSheet';
@@ -58,6 +59,10 @@ interface Props {
     chapterParas: string[];
     /** 从当前页起往后 n 页的窗口（「每次读几页」用；n=1 就是这一页） */
     parasAhead: (pages: number) => Array<{ paraIdx: number; text: string }>;
+    /** 你眼下翻到的是本章第几页（1 起）——活动记录里要写「读了第几页到第几页」 */
+    pageNo: number;
+    /** 本章一共几页（写到头就停在最后一页） */
+    pageCount: number;
     percent: number;
     notify: (msg: string) => void;
     onClose: () => void;
@@ -104,7 +109,11 @@ function briefLine(who: string, a: RdRoamActivity): string {
     if (a.kind === 'summary') {
         bits.push(a.summary || '总结了一段');
     } else {
-        if (a.fromPara !== undefined && a.toPara !== undefined && a.kind === 'annotate') {
+        // 读的是「第几页到第几页」（她 09-21 要的：一眼看出他到底读没读）；
+        // 09-21 之前的老记录没有页号，退回段号
+        if (a.fromPage !== undefined && a.toPage !== undefined && a.kind === 'annotate') {
+            bits.push(a.fromPage === a.toPage ? `第 ${a.fromPage} 页` : `第 ${a.fromPage}–${a.toPage} 页`);
+        } else if (a.fromPara !== undefined && a.toPara !== undefined && a.kind === 'annotate') {
             bits.push(`第 ${a.fromPara + 1}–${a.toPara + 1} 段`);
         }
         if (a.pages) bits.push(`读了 ${a.pages} 页`);
@@ -118,7 +127,7 @@ function briefLine(who: string, a: RdRoamActivity): string {
 }
 
 export default function ReaderCoRead({
-    book, chapterIdx, chapterTitle, pageParas, chapterParas, parasAhead, percent,
+    book, chapterIdx, chapterTitle, pageParas, chapterParas, parasAhead, pageNo, pageCount, percent,
     notify, onClose, onChanged, pickedCharIds, onPick,
 }: Props) {
     const { characters, userProfile, apiConfig, apiPresets } = useOS();
@@ -282,31 +291,40 @@ export default function ReaderCoRead({
     };
 
     /**
-     * 回复模式喂给他的两样东西（她 09-20 改了口径）：
-     *   ① **他眼下这几页能看见的批注**——不是「全局最近更新的批注」。别人新加的批注，
-     *      他读到就能看到；他没回过的那几条才算数（回过的别再塞第二遍）。
-     *   ② **跟他有关的**：别人回复他批注、他参与过的讨论里的新话（关于他的事他清楚）。
-     *      按「他在这条讨论里的最后一句话之后」算，不用时间戳切——不会漏、也不会重复。
+     * 开读之前，把他要读的那几页摆给他看（她 09-21 定稿）。
+     *
+     * **一份**：他读哪几页，那几页上**所有的批注**都给他——当风景看也行，感兴趣的自己接。
+     *   原来是两份：一份「全书最近 8 条」（她原话：「我也不知道那最近八条是从哪来的」——撤了），
+     *   一份「他还没回过的」（漏掉了同一页上别人刚说过的，也漏掉了他自己划过的）。
+     *   现在合成一份：他眼下这一页长什么样，他就看到什么样。他接过话的那几条后面标一句，
+     *   省得他对着同一条说第二遍。
+     * **另加一件**：他参与过的讨论里，他说完之后别人接着说——关于他的事他得知道。
+     *   按「他在这条讨论里的最后一句话之后」算，不用时间戳切——不会漏、也不会重复。
      */
-    const gatherReplyFeed = useCallback(async (
+    const gatherPageFeed = useCallback(async (
         charId: string,
         window: Array<{ paraIdx: number; text: string }>,
-    ): Promise<{ pending: string[]; followUps: string[] }> => {
+    ): Promise<{ notes: string[]; followUps: string[] }> => {
         const from = window[0]?.paraIdx ?? 0;
         const to = window[window.length - 1]?.paraIdx ?? from;
         const [anns, ths] = await Promise.all([listAnnotations(book.id), listThreads(book.id)]);
 
-        // ① 这几页里、他还没回过的别人的批注
-        const mineKeys = new Set(
+        // 他接过话的讨论（认锚点）→ 那一条后面标一句
+        const joined = new Set(
             ths.filter((t) => t.messages.some((m) => m.role === 'char' && m.charId === charId))
                 .map((t) => t.anchorKey),
         );
-        const pending = anns
-            .filter((a) => a.kind !== 'bookmark' && a.note && a.ownerId !== charId)
+        // 他眼下这几页上的批注，一条不落（他自己划的也在里头——那一页本来就是他看到的样子）
+        const notes = anns
+            .filter((a) => a.kind !== 'bookmark' && !!a.note)
+            .filter((a) => canSee(a, charId))
             .filter((a) => a.anchor.startPara >= from && a.anchor.startPara <= to)
-            .filter((a) => !mineKeys.has(threadKeyOf(a.chapterIdx ?? chapterIdx, a.anchor, a.ownerId)))
-            .slice(-8)
-            .map((a) => `[${nameOf(a.ownerId)}] “${a.anchor.text}” → ${a.note}`);
+            .map((a) => {
+                const who = a.ownerId === charId ? '你' : `[${nameOf(a.ownerId)}]`;
+                const done = joined.has(threadKeyOf(a.chapterIdx ?? chapterIdx, a.anchor, a.ownerId))
+                    ? '（你已经接过话了）' : '';
+                return `${who} “${a.anchor.text}” → ${a.note}${done}`;
+            });
 
         // ② 他参与过的讨论里，他说完之后别人接着说
         const followUps: string[] = [];
@@ -321,7 +339,7 @@ export default function ReaderCoRead({
                 followUps.push(`[${who}] 在“${t.anchor.text}”那条下面说：${m.content}`);
             }
         }
-        return { pending, followUps: followUps.slice(-10) };
+        return { notes, followUps: followUps.slice(-10) };
     }, [book.id, chapterIdx, nameOf]);
 
     // ── 归档 ──────────────────────────────────────────────────────
@@ -367,17 +385,17 @@ export default function ReaderCoRead({
         const group = newRoamGroup();
         let done = 0;
         try {
-            const anns = await listAnnotations(book.id);
-            const recentLines = anns
-                .filter((a) => a.kind !== 'bookmark' && a.note)
-                .slice(-8)
-                .map((a) => `[${nameOf(a.ownerId)}] ${a.anchor.text} → ${a.note}`);
-
             for (let i = 0; i < chars.length; i += 1) {
                 const char = chars[i];
                 const prefs = charPrefsOf(charPrefs, char.id);
-                const pages = clampPages(prefs.pages[0], prefs.pages[1]);
-                const window = parasAhead(Math.max(1, pages[1] - pages[0] + 1));
+                // 他这次读几页（她 09-21 从一个区间改成一个数）；窗口永远从你眼下这一页起
+                const pages = clampPageCount(prefs.pages);
+                const window = parasAhead(pages);
+                const winFrom = window[0]?.paraIdx ?? pageFrom;
+                const winTo = window[window.length - 1]?.paraIdx ?? pageTo;
+                // 他读的是「第几页到第几页」（本章口径）——活动记录里要写出来，你一眼能看出读没读
+                const readFromPage = pageNo;
+                const readToPage = Math.min(pageCount, pageNo + pages - 1);
                 const api = resolveReadApi('coread', char.id, readApiSlots(getCoReadStore()), apiConfig);
                 if (!api) { notify(`${char.name}还没配模型（角色自己 / 共读 / 主 API 都空着）`); continue; }
 
@@ -392,32 +410,46 @@ export default function ReaderCoRead({
                     const chatLines = session.contextMode === 'immersive'
                         ? await recentChatLines(char, userProfile)
                         : '';
+                    // 回复模式：面板上那个开关，或者他自己设置页里那个（她 09-21——
+                    // 原来只有面板那个管用，角色设置页那个开关摆着不动，这儿接上）
+                    const replyOn = session.replyMode || prefs.replyMode;
                     const res = await readCoReadPage({
                         char, user: userProfile, book, chapterIdx, chapterTitle,
-                        paras: window, session, recent: recentLines, chatLines, api,
+                        paras: window, session, chatLines, api,
                         noteLimit: prefs.noteLimit,
                         preset: prefs.promptPreset,
-                        replyFeed: session.replyMode ? await gatherReplyFeed(char.id, window) : undefined,
+                        replyFeed: replyOn ? await gatherPageFeed(char.id, window) : undefined,
                     });
                     const written = await writeCoReadMarks({
                         bookId: book.id, charId: char.id, contentRev: book.contentRev,
                         chapterIdx, percent, paras: chapterParas, marks: res.marks,
+                        // 划线只在他读过的这一段里找位置（她 09-21）：他抄的句子一定来自这几页，
+                        // 拿它去整章里找第一个对得上的，短句子重复出现就会画到他没读的页上
+                        searchFrom: winFrom, searchTo: winTo,
                     });
+                    // 他划的线落在第几页（本章口径）——和「读了第几页到第几页」并排看，
+                    // 一眼就分出是「只给了他几页」还是「给了他几页他只划了第一页」（她 09-21）
+                    const perPage = Math.max(1, pageParas.length);
+                    const annPages = [...new Set(written.map(
+                        (a) => readFromPage + Math.floor((a.anchor.startPara - pageFrom) / perPage),
+                    ))]
+                        .filter((p) => p >= readFromPage && p <= readToPage)
+                        .sort((x, y) => x - y);
+
                     // 读的时候顺手接的话（回复模式开着才有）：一句一个气泡，落进对应的讨论
                     const replied = res.replies.length > 0
                         ? await writeCoReadReplies({
                             bookId: book.id, charId: char.id, chapterIdx, replies: res.replies,
                         }).catch(() => 0)
                         : 0;
-                    const winFrom = window[0]?.paraIdx ?? pageFrom;
-                    const winTo = window[window.length - 1]?.paraIdx ?? pageTo;
-
                     await appendRoamActivity({
                         id: rdId('rr'), charId: char.id, bookId: book.id, kind: 'annotate',
                         group, seq: i,
                         fromPara: winFrom, toPara: winTo,
-                        pages: Math.max(1, pages[1] - pages[0] + 1),
+                        fromPage: readFromPage, toPage: readToPage,
+                        pages,
                         annCount: written.length,
+                        annPages: annPages.length > 0 ? annPages : undefined,
                         replyCount: replied || undefined,
                         replies: replied > 0 ? res.replies.flatMap((r) => r.lines).slice(0, 8) : undefined,
                         summary: `${char.name} 读了《${book.title}》第 ${chapterIdx + 1} 章`,
@@ -523,7 +555,7 @@ export default function ReaderCoRead({
         const p = charPrefsOf(charPrefs, char.id);
         const open = openMember === char.id;
         const presetName = p.promptPreset === 'rp' ? 'rp 套' : '默认套';
-        const pagesLabel = p.pages[0] === p.pages[1] ? `${p.pages[0]} 页` : `${p.pages[0]}–${p.pages[1]} 页`;
+        const pagesLabel = `${p.pages} 页`;
         const apiLabel = p.api?.model
             ? presetNameOf({ baseUrl: p.api.baseUrl ?? '', apiKey: p.api.apiKey ?? '', model: p.api.model })
             : presetNameOf(slots.coread);
@@ -549,18 +581,15 @@ export default function ReaderCoRead({
 
                         <div className="rd-row-label">每次读几页</div>
                         <div className="rd-field-row">
-                            <input className="rd-field rd-field-num" type="number" min={1} max={30} value={p.pages[0]}
-                                onChange={(e) => setCharReadPrefs(char.id, { pages: clampPages(Number(e.target.value), p.pages[1]) })} />
-                            <span className="rd-muted">到</span>
-                            <input className="rd-field rd-field-num" type="number" min={1} max={30} value={p.pages[1]}
-                                onChange={(e) => setCharReadPrefs(char.id, { pages: clampPages(p.pages[0], Number(e.target.value)) })} />
-                            <span className="rd-muted">页（默认 1 页，最多 30）</span>
+                            <RdNumField value={p.pages} min={1} max={30} ariaLabel="每次读几页"
+                                onCommit={(v) => setCharReadPrefs(char.id, { pages: v })} />
+                            <span className="rd-muted">页（从你眼下这一页往后读；默认 1 页，最多 30）</span>
                         </div>
 
                         <div className="rd-row-label">每次笔记上限</div>
                         <div className="rd-field-row">
-                            <input className="rd-field rd-field-num" type="number" min={1} max={12} value={p.noteLimit}
-                                onChange={(e) => setCharReadPrefs(char.id, { noteLimit: Math.max(1, Math.min(12, Number(e.target.value) || 1)) })} />
+                            <RdNumField value={p.noteLimit} min={1} max={12} ariaLabel="每次笔记上限"
+                                onCommit={(v) => setCharReadPrefs(char.id, { noteLimit: v })} />
                             <span className="rd-muted">条</span>
                         </div>
 
@@ -689,7 +718,7 @@ export default function ReaderCoRead({
                 </button>
                 <div className="rd-muted">
                     {replyMode
-                        ? '他自己看着办：读到的新批注、你在他参与过的批注下说的话都会喂给他，回不回、要不要往下读由他决定。'
+                        ? '他自己看着办：他读的那几页上留着的批注都摆给他（当风景看也行、想接哪句就接），你在他参与过的批注下说的话也喂给他；回不回、要不要往下读由他决定。'
                         : '关着就得你点 ⚡ 他才回那条讨论。'}
                 </div>
             </div>

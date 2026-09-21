@@ -48,7 +48,8 @@ import NoteForwardSheet from './NoteForwardSheet';
 import NoteFold from './NoteFold';
 import { chapterOf } from './tabs/ReaderNotes';
 import type { NoteForwardCard } from './readerForward';
-import { charPrefsOf, clampPages, setCharReadPrefs, setReadEnabled, useReaderCharPrefs } from './readerCharPrefs';
+import { charPrefsOf, setCharReadPrefs, setReadEnabled, useReaderCharPrefs } from './readerCharPrefs';
+import RdNumField from './RdNumField';
 import { presetNameOf, usePromptPresets } from './readerPromptPresets';
 import { highlightColorOf, useReaderPrefs } from './readerPrefs';
 
@@ -723,18 +724,15 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
 
                     <div className="rd-row-label" style={{ marginTop: 'var(--rd-space-4)' }}>每次读几页</div>
                     <div className="rd-field-row">
-                        <input className="rd-field rd-field-num" type="number" min={1} max={30} value={p.pages[0]}
-                            onChange={(e) => setCharReadPrefs(charId, { pages: clampPages(Number(e.target.value), p.pages[1]) })} />
-                        <span className="rd-muted">到</span>
-                        <input className="rd-field rd-field-num" type="number" min={1} max={30} value={p.pages[1]}
-                            onChange={(e) => setCharReadPrefs(charId, { pages: clampPages(p.pages[0], Number(e.target.value)) })} />
-                        <span className="rd-muted">页（默认 1 页，最多 30）</span>
+                        <RdNumField value={p.pages} min={1} max={30} ariaLabel="每次读几页"
+                            onCommit={(v) => setCharReadPrefs(charId, { pages: v })} />
+                        <span className="rd-muted">页（从你眼下这一页往后读；默认 1 页，最多 30）</span>
                     </div>
 
                     <div className="rd-row-label" style={{ marginTop: 'var(--rd-space-4)' }}>每次笔记上限</div>
                     <div className="rd-field-row">
-                        <input className="rd-field rd-field-num" type="number" min={1} max={12} value={p.noteLimit}
-                            onChange={(e) => setCharReadPrefs(charId, { noteLimit: Math.max(1, Math.min(12, Number(e.target.value) || 1)) })} />
+                        <RdNumField value={p.noteLimit} min={1} max={12} ariaLabel="每次笔记上限"
+                            onCommit={(v) => setCharReadPrefs(charId, { noteLimit: v })} />
                         <span className="rd-muted">条</span>
                     </div>
 

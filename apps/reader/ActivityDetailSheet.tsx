@@ -47,9 +47,17 @@ export function RoamCalls({ calls }: { calls: RdRoamActivity[] }) {
                             <span className="rd-tl-time">{fmtFull(a.createdAt).slice(11)}</span>
                         </div>
                         <div className="rd-tl-text">{a.summary}</div>
-                        {a.fromPara !== undefined && a.toPara !== undefined && a.fromPara !== a.toPara && (
+                        {/* 读的是**第几页到第几页**（她 09-21 要的诊断口子）：只读一页也写出来
+                            ——段号那行是「相等就不显示」，她要靠这行看他到底读没读 */}
+                        {a.fromPage !== undefined && a.toPage !== undefined ? (
+                            <div className="rd-tl-ex">
+                                {a.fromPage === a.toPage ? `第 ${a.fromPage} 页` : `第 ${a.fromPage}–${a.toPage} 页`}
+                                {a.annPages && a.annPages.length > 0
+                                    ? ` · 线落在第 ${a.annPages.join('、')} 页` : ''}
+                            </div>
+                        ) : (a.fromPara !== undefined && a.toPara !== undefined && a.fromPara !== a.toPara && (
                             <div className="rd-tl-ex">第 {a.fromPara + 1}–{a.toPara + 1} 段</div>
-                        )}
+                        ))}
                         {a.excerpt && <div className="rd-tl-ex">{a.excerpt}</div>}
                         {a.replies?.map((line, i) => (
                             <div className="rd-tl-reply" key={i}>{line}</div>
