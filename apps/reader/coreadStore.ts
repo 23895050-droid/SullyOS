@@ -40,12 +40,12 @@ export interface CoReadPos {
  *   时机 timing —— 总结完什么时候进聊天：
  *     auto   = 自动归档：一满就总结，**立刻同步进角色的聊天**
  *     manual = 手动归档：照样总结，但**先不打扰聊天**；点「共读结束」才整段送进去
- * 面板上的三枚胶囊 = 自动归档（msgs+auto）/ 手动归档（msgs+manual）/ 自定义（三个口径 × 两个时机）。
+ * 面板上的三枚胶囊 = 自动归档（默认规则+auto）/ 手动归档（默认规则+manual）/ 自定义（四个口径 × 两个时机）。
  *
  * 水位线是同一条：攒到 threshold 就总结，**最新那条留着做衔接**；
  * 没攒够就点结束 → 把水位线以下剩下的全补总结。
  */
-export type CoReadArchiveMetric = 'msgs' | 'notes' | 'pages';
+export type CoReadArchiveMetric = 'calls' | 'msgs' | 'notes' | 'pages';
 export type CoReadArchiveTiming = 'auto' | 'manual';
 
 export interface CoReadRule {
@@ -55,21 +55,25 @@ export interface CoReadRule {
     timing: CoReadArchiveTiming;
 }
 
-/** 默认 31 条讨论 → 总结前 30 条（她 09-16 的原话）。 */
 /**
- * 默认规则：**每满 10 条讨论总结一条**（她 09-21 拍的板）。
- * 原来是 31——攒得太多，一次总结要吞掉三十条话，写出来的东西糊成一团，
- * 角色读聊天上下文时整个人是乱的；改小之后每条记录只覆盖一小段，干净得多。
+ * 默认规则：**每满 10 条记录总结一条**（她 09-21 拍的板）。
+ *
+ * 「记录」是她的口径（她 09-21 原话）：**角色一次调用算一条**，她自己**五分钟之内
+ * 连着留下的一堆批注和回复合起来算一条**——不是只数讨论。
+ * 原来是 31 条讨论：攒得太多，一次总结要吞掉三十条话，写出来的东西糊成一团，
+ * 角色读聊天上下文时整个人是乱的；换成记录、并改小之后，一条记录只覆盖一小段。
  */
-export const DEFAULT_RULE: CoReadRule = { metric: 'msgs', threshold: 10, timing: 'auto' };
+export const DEFAULT_RULE: CoReadRule = { metric: 'calls', threshold: 10, timing: 'auto' };
 
 export const RULE_METRIC_LABEL: Record<CoReadArchiveMetric, string> = {
+    calls: '记录',
     msgs: '讨论句数',
     notes: '笔记条数',
     pages: '读了多少页',
 };
 
 export const RULE_METRIC_UNIT: Record<CoReadArchiveMetric, string> = {
+    calls: '条记录',
     msgs: '条讨论',
     notes: '条笔记',
     pages: '页',

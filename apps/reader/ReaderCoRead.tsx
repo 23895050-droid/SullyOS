@@ -74,6 +74,14 @@ interface Props {
     onPick?: (charIds: string[]) => void;
 }
 
+/**
+ * 「最近读到的」时间线上的一条：`act` = 角色的一次调用（活动记录）；
+ * `mine` = 她自己的划线 / 接话（她 09-21：这条线上也要看得见她说过的）
+ */
+type RecentItem =
+    | { kind: 'act'; at: string; a: RdRoamActivity }
+    | { kind: 'mine'; at: string; what: string; quote?: string; text: string };
+
 /** 时间线上的时间戳：今天只写 HH:MM，别的日子带月日 */
 const fmtClock = (iso: string): string => {
     const d = new Date(iso);
@@ -149,7 +157,7 @@ export default function ReaderCoRead({
     /** 正在编辑哪个 api 槽 */
     const [apiOpen, setApiOpen] = useState<ReadApiSlot | null>(null);
     const [busy, setBusy] = useState<null | 'read' | 'finish'>(null);
-    const [recent, setRecent] = useState<RdRoamActivity[]>([]);
+    const [recent, setRecent] = useState<RecentItem[]>([]);
     /** 正在看谁的阅读风格 */
     const [styleChar, setStyleChar] = useState<string | null>(null);
     const [charPara, setCharPara] = useState<Record<string, number | null>>({});
@@ -210,20 +218,38 @@ export default function ReaderCoRead({
         if (!session) onPick?.(picks);
     }, [picks, session, onPick]);
 
-    // 每人读到哪 + 最近的活动记录
+    // 每人读到哪 + 「最近读到的」时间线（角色那边 + 她自己的批注和回复，混在一起按时间排）
     const refreshSide = useCallback(async () => {
         if (!session) { setRecent([]); setCharPara({}); return; }
         try {
-            const [paras, acts] = await Promise.all([
+            const [paras, acts, anns, threads] = await Promise.all([
                 Promise.all(session.charIds.map((id) => getProgress(book.id, id).then(
                     (p) => [id, p && p.chapterIdx === chapterIdx ? p.paraIdx : null] as const,
                 ))),
                 Promise.all(session.charIds.map((id) => listRoamActivities(id, 6))),
+                listAnnotations(book.id).catch(() => []),
+                listThreads(book.id).catch(() => []),
             ]);
             setCharPara(Object.fromEntries(paras));
-            setRecent(acts.flat().filter((a) => a.bookId === book.id).sort(
-                (a, b) => b.createdAt.localeCompare(a.createdAt),
-            ).slice(0, 6));
+            const items: RecentItem[] = [];
+            for (const a of acts.flat()) {
+                if (a.bookId === book.id) items.push({ kind: 'act', at: a.createdAt, a });
+            }
+            // 她 09-21：这条时间线上也要看得见她自己的批注和回复——
+            // 不然她只能看见他在读，看不见自己说过什么、他有没有接
+            for (const a of anns) {
+                if (a.ownerId !== 'user' || a.kind === 'bookmark') continue;
+                if (a.createdAt < session.startedAt) continue;
+                items.push({ kind: 'mine', at: a.createdAt, what: '划了一句', quote: a.anchor.text, text: a.note ?? '' });
+            }
+            for (const t of threads) {
+                for (const m of t.messages) {
+                    if (m.role !== 'user' || m.createdAt < session.startedAt) continue;
+                    items.push({ kind: 'mine', at: m.createdAt, what: '接了一句', quote: t.anchor.text, text: m.content });
+                }
+            }
+            items.sort((x, y) => y.at.localeCompare(x.at));
+            setRecent(items.slice(0, 10));
         } catch { /* 读不到就先不显示 */ }
     }, [book.id, chapterIdx, session]);
     useEffect(() => { void refreshSide(); }, [refreshSide]);
@@ -231,7 +257,9 @@ export default function ReaderCoRead({
     /** 这次共读里各人产出的批注 / 回复条数（信息页那行小字） */
     const produced = useMemo(() => {
         const out: Record<string, { ann: number; reply: number }> = {};
-        for (const a of recent) {
+        for (const it of recent) {
+            if (it.kind !== 'act') continue;
+            const a = it.a;
             if (!out[a.charId]) out[a.charId] = { ann: 0, reply: 0 };
             out[a.charId].ann += a.annCount ?? (a.kind === 'annotate' ? 1 : 0);
             out[a.charId].reply += a.replyCount ?? (a.kind === 'discuss' ? 1 : 0);
@@ -407,6 +435,8 @@ export default function ReaderCoRead({
                         group, seq: i,
                         chapterIdx,
                         fromPara: winFrom, toPara: winTo,
+                        // 章内段号 + 每页几段 → 以后才还原得出「他当时读的那一页」是哪几段
+                        perPage,
                         fromPage: readFromPage, toPage: readToPage,
                         pages,
                         annCount: written.length,
@@ -616,7 +646,7 @@ export default function ReaderCoRead({
         <button
             className={`rd-rule${ruleKindOf(rule) === kind ? ' rd-rule-on' : ''}`}
             onClick={() => {
-                if (kind === 'custom') setRule((r) => ({ ...r, metric: 'notes' }));
+                if (kind === 'custom') setRule((r) => ({ ...r, metric: 'calls' }));
                 else setRule({ ...DEFAULT_RULE, timing: kind });
             }}
         >
@@ -630,7 +660,7 @@ export default function ReaderCoRead({
         <div className="rd-rule-body">
             <div className="rd-row-label">水线按什么推</div>
             <div className="rd-btn-row">
-                {(['msgs', 'notes', 'pages'] as CoReadArchiveMetric[]).map((m) => (
+                {(['calls', 'msgs', 'notes', 'pages'] as CoReadArchiveMetric[]).map((m) => (
                     <button key={m} className={`rd-chip${rule.metric === m ? ' rd-chip-on' : ''}`}
                         onClick={() => setRule((r) => ({ ...r, metric: m }))}>
                         {RULE_METRIC_LABEL[m]}
@@ -878,48 +908,62 @@ export default function ReaderCoRead({
                         </div>
 
                         {/* 表面上只报进度，规则的全文在下面的「共读设置」里 */}
+                        {/* 「已归档 N 条」只对讨论句数有意义——别的口径是按时间窗推的 */}
                         <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-4)' }}>
-                            水线：已归档 {session.summarizedMsgs} 条 · 满 {session.rule.threshold}{' '}
-                            {RULE_METRIC_UNIT[session.rule.metric]}总结一次
+                            {session.rule.metric === 'msgs'
+                                ? `水线：已归档 ${session.summarizedMsgs} 条 · 满 ${session.rule.threshold} 条讨论总结一次`
+                                : `水线：满 ${session.rule.threshold} ${RULE_METRIC_UNIT[session.rule.metric]}总结一次`}
                         </div>
 
                         {recent.length > 0 && (
                             <div className="rd-coread-recent">
                                 <div className="rd-row-label">最近读到的</div>
-                                {/* 时间线（她 09-20：加时间线、配时间戳；回复模式的回复记录也在这上面） */}
+                                {/* 时间线（她 09-20：加时间线、配时间戳；09-21：她的划线和接话也在上面） */}
                                 <div className="rd-tl">
-                                    {recent.map((a) => (
-                                        <div className="rd-tl-item" key={a.id}>
+                                    {recent.map((it) => (it.kind === 'mine' ? (
+                                        <div className="rd-tl-item" key={`m${it.at}${it.text.slice(0, 8)}`}>
+                                            <span className="rd-tl-dot" style={{ background: highlightColorOf(prefs, 'user') }} />
+                                            <div className="rd-tl-body">
+                                                <div className="rd-tl-head">
+                                                    <span className="rd-tl-who">{nameOf('user')}</span>
+                                                    <span className="rd-tl-time">{fmtClock(it.at)}</span>
+                                                </div>
+                                                <div className="rd-tl-text">{it.what}{it.text ? `：${it.text}` : ''}</div>
+                                                {it.quote && <div className="rd-tl-ex">“{it.quote}”</div>}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="rd-tl-item" key={it.a.id}>
                                             <span
                                                 className="rd-tl-dot"
-                                                style={{ background: highlightColorOf(prefs, a.charId) }}
+                                                style={{ background: highlightColorOf(prefs, it.a.charId) }}
                                             />
                                             <div className="rd-tl-body">
                                                 <div className="rd-tl-head">
-                                                    <span className="rd-tl-who">{nameOf(a.charId)}</span>
-                                                    <span className="rd-tl-time">{fmtClock(a.createdAt)}</span>
+                                                    <span className="rd-tl-who">{nameOf(it.a.charId)}</span>
+                                                    <span className="rd-tl-time">{fmtClock(it.a.createdAt)}</span>
                                                 </div>
-                                                <div className="rd-tl-text">{a.summary}</div>
-                                                {a.excerpt && <div className="rd-tl-ex">{a.excerpt}</div>}
-                                                {a.replies?.map((line, i) => (
+                                                <div className="rd-tl-text">{it.a.summary}</div>
+                                                {it.a.excerpt && <div className="rd-tl-ex">{it.a.excerpt}</div>}
+                                                {it.a.replies?.map((line, i) => (
                                                     <div className="rd-tl-reply" key={i}>{line}</div>
                                                 ))}
-                                                {a.feeling && <div className="rd-coread-feel">{a.feeling}</div>}
+                                                {it.a.feeling && <div className="rd-coread-feel">{it.a.feeling}</div>}
                                                 <div className="rd-tl-meta">
-                                                    {a.kind === 'summary'
+                                                    {it.a.kind === 'summary'
                                                         ? '总结'
                                                         : [
-                                                            a.annCount ? `批注 ${a.annCount}` : '',
-                                                            a.replyCount ? `回复 ${a.replyCount}` : '',
-                                                            a.pages ? `${a.pages} 页` : '',
+                                                            it.a.annCount ? `批注 ${it.a.annCount}` : '',
+                                                            it.a.replyCount ? `回复 ${it.a.replyCount}` : '',
+                                                            it.a.pages ? `${it.a.pages} 页` : '',
                                                         ].filter(Boolean).join(' · ') || '读了一段'}
-                                                    {(a.tokensIn || a.tokensOut || a.tokens)
-                                                        ? ` · ${fmtTok(a.tokens)} token（读进去 ${fmtTok(a.tokensIn)} / 吐出来 ${fmtTok(a.tokensOut)}）`
+                                                    {(it.a.tokensIn || it.a.tokensOut || it.a.tokens)
+                                                        ? ` · ${fmtTok(it.a.tokens)} token（读进去 ${fmtTok(it.a.tokensIn)} / 吐出来 ${fmtTok(it.a.tokensOut)}）`
                                                         : ''}
                                                 </div>
                                             </div>
                                         </div>
-                                    ))}
+                                    )))}
                                 </div>
                             </div>
                         )}

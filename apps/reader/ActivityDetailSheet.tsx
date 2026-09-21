@@ -67,8 +67,11 @@ export function RoamCalls({ calls }: { calls: RdRoamActivity[] }) {
                                 {a.feedLater && a.feedLater.length > 0 ? ` · 你还没接过话的 ${a.feedLater.length} 条` : ''}
                             </div>
                         )}
-                        {a.feedLater?.map((line, i) => (
-                            <div className="rd-tl-reply" key={`f${i}`}>{line}</div>
+                        {/* 一页一块，块里是多行（那一页的原文 + 批注 + 讨论）——按行摊开显示 */}
+                        {a.feedLater?.map((block, i) => (
+                            <div className="rd-tl-reply" key={`f${i}`}>
+                                {block.split('\n').map((line, j) => <div key={j}>{line}</div>)}
+                            </div>
                         ))}
                         {a.replyMissed ? (
                             <div className="rd-tl-ex">他想接 {a.replyMissed} 条，抄回来的句子没对上原文，没落上</div>

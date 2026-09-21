@@ -121,6 +121,53 @@ async function notesSince(ctx: ArchiveCtx, since: string): Promise<number> {
 }
 
 /**
+ * 这段时间她自己的动作时刻（批注 + 在讨论里说的话）——「记录」口径要用。
+ */
+async function herTouchesSince(bookId: string, since: string): Promise<string[]> {
+    const [anns, threads] = await Promise.all([
+        listAnnotations(bookId).catch(() => []),
+        listThreads(bookId).catch(() => []),
+    ]);
+    const out: string[] = [];
+    for (const a of anns) {
+        if (a.ownerId === 'user' && a.kind !== 'bookmark' && a.createdAt > since) out.push(a.createdAt);
+    }
+    for (const t of threads) {
+        for (const m of t.messages) {
+            if (m.role === 'user' && m.createdAt > since) out.push(m.createdAt);
+        }
+    }
+    return out;
+}
+
+/**
+ * 「记录」口径（她 09-21 的原话）：**角色一次调用算一条**；
+ * **她五分钟之内连着留下的一堆批注、回复合起来算一条**。
+ * 所以 = 角色的调用条数 + 她那堆动作按五分钟切出来的段数。
+ */
+export function countRecords(opts: {
+    /** 角色的调用时刻（一次读 = 一条） */
+    calls: string[];
+    /** 她自己的动作时刻（批注 / 回复；乱序也行） */
+    hers: string[];
+    /** 多近算「一堆」（默认 5 分钟） */
+    gapMs?: number;
+}): number {
+    const gap = opts.gapMs ?? 5 * 60 * 1000;
+    const times = opts.hers
+        .map((t) => new Date(t).getTime())
+        .filter((n) => Number.isFinite(n))
+        .sort((a, b) => a - b);
+    let bursts = 0;
+    let prev = Number.NEGATIVE_INFINITY;
+    for (const t of times) {
+        if (t - prev > gap) bursts += 1;
+        prev = t;
+    }
+    return opts.calls.length + bursts;
+}
+
+/**
  * 跑一次归档。`force=true` 时**不管攒没攒够**，把水位线以下剩下的全总结掉（共读结束走它）。
  * 自己管胶囊（跑起来才开，跑完标成功/失败）——攒不够就静悄悄什么都不做。
  */
@@ -138,10 +185,15 @@ export async function runArchive(ctx: ArchiveCtx, opts: { force: boolean }): Pro
     const pendingMsgs = Math.max(0, all.length - cur.summarizedMsgs);
     const activities = await activitiesSince(ctx, since);
 
-    // 口径（她 09-20）：拿什么数推水位线
-    const pending = cur.rule.metric === 'msgs' ? pendingMsgs
-        : cur.rule.metric === 'notes' ? await notesSince(ctx, since)
-            : activities.reduce((n, a) => n + (a.pages ?? 0), 0);
+    // 口径（她 09-20 定的三维；09-21 加了「记录」）：拿什么数推水位线
+    const pending = cur.rule.metric === 'calls'
+        ? countRecords({
+            calls: activities.map((a) => a.createdAt),
+            hers: await herTouchesSince(ctx.book.id, since),
+        })
+        : cur.rule.metric === 'msgs' ? pendingMsgs
+            : cur.rule.metric === 'notes' ? await notesSince(ctx, since)
+                : activities.reduce((n, a) => n + (a.pages ?? 0), 0);
 
     if (!planArchive({ pending, threshold: cur.rule.threshold, force: opts.force })) {
         return { ran: false, took: 0, text: '', reason: 'below-trigger' };

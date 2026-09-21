@@ -3,12 +3,32 @@
 // 09-20 拆成「口径 × 时机」两个维度）+ 后台任务胶囊的显示窗口。
 // （放在 utils/reader 下是因为 vitest 的 include 只吃这几个目录）
 import { describe, expect, it } from 'vitest';
-import { archiveTake, planArchive } from '../../apps/reader/coreadArchive';
+import { archiveTake, countRecords, planArchive } from '../../apps/reader/coreadArchive';
 import { DEFAULT_RULE } from '../../apps/reader/coreadStore';
 import { JOB_LINGER_MS, visibleJobs, type ReaderJob } from '../../apps/reader/readerJobs';
 
 const T = DEFAULT_RULE.threshold;   // 10（她 09-21 改的）
 
+
+describe('共读归档 · 「记录」口径（她 09-21 拍板）', () => {
+    const t = (min: number) => new Date(Date.UTC(2026, 8, 21, 10, min)).toISOString();
+
+    it('角色一次调用算一条', () => {
+        expect(countRecords({ calls: [t(0), t(10), t(20)], hers: [] })).toBe(3);
+    });
+
+    it('她五分钟之内连着留下的一堆，合起来算一条', () => {
+        expect(countRecords({ calls: [], hers: [t(0), t(1), t(2), t(4)] })).toBe(1);
+    });
+
+    it('隔开超过五分钟就算下一堆', () => {
+        expect(countRecords({ calls: [], hers: [t(0), t(1), t(9), t(10)] })).toBe(2);
+    });
+
+    it('两边加起来才是记录数', () => {
+        expect(countRecords({ calls: [t(3), t(30)], hers: [t(0), t(2), t(40), t(42)] })).toBe(4);
+    });
+});
 describe('共读归档 · 水位线', () => {
     it('差一条还不总结（阈值才触发，最后那条留着做衔接）', () => {
         expect(planArchive({ pending: T - 1, threshold: T, force: false })).toBe(false);
@@ -33,8 +53,8 @@ describe('共读归档 · 水位线', () => {
         expect(planArchive({ pending: 10, threshold: 10, force: false })).toBe(true);
         expect(planArchive({ pending: 9, threshold: 10, force: false })).toBe(false);
     });
-    it('默认规则本身：按讨论句数、10 条、自动归档', () => {
-        expect(DEFAULT_RULE).toEqual({ metric: 'msgs', threshold: 10, timing: 'auto' });
+    it('默认规则本身：按记录、10 条、自动归档（她 09-21 拍板）', () => {
+        expect(DEFAULT_RULE).toEqual({ metric: 'calls', threshold: 10, timing: 'auto' });
     });
 });
 

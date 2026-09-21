@@ -432,8 +432,9 @@ export async function writeCoReadReplies(opts: {
     for (const r of replies) {
         const q = cleanQuote(r.quote);
         if (!q) { missed += 1; continue; }
-        // 他自己划的不接（不用回自己）；同一句话多处出现时优先本章的
-        const live = anns.filter((a) => a.kind !== 'bookmark' && a.ownerId !== charId);
+        // **他自己划的也能接**（她 09-21：她回了他划的那句，他得能在同一条下面回她）；
+        // 同一句话在多处出现时优先本章的
+        const live = anns.filter((a) => a.kind !== 'bookmark');
         const inChapter = live.filter((a) => (a.chapterIdx ?? chapterIdx) === chapterIdx);
         const pick = (pool: typeof live) => pool.find((a) => norm(a.anchor.text) === q)
             ?? pool.find((a) => norm(a.note ?? '') === q && q.length >= 4)
