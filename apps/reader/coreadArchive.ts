@@ -72,15 +72,24 @@ export function archiveTake(opts: { pendingMsgs: number; force: boolean }): numb
     return Math.max(1, opts.pendingMsgs - 1);
 }
 
-/** 这本书的讨论流水（全章，时间序）——水位线数的是它。 */
+/**
+ * 这本书的讨论流水（时间序）——水位线数的是它。
+ *
+ * **`since` 之前的一律不算**（她 09-21）：这本书的讨论是**一本书一条河**，从第一次读就有；
+ * 水位线却从 0 起数，不切时间的话，新开一场共读会把**以前**的话（她自己读书时说的、
+ * 上一个会话的旧账）当成「这段时间说的」总结进去——她看到的「把之前非共读的批注
+ * 也算进共读的总结」就是这个。传会话开始时间就干净了。
+ */
 export async function collectDiscussion(
     bookId: string,
     nameOf: (ownerId: string) => string,
+    since?: string,
 ): Promise<Array<{ who: string; text: string; at: string }>> {
     const threads = await listThreads(bookId);
     const rows: Array<{ who: string; text: string; at: string }> = [];
     for (const t of threads) {
         for (const m of t.messages) {
+            if (since && m.createdAt <= since) continue;
             const who = m.role === 'user' ? 'user' : (m.role === 'char' ? (m.charId ?? null) : null);
             rows.push({ who: who ? nameOf(who) : '旁白', text: m.content, at: m.createdAt });
         }
@@ -89,14 +98,19 @@ export async function collectDiscussion(
     return rows;
 }
 
-/** 这段时间里大家读到了什么（参与共读的每个人各自的调用都算），时间序。 */
+/**
+ * 这段时间里大家读到了什么（参与共读的每个人各自的调用都算），时间序。
+ * **只认这场共读读出来的**（`mode === 'coread'`，她 09-21）：他自己单独读书、
+ * 翻笔记那些不算「我们一起读到的」。
+ */
 async function activitiesSince(ctx: ArchiveCtx, since: string): Promise<RdRoamActivity[]> {
     const groups = await Promise.all(
         ctx.chars.map((c) => listRoamActivities(c.id, 200).catch(() => [] as RdRoamActivity[])),
     );
     return groups
         .flat()
-        .filter((a) => a.bookId === ctx.book.id && a.createdAt > since && a.kind !== 'summary')
+        .filter((a) => a.bookId === ctx.book.id && a.createdAt > since && a.kind !== 'summary'
+            && a.mode === 'coread')
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
@@ -119,7 +133,8 @@ export async function runArchive(ctx: ArchiveCtx, opts: { force: boolean }): Pro
     if (!ctx.api) return { ran: false, took: 0, text: '', reason: 'no-api' };
 
     const since = cur.summarizedAt ?? cur.startedAt;
-    const all = await collectDiscussion(ctx.book.id, ctx.nameOf);
+    // 只数**这场共读开始之后**说的话（她 09-21：以前的旧账不算这次的）
+    const all = await collectDiscussion(ctx.book.id, ctx.nameOf, cur.startedAt);
     const pendingMsgs = Math.max(0, all.length - cur.summarizedMsgs);
     const activities = await activitiesSince(ctx, since);
 

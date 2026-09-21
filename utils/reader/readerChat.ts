@@ -318,10 +318,14 @@ export interface ReadPageInput {
     /** 这一次最多留几条批注（角色自己的设置；不给就用默认） */
     noteLimit?: number;
     /**
-     * 回复模式（她 09-21 定稿）：**他读的那几页上所有的批注**（当风景看也行，感兴趣的自己接）
-     * ＋ 他参与过的讨论里别人接着说他的话。开着就不必她点 ⚡——他自己决定回不回、要不要往下读。
+     * 回复模式（她 09-21 定稿）：
+     *   · `notes`  = **他读的那几页上所有的批注**（当风景看也行，感兴趣的自己接）
+     *   · `later`  = 他最近几次读过的那几页上，还留着他没接过话的（她加完批注他往后走了，
+     *                那些话他的窗口再也扫不到——她希望他能回「以她的话收尾」的讨论）
+     *   · `followUps` = 他参与过的讨论里，他说完之后别人接着说的话
+     * 开着就不必她点 ⚡——他自己决定回不回、要不要往下读。
      */
-    replyFeed?: { notes: string[]; followUps: string[] };
+    replyFeed?: { notes: string[]; later: string[]; followUps: string[] };
     /** 用哪套提示词（'' = 默认套；'rp' = 角色扮演套）。来自角色自己的读书设置 */
     preset?: string;
     api: ReaderCallRuntime;
@@ -352,9 +356,11 @@ export async function readCoReadPage(input: ReadPageInput): Promise<CoReadPageRe
         // 他读的这几页上原本就有的批注（她 09-21：读哪页就看到哪页，当风景看也行）
         replyFeed && replyFeed.notes.length > 0
             ? `\n这几页上已经留着的批注（当风景看也行，想接哪句就接）：\n${replyFeed.notes.join('\n')}` : '',
+        replyFeed && replyFeed.later.length > 0
+            ? `\n你上几次读到的那几页上，还留着这些你还没接过话的：\n${replyFeed.later.join('\n')}` : '',
         replyFeed && replyFeed.followUps.length > 0
             ? `\n你参与过的那几条下面，大家接着说：\n${replyFeed.followUps.join('\n')}` : '',
-        replyFeed && (replyFeed.notes.length > 0 || replyFeed.followUps.length > 0)
+        replyFeed && (replyFeed.notes.length > 0 || replyFeed.later.length > 0 || replyFeed.followUps.length > 0)
             ? '\n想接哪句就写进 replies：quote 原样抄那句话，lines 里一句一条，像聊天那样连着说；这次一句都不想接就留一个空数组。'
             : '',
         input.noteLimit ? `这次最多划 ${input.noteLimit} 条。` : '',
@@ -628,11 +634,12 @@ export async function summarizeCoReadRange(input: SummarizeInput): Promise<strin
                         ? `这一段的范围：第 ${from.chapterIdx + 1} 章第 ${from.paraIdx + 1} 段 → 第 ${to.chapterIdx + 1} 章第 ${to.paraIdx + 1} 段。`
                         : `这一段的范围：从开头读到第 ${to.chapterIdx + 1} 章第 ${to.paraIdx + 1} 段。`,
                     mins > 0 ? `这一场共读一共持续了 ${durText}。` : '',
-                    `一起读的人一共 ${chars.length} 位：${names}。`,
+                    // 一起读的人 = 她 + 角色。原来只数了角色（她说三个人写成两个人，就是这儿）
+                    `一起读的人一共 ${chars.length + 1} 位：${user.name}${names ? `、${names}` : ''}。`,
                     '',
-                    readLines.length > 0 ? `这段时间他读到的：\n${readLines.join('\n')}` : '',
+                    readLines.length > 0 ? `这段时间大家读到的：\n${readLines.join('\n')}` : '',
                     '',
-                    talkLines.length > 0 ? `这段时间两个人说的话（时间序）：\n${talkLines.join('\n')}` : '',
+                    talkLines.length > 0 ? `这段时间大家说的话（时间序）：\n${talkLines.join('\n')}` : '',
                     '',
                     readLines.length === 0 && talkLines.length === 0 && excerpt
                         ? `这段时间没什么可记的，只有这一小段正文：\n${excerpt}` : '',

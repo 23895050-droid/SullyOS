@@ -28,7 +28,7 @@ import { useOS } from '../../context/OSContext';
 import type { CharacterProfile } from '../../types';
 import {
     canSee, getProgress, listAnnotations, listRoamActivities, listThreads, appendRoamActivity,
-    newRoamGroup, putProgress, rdId, type RdBook, type RdRoamActivity,
+    newRoamGroup, putProgress, rdId, type RdAnnotation, type RdBook, type RdRoamActivity,
 } from '../../utils/reader/readerDb';
 import { recentChatLines, readCoReadPage, resolveReadApi, writeCoReadMarks, writeCoReadReplies, type ReaderCallRuntime } from '../../utils/reader/readerChat';
 import { analyzeCharStyle, needStyleAnalysis } from '../../utils/reader/readerStyle';
@@ -293,18 +293,24 @@ export default function ReaderCoRead({
     /**
      * 开读之前，把他要读的那几页摆给他看（她 09-21 定稿）。
      *
-     * **一份**：他读哪几页，那几页上**所有的批注**都给他——当风景看也行，感兴趣的自己接。
+     * **一、他眼下这几页**：那几页上**所有的批注**都给他——当风景看也行，感兴趣的自己接。
      *   原来是两份：一份「全书最近 8 条」（她原话：「我也不知道那最近八条是从哪来的」——撤了），
      *   一份「他还没回过的」（漏掉了同一页上别人刚说过的，也漏掉了他自己划过的）。
      *   现在合成一份：他眼下这一页长什么样，他就看到什么样。他接过话的那几条后面标一句，
      *   省得他对着同一条说第二遍。
-     * **另加一件**：他参与过的讨论里，他说完之后别人接着说——关于他的事他得知道。
+     *
+     * **二、他上几次读到的那几页**（她 09-21 追加）：他读完往后走了以后，她又在那几页上留了话，
+     *   那些话他的窗口里再也扫不到——**他希望的是他能回「以她的话收尾」的那些讨论**，
+     *   所以把他最近三次读过的段落也捞一遍，挑上面**他还没接过话的**摆给他。
+     *   名单是现读的：她删掉那条批注，这儿下一次就没有了。
+     *
+     * **三、他参与过的讨论**里，他说完之后别人接着说——关于他的事他得知道。
      *   按「他在这条讨论里的最后一句话之后」算，不用时间戳切——不会漏、也不会重复。
      */
     const gatherPageFeed = useCallback(async (
         charId: string,
         window: Array<{ paraIdx: number; text: string }>,
-    ): Promise<{ notes: string[]; followUps: string[] }> => {
+    ): Promise<{ notes: string[]; later: string[]; followUps: string[] }> => {
         const from = window[0]?.paraIdx ?? 0;
         const to = window[window.length - 1]?.paraIdx ?? from;
         const [anns, ths] = await Promise.all([listAnnotations(book.id), listThreads(book.id)]);
@@ -314,19 +320,41 @@ export default function ReaderCoRead({
             ths.filter((t) => t.messages.some((m) => m.role === 'char' && m.charId === charId))
                 .map((t) => t.anchorKey),
         );
-        // 他眼下这几页上的批注，一条不落（他自己划的也在里头——那一页本来就是他看到的样子）
-        const notes = anns
+        const keyOf = (a: RdAnnotation) => threadKeyOf(a.chapterIdx ?? chapterIdx, a.anchor, a.ownerId);
+        /** 一条批注 → 给他的那一行 */
+        const lineOf = (a: RdAnnotation) => {
+            const who = a.ownerId === charId ? '你' : `[${nameOf(a.ownerId)}]`;
+            const done = joined.has(keyOf(a)) ? '（你已经接过话了）' : '';
+            return `${who} “${a.anchor.text}” → ${a.note}${done}`;
+        };
+        const readable = anns
             .filter((a) => a.kind !== 'bookmark' && !!a.note)
-            .filter((a) => canSee(a, charId))
-            .filter((a) => a.anchor.startPara >= from && a.anchor.startPara <= to)
-            .map((a) => {
-                const who = a.ownerId === charId ? '你' : `[${nameOf(a.ownerId)}]`;
-                const done = joined.has(threadKeyOf(a.chapterIdx ?? chapterIdx, a.anchor, a.ownerId))
-                    ? '（你已经接过话了）' : '';
-                return `${who} “${a.anchor.text}” → ${a.note}${done}`;
-            });
+            .filter((a) => canSee(a, charId));
 
-        // ② 他参与过的讨论里，他说完之后别人接着说
+        // 一、他眼下这几页（顺序就是书上从上到下）
+        const here = readable.filter((a) => a.anchor.startPara >= from && a.anchor.startPara <= to);
+        const seen = new Set(here.map((a) => a.id));
+
+        // 二、他最近三次读过的段落，上面还留着他没接过话的（最新的 8 条，按书上的顺序摆）
+        const reads = (await listRoamActivities(charId, 200).catch(() => [] as RdRoamActivity[]))
+            .filter((a) => a.bookId === book.id && a.kind === 'annotate' && a.mode === 'coread'
+                && a.fromPara !== undefined && a.toPara !== undefined)
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+            .slice(-3);
+        const later = (reads.length === 0 ? [] : [...readable]
+            .filter((a) => !seen.has(a.id))
+            .filter((a) => reads.some((r) => a.anchor.startPara >= (r.fromPara ?? 0)
+                && a.anchor.startPara <= (r.toPara ?? 0)))
+            .filter((a) => !joined.has(keyOf(a)))
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+            .slice(-8)
+            .sort((a, b) => a.anchor.startPara - b.anchor.startPara
+                || a.anchor.startOffset - b.anchor.startOffset))
+            .map(lineOf);
+
+        const notes = here.map(lineOf);
+
+        // 三、他参与过的讨论里，他说完之后别人接着说
         const followUps: string[] = [];
         for (const t of ths) {
             const his = t.messages.filter((m) => m.role === 'char' && m.charId === charId);
@@ -339,7 +367,7 @@ export default function ReaderCoRead({
                 followUps.push(`[${who}] 在“${t.anchor.text}”那条下面说：${m.content}`);
             }
         }
-        return { notes, followUps: followUps.slice(-10) };
+        return { notes, later, followUps: followUps.slice(-10) };
     }, [book.id, chapterIdx, nameOf]);
 
     // ── 归档 ──────────────────────────────────────────────────────
