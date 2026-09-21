@@ -17,6 +17,7 @@ import {
     Lightning, Sun, Target, TextAa, Trophy,
 } from '@phosphor-icons/react';
 import ReaderCover from '../ReaderCover';
+import { readerDayLine, readerFootLine } from '../readerLines';
 import DailyReport from './ReaderDaily';
 import { listBooks, listProgressByBook, type RdBook, type RdProgress } from '../../../utils/reader/readerDb';
 import {
@@ -287,7 +288,7 @@ export default function ReaderStats({ refreshToken }: Props) {
             ) : span === 'total' ? (
                 <>
                     <div className="rd-hello">
-                        <div className="rd-hello-big">第 {dayNo} 天，点点滴滑都是心意 ❤️</div>
+                        <div className="rd-hello-big">第 {dayNo} 天，{readerDayLine()}</div>
                         <div className="rd-stat-tile-cap" style={{ marginTop: 4 }}>
                             连续读了 {streak} 天 · 一共打开 {sessions} 次
                         </div>
@@ -475,7 +476,7 @@ export default function ReaderStats({ refreshToken }: Props) {
 
             {rows.length > 0 && (
                 <div className="rd-muted" style={{ textAlign: 'center', marginTop: 'var(--rd-space-5)' }}>
-                    <CalendarBlank size={14} /> 继续读下去，遇见更好的自己 ✨
+                    <CalendarBlank size={14} /> {readerFootLine('stats')}
                 </div>
             )}
         </div>

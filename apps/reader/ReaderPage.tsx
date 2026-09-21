@@ -1186,7 +1186,11 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     }
 
     return (
-        <div className="rd-reader" data-rd-page="reader" ref={rootRef}>
+        // 「打开书」这一步的聚焦式转场（她 09-21 定，T7④）：阅读页是整屏页，旧页（书架）
+        // 那一整棵 .rd-body 都卸载了，没有旧页可留——所以走 index.html 里的一次性版
+        // （page-focus-once：只聚焦淡入、不淡透明度，免得开头露一帧空底）。
+        // 阅读页每次都是新挂的（键里带 bookId），所以这个 class 一上来就播一次，正好。
+        <div className="rd-reader page-focus-once" data-rd-page="reader" ref={rootRef}>
             {/* 夹了书签：纸的右上角挂一条红丝带（参考图 1/3） */}
             {bookmarked && <div className="rd-ribbon" aria-hidden />}
 

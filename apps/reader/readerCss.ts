@@ -120,6 +120,17 @@ export const READER_SKELETON_CSS = `
 
 /* ── 外壳：内容区 + 底部五个页签 ── */
 .rd-body { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+
+/* 页签切换的「聚焦式」转场（她 09-21 定，T7④）。
+   两块格子轮流坐庄：**旧页不卸载**（同一格子树，只换 class）——它的数据和滚动位置都留着。
+   重挂一次要重新读库，会先闪一帧空的，那是闪屏不是转场。
+   谁在上面：**现行的那层绝对定位**（绝对定位画在流内内容之上），旧页留在流里，
+   所以 DOM 顺序不用管、也**不给任何一层 z-index**——那会开一个新的层叠上下文，
+   把弹卡（position:fixed）关进去，可能被底部导航盖住。 */
+.rd-tab { height: 100%; }
+.rd-tab-top { position: absolute; inset: 0; }
+.rd-tab-ghost { position: relative; pointer-events: none; }
+.rd-tab-hidden { visibility: hidden; }
 .rd-screen {
   position: absolute; inset: 0;
   overflow-y: auto; overscroll-behavior: contain;
@@ -1464,6 +1475,52 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 .rd-slider-hue { height: 14px; border-radius: var(--rd-r-pill); appearance: none; -webkit-appearance: none; }
 .rd-slider-hue::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: var(--rd-r-pill); background: var(--rd-knob); box-shadow: var(--rd-shadow-sm); }
 .rd-hl-preview { width: 30px; height: 30px; border-radius: var(--rd-r-pill); box-shadow: var(--rd-shadow-sm); flex: 0 0 auto; }
+
+/* ── 划线设置那张卡（T7① 重写：跟书房其它弹卡同一套语言）──────────────
+   「我的笔」= 一张卡：左边大色点 + 色号，右边是取色窗（原生 input[type=color] 就长
+   一个方块，只给它统一几何）。下面「存下来的颜色」用 .rd-pen-swatches 排，
+   不再借 .rd-hunt-hist 那个收集页的类。 */
+.rd-pen-card { display: flex; align-items: center; gap: var(--rd-space-4); }
+.rd-pen-dot {
+  width: 46px; height: 46px; flex: 0 0 auto;
+  border-radius: var(--rd-r-pill); box-shadow: var(--rd-shadow-sm);
+}
+.rd-pen-info { flex: 1 1 auto; min-width: 0; }
+.rd-pen-hex { font-family: var(--rd-font-heading); font-size: var(--rd-fs-lg); line-height: 1.4; }
+/* 「我的笔」里那个取色窗：比设置行里那枚大一档，跟左边色点等高 */
+.rd-pen-pick .rd-color-in { width: 46px; height: 46px; border-radius: var(--rd-r-md); }
+.rd-pen-swatches { display: flex; flex-wrap: wrap; gap: var(--rd-space-3); }
+.rd-pen-row { display: flex; align-items: center; gap: var(--rd-space-3); }
+.rd-pen-mini {
+  width: 18px; height: 18px; flex: 0 0 auto;
+  border-radius: var(--rd-r-pill); box-shadow: var(--rd-shadow-sm);
+}
+/* 还没挑笔的人：画一个空心圈，别拿默认色冒充满上（截图里两个「还没挑」旁边顶着
+   一绿一蓝两个实心点，看着像他真有那支笔） */
+.rd-pen-mini-none { background: transparent; box-shadow: inset 0 0 0 1px var(--rd-rule); }
+
+/* ── 自定义 CSS 面板（T7② 重写）──────────────────────────────────
+   ① 层的顺序用三枚小胶囊讲清楚（骨架 → 皮肤 → 你写的），比一段散文好读；
+   ② 「可用的名字」是可点的清单——原来那句「类名见骨架层注释」她根本看不见注释。 */
+.rd-css-layers { display: flex; align-items: center; gap: var(--rd-space-2); flex-wrap: wrap; }
+.rd-css-layer {
+  padding: var(--rd-space-1) var(--rd-space-3);
+  border-radius: var(--rd-r-pill);
+  background: var(--rd-bg-2); color: var(--rd-ink-soft);
+  font-size: var(--rd-fs-caption);
+}
+.rd-css-layer-me { background: var(--rd-chip-on-bg); color: var(--rd-chip-on-ink); }
+.rd-css-sep { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-css-ref { display: flex; flex-direction: column; }
+.rd-css-ref-row {
+  display: flex; align-items: baseline; gap: var(--rd-space-3);
+  width: 100%; text-align: left; border: 0; background: transparent; color: inherit;
+  padding: var(--rd-space-2) 0; font-family: inherit;
+}
+.rd-css-ref-row + .rd-css-ref-row { border-top: 1px solid var(--rd-rule-soft); }
+.rd-css-ref-row:active { background: var(--rd-bg-2); }
+.rd-css-ref-name { font-family: var(--rd-font-heading); font-size: var(--rd-fs-sm); flex: 0 0 auto; min-width: 116px; }
+.rd-css-ref-what { color: var(--rd-ink-soft); font-size: var(--rd-fs-sm); flex: 1 1 auto; min-width: 0; }
 .rd-hunt-chip {
   border: 0; border-radius: var(--rd-r-pill); background: var(--rd-card);
   color: var(--rd-ink); font-family: inherit; font-size: var(--rd-fs-sm);

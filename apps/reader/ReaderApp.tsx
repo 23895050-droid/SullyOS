@@ -8,7 +8,7 @@
 // 层级：书架/笔记/书库/统计/设置 装在 .rd-body 里，下面挂 .rd-nav；
 // 阅读页与书详情是整屏页（盖住导航，参考图里这两页都没有底部导航）。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChartBar, Gear, NoteBlank, SquaresFour } from '@phosphor-icons/react';
 import ReaderSkinPreset from './ReaderSkinPreset';
 import ReaderPage from './ReaderPage';
@@ -44,7 +44,18 @@ interface Props {
 
 export default function ReaderApp({ onBack }: Props) {
     const prefs = useReaderPrefs();
-    const [tab, setTab] = useState<TabKey>('shelf');
+    /**
+     * 页签的两块格子：a 出生就是书架，b 空着等第一次切换。见下面 setTab 那段注释。
+     * 不直接存 `tab`——存的是「哪一格装着谁、谁在上面」，这样旧页才不会被卸载。
+     */
+    const [layers, setLayers] = useState<{ a: TabKey; b: TabKey | null; top: 'a' | 'b' }>({ a: 'shelf', b: null, top: 'a' });
+    /** 交叉转场进行中（旧页失焦 + 新页聚焦，~490ms） */
+    const [fading, setFading] = useState(false);
+    /** 从整屏页退回来那一下的一次性聚焦（没有旧页可留，见 showTab） */
+    const [focusOnce, setFocusOnce] = useState(false);
+    const fadeTimer = useRef<number | null>(null);
+    const focusTimer = useRef<number | null>(null);
+    const tab: TabKey = (layers.top === 'a' ? layers.a : layers.b) ?? layers.a;
     /** 正在读的书（整屏阅读页） */
     const [reading, setReading] = useState<string | null>(null);
     /** 「查看原文」的落点（章内章号 + 章内段号）；不设就是照常恢复上次读到哪 */
@@ -74,6 +85,48 @@ export default function ReaderApp({ onBack }: Props) {
         return () => window.clearTimeout(t);
     }, [toast]);
 
+    /**
+     * 页签切换 = **聚焦式转场**（她 09-21 定，T7④）：旧页失焦淡出 → 新页聚焦淡入，零位移。
+     *
+     * 做法是两块格子轮流坐庄（见上面 `layers`）：新页进**底下那格**，然后把 top 翻过去。
+     * 关键是**旧页不卸载**——它还在原来那一格、还是原来那棵树，只是从「现行」变成了「上一页」，
+     * 换的只是 class。所以它的数据和滚动位置都留着。
+     * （反过来做——把旧页重新渲染一遍当背景——不行：重挂一次要重新读库，
+     *   会先闪一帧空的，那是闪屏不是转场。）
+     */
+    const setTab = (next: TabKey) => {
+        if (next === tab) return;
+        const bottom: 'a' | 'b' = layers.top === 'a' ? 'b' : 'a';
+        setLayers(bottom === 'a' ? { ...layers, a: next, top: 'a' } : { ...layers, b: next, top: 'b' });
+        setFocusOnce(false);
+        setFading(true);
+        if (fadeTimer.current) window.clearTimeout(fadeTimer.current);
+        // 460ms 是两段动画加起来（260 淡出 / 120 错开 + 340 淡入），多给一点收尾
+        fadeTimer.current = window.setTimeout(() => setFading(false), 490);
+    };
+
+    /**
+     * 直接显示某一页、**不跟旧页交叉**。两处用它：
+     *   · 深链开局（跳进来就落在某页，那一下不该是「切换」）
+     *   · 从整屏页（阅读页 / 书详情 / 角色页 / 活动页）退回来——那边整棵 .rd-body 都卸载了，
+     *     没有旧页可留，重挂的旧页会闪一帧空的。
+     * 所以走 index.html 里那个「一次性聚焦」版（`page-focus-once`）：只聚焦淡入、不淡透明度，
+     * 免得开头露一帧空底。（打开书那个方向是 ReaderPage 自己套的同一招。）
+     */
+    const showTab = (next: TabKey) => {
+        setLayers({ a: next, b: null, top: 'a' });
+        setFading(false);
+        setFocusOnce(true);
+        if (fadeTimer.current) window.clearTimeout(fadeTimer.current);
+        if (focusTimer.current) window.clearTimeout(focusTimer.current);
+        focusTimer.current = window.setTimeout(() => setFocusOnce(false), 420);
+    };
+
+    useEffect(() => () => {
+        if (fadeTimer.current) window.clearTimeout(fadeTimer.current);
+        if (focusTimer.current) window.clearTimeout(focusTimer.current);
+    }, []);
+
     // 深链：跳进来直接落到该到的页
     useEffect(() => {
         const target: ReaderDeepLink | null = consumeReaderDeepLink();
@@ -82,7 +135,7 @@ export default function ReaderApp({ onBack }: Props) {
             // 「在读的那本书」：继续上次读的；没有就落书架
             const last = prefs.lastBookId;
             if (last) setReading(last);
-            else setTab('shelf');
+            else showTab('shelf');
             return;
         }
         if (target.startsWith('book:')) {
@@ -94,7 +147,7 @@ export default function ReaderApp({ onBack }: Props) {
             }
             setReading(id);
         }
-        else if (TABS.some((t) => t.key === target)) setTab(target as TabKey);
+        else if (TABS.some((t) => t.key === target)) showTab(target as TabKey);
         // 只在挂载时跑一次：prefs 变化不该重新跳页
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -142,10 +195,10 @@ export default function ReaderApp({ onBack }: Props) {
                     startAt={startAt}
                     notify={notify}
                     onOpenDetails={(id) => { setReading(null); setDetails(id); }}
-                    onOpenStats={() => { setReading(null); setTab('stats'); }}
+                    onOpenStats={() => { setReading(null); showTab('stats'); }}
                     // 退出这本书 → 回书架（别往 app 外退：这行以前连调了 app 级 onBack，
                     // 点一次直接退到手机桌面。她 2026-09-15 报的）
-                    onBack={() => { setReading(null); setTab('shelf'); refresh(); }}
+                    onBack={() => { setReading(null); showTab('shelf'); refresh(); }}
                 />
                 <ReaderJobPill />
                 {toast && <div className="rd-toast">{toast}</div>}
@@ -162,7 +215,7 @@ export default function ReaderApp({ onBack }: Props) {
                     charId={charPage}
                     initialView={charView}
                     notify={notify}
-                    onBack={() => { setCharPage(null); setTab(charFrom === 'settings' ? 'settings' : 'library'); refresh(); }}
+                    onBack={() => { setCharPage(null); showTab(charFrom === 'settings' ? 'settings' : 'library'); refresh(); }}
                     onOpenAt={(bookId, chapterIdx, paraIdx) => {
                         setCharPage(null);
                         openAt(bookId, chapterIdx, paraIdx);
@@ -179,7 +232,7 @@ export default function ReaderApp({ onBack }: Props) {
         return (
             <div className={rootClass}>
                 <ReaderSkinPreset />
-                <ActivityPage notify={notify} onBack={() => { setActPage(false); setTab('library'); refresh(); }} />
+                <ActivityPage notify={notify} onBack={() => { setActPage(false); showTab('library'); refresh(); }} />
                 <ReaderJobPill />
                 {toast && <div className="rd-toast">{toast}</div>}
             </div>
@@ -205,39 +258,63 @@ export default function ReaderApp({ onBack }: Props) {
         );
     }
 
+    /** 五个页签各自的正文（两块格子都用它渲染，所以抽出来） */
+    const tabView = (key: TabKey) => (
+        <>
+            {key === 'shelf' && (
+                <ReaderShelf
+                    onOpenBook={openBook}
+                    onOpenDetails={(id) => setDetails(id)}
+                    notify={notify}
+                    refreshToken={refreshToken}
+                    onChanged={refresh}
+                    onExit={onBack}
+                />
+            )}
+            {key === 'notes' && <ReaderNotes onOpenAt={openAt} notify={notify} />}
+            {key === 'library' && (
+                <ReaderLibrary
+                    onOpenChar={(id) => { setCharFrom('library'); setCharView('main'); setCharPage(id); }}
+                    onOpenActs={() => setActPage(true)}
+                    notify={notify}
+                />
+            )}
+            {key === 'stats' && <ReaderStats refreshToken={refreshToken} />}
+            {key === 'settings' && (
+                <ReaderSettings
+                    notify={notify}
+                    page={setPage}
+                    onPage={setSetPage}
+                    onOpenChar={(id, view) => { setCharFrom('settings'); setCharView(view ?? 'settings'); setCharPage(id); }}
+                />
+            )}
+        </>
+    );
+
+    /**
+     * 一层格子。`top` 那层是现行页，绝对定位浮在上面；另一层是刚翻过去的那一页，
+     * 留在流里、转场时失焦淡出，转场完了 `visibility:hidden` **藏而不卸**（位置和数据都留住）。
+     * 注意：两层都**不给 z-index**——绝对定位本来就画在流内内容之上，够用了；
+     * 一给 z-index 就开了新的层叠上下文，弹卡（fixed）会被关进去。
+     */
+    const renderLayer = (which: 'a' | 'b') => {
+        const key = which === 'a' ? layers.a : layers.b;
+        if (!key) return null;
+        const isTop = layers.top === which;
+        const cls = isTop
+            ? `rd-tab rd-tab-top${fading ? ' page-focus' : focusOnce ? ' page-focus-once' : ''}`
+            : `rd-tab rd-tab-ghost${fading ? ' page-defocus' : ' rd-tab-hidden'}`;
+        return <div key={which} className={cls}>{tabView(key)}</div>;
+    };
+
     return (
         <div className={rootClass}>
             <ReaderSkinPreset />
             <ReaderJobPill />
 
             <div className="rd-body">
-                {tab === 'shelf' && (
-                    <ReaderShelf
-                        onOpenBook={openBook}
-                        onOpenDetails={(id) => setDetails(id)}
-                        notify={notify}
-                        refreshToken={refreshToken}
-                        onChanged={refresh}
-                        onExit={onBack}
-                    />
-                )}
-                {tab === 'notes' && <ReaderNotes onOpenAt={openAt} notify={notify} />}
-                {tab === 'library' && (
-                    <ReaderLibrary
-                        onOpenChar={(id) => { setCharFrom('library'); setCharView('main'); setCharPage(id); }}
-                        onOpenActs={() => setActPage(true)}
-                        notify={notify}
-                    />
-                )}
-                {tab === 'stats' && <ReaderStats refreshToken={refreshToken} />}
-                {tab === 'settings' && (
-                    <ReaderSettings
-                        notify={notify}
-                        page={setPage}
-                        onPage={setSetPage}
-                        onOpenChar={(id, view) => { setCharFrom('settings'); setCharView(view ?? 'settings'); setCharPage(id); }}
-                    />
-                )}
+                {renderLayer('a')}
+                {renderLayer('b')}
             </div>
 
             <nav className="rd-nav">

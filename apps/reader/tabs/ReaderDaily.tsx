@@ -14,6 +14,7 @@
 
 import { ArrowUp, CalendarBlank, Clock, Flame, Hourglass, Lightning, Sun, Target } from '@phosphor-icons/react';
 import ReaderCover from '../ReaderCover';
+import { readerFootLine } from '../readerLines';
 import type { RdBook } from '../../../utils/reader/readerDb';
 import {
     dayBooks, efficiency, fmtChars, fmtClock, fmtSec, fmtShort, partSeconds, peakPart, type DayStat,
@@ -234,7 +235,7 @@ export default function ReaderDaily({ dayKey, day, books }: Props) {
             </div>
 
             <div className="rd-muted" style={{ textAlign: 'center', marginTop: 'var(--rd-space-4)' }}>
-                继续读下去，遇见更好的自己 ✨
+                {readerFootLine('daily')}
             </div>
         </>
     );

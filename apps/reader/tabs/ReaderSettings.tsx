@@ -52,6 +52,24 @@ const LAYOUT_OPTS: Array<{ key: ShelfLayout; label: string }> = [
     { key: 'detail', label: '详情列表' },
 ];
 
+/**
+ * 「可用的名字」清单（T7② 重写时加的）。
+ * 原来是「类名见骨架层注释」——注释在 readerCss.ts 里，她根本看不见，等于没说。
+ * 点一下就把起手式加进框里，省得对着空白框想名字（全部名字在 readerCss.ts 头注释那份速查表）。
+ */
+const CSS_REFS: Array<{ name: string; what: string; snip: string }> = [
+    { name: '.rd-para', what: '正文段落', snip: '.rd-para { letter-spacing: 0.02em; }' },
+    { name: '.rd-reader-flow', what: '整章正文的容器', snip: '.rd-reader-flow { }' },
+    { name: '.rd-reader-bar', what: '阅读页顶栏', snip: '.rd-reader-bar { }' },
+    { name: '.rd-reader-foot', what: '阅读页底栏', snip: '.rd-reader-foot { }' },
+    { name: '.rd-hl-rect', what: '划出来的那一道', snip: '.rd-hl-rect { }' },
+    { name: '.rd-book-title', what: '书架上的书名', snip: '.rd-book-title { }' },
+    { name: '.rd-note-quote', what: '笔记里的摘录', snip: '.rd-note-quote { }' },
+    { name: '--rd-fs-body', what: '正文字号', snip: '--rd-fs-body: 18px;' },
+    { name: '--rd-page-gutter', what: '左右页边距', snip: '--rd-page-gutter: 26px;' },
+    { name: '--rd-lh-body', what: '正文行高', snip: '--rd-lh-body: 2;' },
+];
+
 /** 一行：「左标签 / 右当前值 / 箭头」 */
 function Row({ label, value, onClick, icon }: { label: string; value?: string; onClick: () => void; icon?: ReactNode }) {
     return (
@@ -328,25 +346,55 @@ function SheetHost({ sheet, setSheet, t, prefs, cssDraft, setCssDraft }: {
 
     if (sheet === 'hl') return <HighlightColorSheet onClose={close} />;
 
-    // css
+    // css —— T7② 重排：层的顺序用三枚小胶囊讲清楚，「可用的名字」换成点得动的清单
+    const cur = cssDraft ?? prefs.cssGlobal;
+    const insert = (snip: string) => {
+        const t = cur.replace(/\s+$/, '');
+        setCssDraft(t ? `${t}\n${snip}\n` : `${snip}\n`);
+    };
     return (
         <div className="rd-sheet-mask" onClick={close}>
-            <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="rd-sheet rd-sheet-tall" onClick={(e) => e.stopPropagation()}>
                 <div className="rd-sheet-grip" />
-                <div className="rd-sheet-title">自定义 CSS（皮肤层）</div>
-                <textarea
-                    className="rd-field"
-                    rows={6}
-                    placeholder={'.rd-para { letter-spacing: 0.02em; }'}
-                    value={cssDraft ?? prefs.cssGlobal}
-                    onChange={(e) => setCssDraft(e.target.value)}
-                />
-                <div className="rd-btn-row" style={{ marginTop: 8 }}>
-                    <button className="rd-btn rd-btn-primary" onClick={() => { setCssGlobal(cssDraft ?? prefs.cssGlobal); setCssDraft(null); }}>保存</button>
+                <div className="rd-sheet-title">自定义 CSS</div>
+                <div className="rd-muted">它挂在最后一张表里，同权重时以你写的为准——所以不用写 !important。</div>
+
+                <div className="rd-sheet-body" style={{ overflowY: 'auto' }}>
+                    <div className="rd-css-layers">
+                        <span className="rd-css-layer">骨架层</span>
+                        <span className="rd-css-sep">›</span>
+                        <span className="rd-css-layer">皮肤</span>
+                        <span className="rd-css-sep">›</span>
+                        <span className="rd-css-layer rd-css-layer-me">你写的这层</span>
+                    </div>
+
+                    <textarea
+                        className="rd-field"
+                        rows={6}
+                        placeholder={'.rd-para { letter-spacing: 0.02em; }'}
+                        value={cur}
+                        onChange={(e) => setCssDraft(e.target.value)}
+                    />
+
+                    <div className="rd-group-head" style={{ marginTop: 0 }}>
+                        <span>可用的名字</span><span>点一下加进框里</span>
+                    </div>
+                    <div className="rd-css-ref">
+                        {CSS_REFS.map((r) => (
+                            <button key={r.name} type="button" className="rd-css-ref-row" onClick={() => insert(r.snip)}>
+                                <span className="rd-css-ref-name">{r.name}</span>
+                                <span className="rd-css-ref-what">{r.what}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="rd-btn-row" style={{ marginTop: 'var(--rd-space-4)' }}>
+                    <button className="rd-btn rd-btn-primary" onClick={() => { setCssGlobal(cur); setCssDraft(null); }}>保存</button>
                     <button className="rd-btn" onClick={() => { setCssGlobal(''); setCssDraft(''); }}>清空</button>
                 </div>
-                <div className="rd-muted" style={{ marginTop: 6 }}>
-                    这里写的规则挂在骨架层之后，同权重时你的生效——不用写 !important。类名见骨架层注释。
+                <div className="rd-muted" style={{ marginTop: 'var(--rd-space-2)' }}>
+                    现在是：{prefs.cssGlobal ? `写了 ${prefs.cssGlobal.split('\n').length} 行` : '还没写'}
                 </div>
             </div>
         </div>
