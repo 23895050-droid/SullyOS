@@ -1,10 +1,11 @@
 // 读书模块 · 导入导出（T6）单测：范围勾得住、分角色筛得对、导回来一致
 import { describe, expect, it } from 'vitest';
 import { FULL_EXPORT_SCOPE, applyReaderImport, buildReaderExport, isReaderBundle } from './readerExport';
+import { planImport, type ReaderExportBundle } from './readerExport';
 import {
     appendRoamActivity, chapterRowId, getProgress, listAnnotations, listBooks, listChapters,
-    listProgressByBook, listRoamActivities, putAnnotation, putBook, putChapters, putProgress, rdId,
-    type RdAnchor, type RdAnnotation, type RdBook, type RdChapter, type RdProgress, type RdRoamActivity,
+    listProgressByBook, listRoamActivities, listThreads, putAnnotation, putBook, putChapters, putProgress, rdId,
+    type RdAnchor, type RdAnnotation, type RdBook, type RdChapter, type RdProgress, type RdRoamActivity, type RdThread,
 } from './readerDb';
 
 const iso = () => new Date().toISOString();
@@ -103,7 +104,8 @@ describe('readerExport · 导回来一致', () => {
         });
         expect(isReaderBundle(bundle)).toBe(true);
 
-        const result = await applyReaderImport(JSON.parse(JSON.stringify(bundle)));
+        const known = { knownCharIds: ['char_a'] };   // 真跑的时候是这台设备上的角色 id
+        const result = await applyReaderImport(JSON.parse(JSON.stringify(bundle)), known);
         // 同一个库里跑过别的用例，别人的书也在包里——这里只认「这本带上了」
         expect(bundle.books.map((b) => b.id)).toContain(book.id);
         expect(result.books).toBeGreaterThanOrEqual(1);
@@ -114,7 +116,7 @@ describe('readerExport · 导回来一致', () => {
         // 同一份再导一遍：行数不翻倍（id 覆盖）
         const annsBefore = (await listAnnotations(book.id)).length;
         const progsBefore = (await listProgressByBook(book.id)).length;
-        await applyReaderImport(JSON.parse(JSON.stringify(bundle)));
+        await applyReaderImport(JSON.parse(JSON.stringify(bundle)), known);
         expect((await listAnnotations(book.id)).length).toBe(annsBefore);
         expect((await listProgressByBook(book.id)).length).toBe(progsBefore);
         expect((await listBooks()).filter((b) => b.id === book.id)).toHaveLength(1);
@@ -136,7 +138,78 @@ describe('readerExport · 进度那条也在包里', () => {
         const bundle = await buildReaderExport({ scope: { ...NO_CONTENT, notes: true }, owners: ['char_a'] });
         expect(bundle.progress.filter((p) => p.bookId === book.id)).toHaveLength(1);
         expect(bundle.progress.every((p) => p.ownerId === 'char_a')).toBe(true);
-        await applyReaderImport(JSON.parse(JSON.stringify(bundle)));
+        await applyReaderImport(JSON.parse(JSON.stringify(bundle)), { knownCharIds: ['char_a'] });
         expect((await getProgress(book.id, 'char_a'))?.percent).toBe(30);
+    });
+});
+
+// ── 换设备认人（她 09-21 验收时提的：匹配不上角色的要能手动认领） ──
+
+describe('readerExport · 认领（换设备导进来）', () => {
+    /** 一台「别的设备」上的包：主人叫 char_old，这台设备上没有这个 id */
+    const foreignBundle = (bookId: string): unknown => {
+        const a = mkAnn(bookId, 'char_old', '他划的');
+        const p = mkProg(bookId, 'char_old');
+        const r = mkRoam(bookId, 'char_old');
+        const t: RdThread = {
+            id: 'th_x', bookId, anchor, anchorKey: 'k', chapterIdx: 0,
+            charIds: ['char_old'],
+            messages: [
+                { id: 'm1', role: 'char', charId: 'char_old', content: '他说的', kind: 'chat', createdAt: iso() },
+                { id: 'm2', role: 'user', content: '她说的', kind: 'chat', createdAt: iso() },
+            ],
+            createdAt: iso(), updatedAt: iso(),
+        };
+        return {
+            kind: 'sullyos-reader-export', version: 1, exportedAt: iso(),
+            owners: ['char_old'], ownerNames: { char_old: '阿一' },
+            scope: { content: false, notes: true, text: true, media: false, settings: true },
+            books: [], chapters: [], annotations: [a], threads: [t], progress: [p], roam: [r], blobs: {},
+            settings: {
+                prefs: undefined, charPrefs: { char_old: { readEnabled: true, promptPreset: '', pages: [1, 1], noteLimit: 6, replyMode: false } },
+                charStyle: {}, promptPresets: undefined, mount: { version: 1, updatedAt: iso(), chars: {} },
+            },
+        };
+    };
+
+    it('planImport 认出「这台设备没有的人」，带上名字和数量', () => {
+        const book = mkBook();
+        const stats = planImport(foreignBundle(book.id), ['char_a', 'char_b']);
+        const stranger = stats.find((s) => s.id === 'char_old');
+        expect(stranger).toBeTruthy();
+        expect(stranger?.known).toBe(false);
+        expect(stranger?.name).toBe('阿一');
+        expect(stranger?.annotations).toBe(1);
+        expect(stranger?.progress).toBe(1);
+        expect(stranger?.roam).toBe(1);
+        expect(stranger?.threads).toBe(1);
+        expect(stranger?.hasSettings).toBe(true);
+    });
+
+    it('认领之后：批注/进度/活动记录都归到那个人名下，讨论里他的话也改过来', async () => {
+        const book = mkBook();
+        await putBook(book);
+        const r = await applyReaderImport(foreignBundle(book.id), {
+            remap: { char_old: 'char_a' }, knownCharIds: ['char_a'],
+        });
+        expect(r.skipped).toBe(0);
+        expect(r.annotations).toBe(1);
+        expect((await listAnnotations(book.id)).some((a) => a.ownerId === 'char_a')).toBe(true);
+        expect((await getProgress(book.id, 'char_a'))?.percent).toBe(30);
+        expect((await listRoamActivities('char_a')).length).toBeGreaterThanOrEqual(1);
+        const threads = await listThreads(book.id);
+        expect(threads.some((t) => t.charIds.includes('char_a'))).toBe(true);
+    });
+
+    it('不认领就不写（不造幽灵角色），认得的照写', async () => {
+        const book = mkBook();
+        await putBook(book);
+        const r = await applyReaderImport(foreignBundle(book.id), { knownCharIds: ['char_a'] });
+        expect(r.annotations).toBe(0);
+        expect(r.progress).toBe(0);
+        expect(r.roam).toBe(0);
+        expect(r.skipped).toBe(3);            // 批注 + 进度 + 活动记录
+        expect((await listAnnotations(book.id)).every((a) => a.ownerId !== 'char_old')).toBe(true);
+        expect(await getProgress(book.id, 'char_old')).toBeNull();
     });
 });

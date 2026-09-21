@@ -16,8 +16,14 @@
 //
 // 导入是**按 id 覆盖**（put）：同一份包导两遍幂等；跨设备导进来是把新行加进去。
 // 设置类：角色设置/风格/挂载按角色合并（导一个人的包不动别人），提示词套按 id 合并。
+//
+// **换设备会认不出人**（她 09-21 报的）：角色 id 是那台设备上生成的，导到这台来对不上号。
+// 所以包里带一份 `ownerNames`（当时叫什么名字），导入前 `planImport` 先把「这台设备没有的人」
+// 列出来；她在一张引导卡里把那个人**认领给现有的某个角色**（`remap`），再真正写库。
+// 认不出来的部分**默认不写**——宁可少几条，也不要在库里造出一串幽灵角色。
 
 import { blobToDataUrl, dataUrlToBlob, getBlobForRef, restoreBlobRef } from '../blobRef';
+import { DB } from '../db';
 import {
     appendRoamActivity, listAnnotations, listBooks, listChapters, listProgressByBook, listRecentRoamActivities,
     listThreads, putAnnotation, putBook, putChapters, putProgress, putThread,
@@ -65,6 +71,8 @@ export interface ReaderExportBundle {
     exportedAt: string;
     /** null = 全员 */
     owners: string[] | null;
+    /** 这些 id 当时叫什么名字（导入端认人用：id 换设备会变，名字不会） */
+    ownerNames?: Record<string, string>;
     scope: ReaderExportScope;
     books: RdBook[];
     chapters: RdChapter[];
@@ -100,6 +108,8 @@ function grabSettings(owners: string[] | null): ReaderExportSettings {
 export async function buildReaderExport(opts: {
     scope: ReaderExportScope;
     owners?: string[] | null;
+    /** id → 名字（导入端那张「认一下这是谁」的卡要靠它；不给就只写 id） */
+    ownerNames?: Record<string, string>;
 }): Promise<ReaderExportBundle> {
     const scope = opts.scope;
     const owners = opts.owners && opts.owners.length > 0 ? opts.owners : null;
@@ -155,10 +165,63 @@ export async function buildReaderExport(opts: {
         version: READER_EXPORT_VERSION,
         exportedAt: new Date().toISOString(),
         owners,
+        ownerNames: pickNames(opts.ownerNames, owners),
         scope,
         books, chapters, annotations, threads, progress, roam, blobs,
         settings: scope.settings ? grabSettings(owners) : undefined,
     };
+}
+
+/** 只留这次包里真的带了的那些 id 的名字（全量导出时把所有人都写上） */
+function pickNames(names: Record<string, string> | undefined, owners: string[] | null): Record<string, string> {
+    if (!names) return {};
+    if (owners === null) return { ...names };
+    const out: Record<string, string> = {};
+    for (const id of owners) if (names[id]) out[id] = names[id];
+    return out;
+}
+
+/** 一个人在这份包里有多少东西（认领卡片上那行数字） */
+export interface ImportOwnerStat {
+    id: string;
+    /** 包里记的名字；没有就用 id */
+    name: string;
+    annotations: number;
+    threads: number;
+    progress: number;
+    roam: number;
+    hasSettings: boolean;
+    /** 这台设备上已经有这个 id 吗（有就不用认领） */
+    known: boolean;
+}
+
+/**
+ * 导入前先看一眼这份包里都有谁、各带了多少东西、这台设备认不认识。
+ * 纯函数（只读包和一份已有角色 id），**不写库**——认领卡片拿它渲染。
+ */
+export function planImport(raw: unknown, knownCharIds: string[]): ImportOwnerStat[] {
+    if (!isReaderBundle(raw)) return [];
+    const b = raw;
+    const known = new Set(knownCharIds);
+    const stats = new Map<string, ImportOwnerStat>();
+    const of = (id: string): ImportOwnerStat => {
+        const cur = stats.get(id) ?? {
+            id, name: b.ownerNames?.[id] || id, annotations: 0, threads: 0, progress: 0, roam: 0,
+            hasSettings: false, known: id === 'user' || known.has(id),
+        };
+        stats.set(id, cur);
+        return cur;
+    };
+    for (const a of b.annotations ?? []) of(a.ownerId).annotations += 1;
+    for (const p of b.progress ?? []) of(p.ownerId).progress += 1;
+    for (const r of b.roam ?? []) of(r.charId).roam += 1;
+    for (const t of b.threads ?? []) for (const id of t.charIds ?? []) of(id).threads += 1;
+    for (const id of Object.keys(b.settings?.charPrefs ?? {})) of(id).hasSettings = true;
+    for (const id of Object.keys(b.settings?.charStyle ?? {})) of(id).hasSettings = true;
+    for (const id of Object.keys(b.settings?.mount?.chars ?? {})) of(id).hasSettings = true;
+    // 活动记录里出现过的 user 也占一行（但永远 known）
+    for (const id of b.owners ?? []) of(id);
+    return [...stats.values()].sort((x, y) => Number(x.known) - Number(y.known));
 }
 
 export interface ReaderImportResult {
@@ -170,17 +233,36 @@ export interface ReaderImportResult {
     roam: number;
     blobs: number;
     settings: boolean;
+    /** 认不出、又没被认领，所以**没写进来**的行数 */
+    skipped: number;
 }
 
 export const isReaderBundle = (v: unknown): v is ReaderExportBundle =>
     !!v && typeof v === 'object' && (v as ReaderExportBundle).kind === 'sullyos-reader-export';
 
-/** 把一份包写回库里（按 id 覆盖）。返回每样写了多少条 */
-export async function applyReaderImport(raw: unknown): Promise<ReaderImportResult> {
+/**
+ * 把一份包写回库里（按 id 覆盖）。返回每样写了多少条。
+ *
+ * `remap` = 「认领表」：包里的老 id → 这台设备上的角色 id（`planImport` 那张卡收上来的）。
+ * 包里**认不出、又没被认领**的行**不写**（`skipped` 数给你看）——不造幽灵角色。
+ */
+export async function applyReaderImport(
+    raw: unknown,
+    opts?: { remap?: Record<string, string>; knownCharIds?: string[] },
+): Promise<ReaderImportResult> {
     if (!isReaderBundle(raw)) throw new Error('这不是书房导出的文件');
     const b = raw;
     const out: ReaderImportResult = {
-        books: 0, chapters: 0, annotations: 0, threads: 0, progress: 0, roam: 0, blobs: 0, settings: false,
+        books: 0, chapters: 0, annotations: 0, threads: 0, progress: 0, roam: 0, blobs: 0, settings: false, skipped: 0,
+    };
+
+    const known = new Set(opts?.knownCharIds ?? (await DB.getAllCharacters()).map((c) => c.id));
+    const remap = opts?.remap ?? {};
+    /** 这个主人落到谁名下：'' = 认不出也没认领 → 这条不写 */
+    const toOwner = (id: string): string => {
+        if (id === 'user' || known.has(id)) return id;
+        const to = remap[id];
+        return to && (to === 'user' || known.has(to)) ? to : '';
     };
 
     // 图片先写回（按原令牌，引用零改写）
@@ -193,26 +275,61 @@ export async function applyReaderImport(raw: unknown): Promise<ReaderImportResul
 
     for (const book of b.books ?? []) { await putBook(book); out.books += 1; }
     if ((b.chapters ?? []).length > 0) { await putChapters(b.chapters); out.chapters = b.chapters.length; }
-    for (const a of b.annotations ?? []) { await putAnnotation(a); out.annotations += 1; }
-    for (const t of b.threads ?? []) { await putThread(t); out.threads += 1; }
-    for (const p of b.progress ?? []) { await putProgress(p); out.progress += 1; }
-    for (const r of b.roam ?? []) { await appendRoamActivity(r); out.roam += 1; }
+    for (const a of b.annotations ?? []) {
+        const ownerId = toOwner(a.ownerId);
+        if (!ownerId) { out.skipped += 1; continue; }
+        await putAnnotation({ ...a, ownerId });
+        out.annotations += 1;
+    }
+    for (const p of b.progress ?? []) {
+        const ownerId = toOwner(p.ownerId);
+        if (!ownerId) { out.skipped += 1; continue; }
+        await putProgress({ ...p, ownerId });
+        out.progress += 1;
+    }
+    for (const r of b.roam ?? []) {
+        const charId = toOwner(r.charId);
+        if (!charId) { out.skipped += 1; continue; }
+        await appendRoamActivity({ ...r, charId });
+        out.roam += 1;
+    }
+    for (const t of b.threads ?? []) {
+        // 讨论是挂在划线上的一串话：作者认不出来就把那几条话去掉，线本身留着（她那一边的话还在）
+        const charIds: string[] = [];
+        for (const id of t.charIds ?? []) {
+            const to = toOwner(id);
+            if (to && to !== 'user' && !charIds.includes(to)) charIds.push(to);
+        }
+        const messages = (t.messages ?? []).flatMap((m) => {
+            if (m.role !== 'char' || !m.charId) return [m];
+            const to = toOwner(m.charId);
+            return to ? [{ ...m, charId: to }] : [];
+        });
+        await putThread({ ...t, charIds, messages });
+        out.threads += 1;
+    }
 
     if (b.settings) {
-        applySettings(b.settings);
+        applySettings(b.settings, remap);
         out.settings = true;
     }
     return out;
 }
 
-function applySettings(s: ReaderExportSettings): void {
+function applySettings(s: ReaderExportSettings, remap: Record<string, string>): void {
+    // 认领表也管设置那几块（他自己的设置得跟着人走）
+    const to = (id: string): string => remap[id] ?? id;
     // 读书偏好：整份覆盖（「合并两套偏好」没有说得通的默认答案）
     if (s.prefs) readerPrefsStore.set((prev) => ({ ...prev, ...s.prefs, version: prev.version }));
     // 角色自己的设置 / 风格 / 挂载：按角色合并——导一个人的包不碰别人
-    for (const [id, row] of Object.entries(s.charPrefs ?? {})) setCharReadPrefs(id, row);
-    for (const [id, row] of Object.entries(s.charStyle ?? {})) setCharStyle(id, row);
+    for (const [id, row] of Object.entries(s.charPrefs ?? {})) setCharReadPrefs(to(id), row);
+    for (const [id, row] of Object.entries(s.charStyle ?? {})) setCharStyle(to(id), row);
     if (s.promptPresets) mergePromptPresetStore(s.promptPresets);
-    if (s.mount) mergeReaderMountConfig(s.mount);
+    if (s.mount) {
+        const chars: ReaderMountConfig['chars'] = {};
+        for (const [id, row] of Object.entries(s.mount.chars ?? {})) chars[to(id)] = row;
+        mergeReaderMountConfig({ ...s.mount, chars });
+    }
 }
 
 /** 导出的文件名：`书房-Angel-2026-09-21.json` */

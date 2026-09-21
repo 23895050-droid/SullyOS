@@ -12,13 +12,14 @@
 //
 // 导入是按 id 覆盖：同一份包导两遍不会翻倍；换设备导进来是把新行加进去。
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft, DownloadSimple, UploadSimple } from '@phosphor-icons/react';
 import { useOS } from '../../../context/OSContext';
 import {
-    FULL_EXPORT_SCOPE, applyReaderImport, buildReaderExport, downloadReaderBundle,
-    isReaderBundle, type ReaderExportScope,
+    FULL_EXPORT_SCOPE, applyReaderImport, buildReaderExport, downloadReaderBundle, isReaderBundle,
+    planImport, type ReaderExportBundle, type ReaderExportScope,
 } from '../../../utils/reader/readerExport';
+import ImportMapSheet from '../ImportMapSheet';
 
 const SCOPE_LABELS: Array<{ key: keyof ReaderExportScope; label: string; hint: string }> = [
     { key: 'content', label: '书内容', hint: '书目 + 正文（不含原始 epub/txt 文件）' },
@@ -34,11 +35,20 @@ interface Props {
 }
 
 export default function ReaderSetData({ onBack, notify }: Props) {
-    const { characters } = useOS();
+    const { characters, userProfile } = useOS();
     const [scope, setScope] = useState<ReaderExportScope>({ ...FULL_EXPORT_SCOPE });
     const [owners, setOwners] = useState<string[]>([]);
     const [busy, setBusy] = useState(false);
+    /** 认不出人的包先停在这儿，等她在认领卡里认完再写库 */
+    const [pending, setPending] = useState<ReaderExportBundle | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);
+
+    const charIds = useMemo(() => characters.map((c) => c.id), [characters]);
+    /** 包里带名字：换设备导入时那张认领卡才知道「他是谁」 */
+    const nameMap = useMemo(
+        () => ({ user: userProfile?.name ?? '我', ...Object.fromEntries(characters.map((c) => [c.id, c.name])) }),
+        [characters, userProfile],
+    );
 
     const toggle = (key: keyof ReaderExportScope) => setScope((s) => ({ ...s, [key]: !s[key] }));
     const toggleOwner = (id: string) => setOwners((arr) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]));
@@ -47,7 +57,7 @@ export default function ReaderSetData({ onBack, notify }: Props) {
         if (!Object.values(scope).some(Boolean)) { notify('一样都没勾，没东西可导'); return; }
         setBusy(true);
         try {
-            const bundle = await buildReaderExport({ scope, owners });
+            const bundle = await buildReaderExport({ scope, owners, ownerNames: nameMap });
             const who = owners.length === 0 ? '' : characters.filter((c) => owners.includes(c.id)).map((c) => c.name).join('+');
             const name = downloadReaderBundle(bundle, who || undefined);
             notify(`导出好了：${name}`);
@@ -57,13 +67,11 @@ export default function ReaderSetData({ onBack, notify }: Props) {
         setBusy(false);
     };
 
-    const doImport = async (file: File) => {
+    /** 真写库（认领表可以是空的 = 只导能认出来的） */
+    const runImport = async (bundle: ReaderExportBundle, remap: Record<string, string>) => {
         setBusy(true);
         try {
-            const text = await file.text();
-            const data: unknown = JSON.parse(text);
-            if (!isReaderBundle(data)) throw new Error('这不是书房导出的文件');
-            const r = await applyReaderImport(data);
+            const r = await applyReaderImport(bundle, { remap, knownCharIds: charIds });
             const bits = [
                 r.books ? `${r.books} 本书` : '',
                 r.chapters ? `${r.chapters} 章正文` : '',
@@ -73,12 +81,29 @@ export default function ReaderSetData({ onBack, notify }: Props) {
                 r.roam ? `${r.roam} 条活动记录` : '',
                 r.blobs ? `${r.blobs} 张图` : '',
                 r.settings ? '设置' : '',
+                r.skipped ? `${r.skipped} 条没认领、没导` : '',
             ].filter(Boolean);
             notify(bits.length > 0 ? `导进来了：${bits.join(' · ')}` : '文件是空的，什么都没导');
         } catch (e) {
             notify(`导入没成：${e instanceof Error ? e.message : '文件读不出来'}`);
         }
         setBusy(false);
+    };
+
+    const doImport = async (file: File) => {
+        setBusy(true);
+        try {
+            const data: unknown = JSON.parse(await file.text());
+            if (!isReaderBundle(data)) throw new Error('这不是书房导出的文件');
+            // 认不出人的包先弹认领卡（她 09-21 要的：「匹配不上角色的，手动找回给已有的角色」）
+            const unknown = planImport(data, charIds).filter((s) => !s.known);
+            setBusy(false);
+            if (unknown.length > 0) { setPending(data); return; }
+            await runImport(data, {});
+        } catch (e) {
+            notify(`导入没成：${e instanceof Error ? e.message : '文件读不出来'}`);
+            setBusy(false);
+        }
     };
 
     return (
@@ -147,6 +172,16 @@ export default function ReaderSetData({ onBack, notify }: Props) {
                     if (f) void doImport(f);
                 }}
             />
+
+            {pending && (
+                <ImportMapSheet
+                    bundle={pending}
+                    characters={characters}
+                    busy={busy}
+                    onCancel={() => setPending(null)}
+                    onConfirm={(remap) => { const b = pending; setPending(null); if (b) void runImport(b, remap); }}
+                />
+            )}
 
             <div className="rd-hint-list" style={{ marginTop: 'var(--rd-space-4)' }}>
                 <div className="rd-muted">

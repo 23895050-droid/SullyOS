@@ -40,13 +40,16 @@ import ReaderCharStyleSheet from './ReaderCharStyleSheet';
 import ActivityDetailSheet, { RoamCalls, fmtTok } from './ActivityDetailSheet';
 import {
     CHAR_EXPORT_SCOPE, applyReaderImport, buildReaderExport, downloadReaderBundle, isReaderBundle,
+    planImport, type ReaderExportBundle,
 } from '../../utils/reader/readerExport';
+import ImportMapSheet from './ImportMapSheet';
 import { canRetrySummary, retrySummaryFor } from './coreadRetry';
 import NoteForwardSheet from './NoteForwardSheet';
 import NoteFold from './NoteFold';
 import { chapterOf } from './tabs/ReaderNotes';
 import type { NoteForwardCard } from './readerForward';
 import { charPrefsOf, clampPages, setCharReadPrefs, setReadEnabled, useReaderCharPrefs } from './readerCharPrefs';
+import { presetNameOf, usePromptPresets } from './readerPromptPresets';
 import { highlightColorOf, useReaderPrefs } from './readerPrefs';
 
 interface Props {
@@ -166,7 +169,14 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
     const exportMine = async () => {
         setDataBusy(true);
         try {
-            const bundle = await buildReaderExport({ scope: CHAR_EXPORT_SCOPE, owners: [charId] });
+            const bundle = await buildReaderExport({
+                scope: CHAR_EXPORT_SCOPE,
+                owners: [charId],
+                ownerNames: {
+                    user: userProfile?.name ?? '我',
+                    ...Object.fromEntries(characters.map((c) => [c.id, c.name])),
+                },
+            });
             notify(`导出好了：${downloadReaderBundle(bundle, name)}`);
         } catch (e) {
             notify(`导出没成：${e instanceof Error ? e.message : '未知错误'}`);
@@ -174,12 +184,11 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
         setDataBusy(false);
     };
 
-    const importMine = async (file: File) => {
+    /** 真写库（认领表可以是空的） */
+    const runImportMine = async (bundle: ReaderExportBundle, remap: Record<string, string>) => {
         setDataBusy(true);
         try {
-            const data: unknown = JSON.parse(await file.text());
-            if (!isReaderBundle(data)) throw new Error('这不是书房导出的文件');
-            const r = await applyReaderImport(data);
+            const r = await applyReaderImport(bundle, { remap, knownCharIds: characters.map((c) => c.id) });
             const bits = [
                 r.annotations ? `${r.annotations} 条批注` : '',
                 r.threads ? `${r.threads} 个讨论` : '',
@@ -187,6 +196,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                 r.roam ? `${r.roam} 条活动记录` : '',
                 r.books ? `${r.books} 本书` : '',
                 r.settings ? '设置' : '',
+                r.skipped ? `${r.skipped} 条没认领、没导` : '',
             ].filter(Boolean);
             notify(bits.length > 0 ? `导进来了：${bits.join(' · ')}` : '文件是空的，什么都没导');
             setReload((n) => n + 1);
@@ -196,7 +206,24 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
         setDataBusy(false);
     };
 
+    const importMine = async (file: File) => {
+        setDataBusy(true);
+        try {
+            const data: unknown = JSON.parse(await file.text());
+            if (!isReaderBundle(data)) throw new Error('这不是书房导出的文件');
+            // 换设备导进来的会认不出人——先弹认领卡（默认就认给当前这位，她是冲着「他」进来的）
+            const unknown = planImport(data, characters.map((c) => c.id)).filter((s) => !s.known);
+            setDataBusy(false);
+            if (unknown.length > 0) { setDataPending(data); return; }
+            await runImportMine(data, {});
+        } catch (e) {
+            notify(`导入没成：${e instanceof Error ? e.message : '文件读不出来'}`);
+            setDataBusy(false);
+        }
+    };
+
     const charPrefs = useReaderCharPrefs();
+    const promptPresetStore = usePromptPresets();
     const prefs = useReaderPrefs();
     const p = charPrefsOf(charPrefs, charId);
     const pen = p.penColor ?? highlightColorOf(prefs, charId);
@@ -224,6 +251,8 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
     const [shelfTab, setShelfTab] = useState<ShelfTab>('all');
     /** 他自己的数据（导出/导入） */
     const [dataBusy, setDataBusy] = useState(false);
+    /** 认不出人的包先停在这儿，等她在认领卡里认完再写库 */
+    const [dataPending, setDataPending] = useState<ReaderExportBundle | null>(null);
     const dataFileRef = useRef<HTMLInputElement | null>(null);
     /** 筛东西那张卡 */
     const [filterOpen, setFilterOpen] = useState(false);
@@ -767,6 +796,18 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                         notify={notify}
                     />
                 )}
+
+                {/* 换设备导进来的包会认不出人——认领卡（默认就认给他，她是冲着「他」进来的） */}
+                {dataPending && (
+                    <ImportMapSheet
+                        bundle={dataPending}
+                        characters={characters}
+                        defaultTo={charId}
+                        busy={dataBusy}
+                        onCancel={() => setDataPending(null)}
+                        onConfirm={(remap) => { const b = dataPending; setDataPending(null); if (b) void runImportMine(b, remap); }}
+                    />
+                )}
             </div>
         );
     }
@@ -788,7 +829,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                 <div className="rd-cp-name">{name}</div>
                 <div className="rd-cp-tags">
                     <span className="rd-cp-tag">{p.readEnabled ? '可以一起读' : '还没开读书开关'}</span>
-                    <span className="rd-cp-tag">{p.promptPreset === 'rp' ? 'rp 套' : '默认套'}</span>
+                    <span className="rd-cp-tag">{presetNameOf(p.promptPreset, promptPresetStore)}</span>
                 </div>
 
                 {/* 最近一次的状态：感受和产出都摆在这一行上（点开是详细状态） */}

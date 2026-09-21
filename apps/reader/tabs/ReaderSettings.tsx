@@ -134,12 +134,9 @@ export default function ReaderSettings({ onOpenChar, notify, page: pageProp, onP
                     </div>
                 </div>
 
-                <div className="rd-section-title">翻页</div>
-                <div className="rd-card rd-card-flush">
-                    <div className="rd-list">
-                        <Row label="翻页方式" value="横滑" onClick={() => setSheet('layout')} />
-                    </div>
-                </div>
+                {/* 翻页方式这一行**删了**（她 09-21 报的 bug：它点开的是「书架版式」那张卡）。
+                    翻页目前只有横滑一种（ReaderPage 是 translateX 的横向轨道），
+                    真要成可切的设置就是另一颗（上下滚动要另写一条渲染路径），先不摆假开关。 */}
 
                 <button className="rd-btn rd-btn-block" style={{ marginTop: 'var(--rd-space-4)' }} onClick={() => setTypography(DEFAULT_TYPOGRAPHY)}>
                     排版恢复默认
