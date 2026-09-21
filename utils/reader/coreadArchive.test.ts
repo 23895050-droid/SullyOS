@@ -1,4 +1,5 @@
-// 归档水位线的纯函数（她 09-16 照 TRPG 定的规矩：讨论到 31 条总结前 30 条；
+// 归档水位线的纯函数（她 09-16 照 TRPG 定的规矩：攒够阈值就总结，最新那条留着做衔接；
+// 09-21 她把默认阈值从 31 改成 10——攒太多会糊成一团）；
 // 09-20 拆成「口径 × 时机」两个维度）+ 后台任务胶囊的显示窗口。
 // （放在 utils/reader 下是因为 vitest 的 include 只吃这几个目录）
 import { describe, expect, it } from 'vitest';
@@ -6,19 +7,19 @@ import { archiveTake, planArchive } from '../../apps/reader/coreadArchive';
 import { DEFAULT_RULE } from '../../apps/reader/coreadStore';
 import { JOB_LINGER_MS, visibleJobs, type ReaderJob } from '../../apps/reader/readerJobs';
 
-const T = DEFAULT_RULE.threshold;   // 31
+const T = DEFAULT_RULE.threshold;   // 10（她 09-21 改的）
 
 describe('共读归档 · 水位线', () => {
-    it('攒到 30 条还不总结（31 才触发，最后那条留着做衔接）', () => {
-        expect(planArchive({ pending: 30, threshold: T, force: false })).toBe(false);
+    it('差一条还不总结（阈值才触发，最后那条留着做衔接）', () => {
+        expect(planArchive({ pending: T - 1, threshold: T, force: false })).toBe(false);
     });
-    it('第 31 条一到 → 触发；一次吃 30 条', () => {
-        expect(planArchive({ pending: 31, threshold: T, force: false })).toBe(true);
-        expect(archiveTake({ pendingMsgs: 31, force: false })).toBe(30);
+    it('阈值一到 → 触发；一次吃掉阈值减一条', () => {
+        expect(planArchive({ pending: T, threshold: T, force: false })).toBe(true);
+        expect(archiveTake({ pendingMsgs: T, force: false })).toBe(T - 1);
     });
-    it('水位线推过之后，再看剩下的够不够 31（30 + 31 = 61 再吃一批）', () => {
-        expect(planArchive({ pending: 30, threshold: T, force: false })).toBe(false);
-        expect(planArchive({ pending: 31, threshold: T, force: false })).toBe(true);
+    it('水位线推过之后，再看剩下的够不够再来一批', () => {
+        expect(planArchive({ pending: T - 1, threshold: T, force: false })).toBe(false);
+        expect(planArchive({ pending: T, threshold: T, force: false })).toBe(true);
     });
     it('共读结束（force）：不管攒没攒够都跑，没到水位线的部分一次补齐', () => {
         expect(planArchive({ pending: 7, threshold: T, force: true })).toBe(true);
@@ -32,8 +33,8 @@ describe('共读归档 · 水位线', () => {
         expect(planArchive({ pending: 10, threshold: 10, force: false })).toBe(true);
         expect(planArchive({ pending: 9, threshold: 10, force: false })).toBe(false);
     });
-    it('默认规则本身：按讨论句数、31 条、自动归档', () => {
-        expect(DEFAULT_RULE).toEqual({ metric: 'msgs', threshold: 31, timing: 'auto' });
+    it('默认规则本身：按讨论句数、10 条、自动归档', () => {
+        expect(DEFAULT_RULE).toEqual({ metric: 'msgs', threshold: 10, timing: 'auto' });
     });
 });
 

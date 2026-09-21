@@ -357,11 +357,11 @@ export async function readCoReadPage(input: ReadPageInput): Promise<CoReadPageRe
         replyFeed && replyFeed.notes.length > 0
             ? `\n这几页上已经留着的批注（当风景看也行，想接哪句就接）：\n${replyFeed.notes.join('\n')}` : '',
         replyFeed && replyFeed.later.length > 0
-            ? `\n你上几次读到的那几页上，还留着这些你还没接过话的：\n${replyFeed.later.join('\n')}` : '',
+            ? `\n你上几次读到的那几页上，还留着这些你还没接过话的（先说这几条）：\n${replyFeed.later.join('\n')}` : '',
         replyFeed && replyFeed.followUps.length > 0
             ? `\n你参与过的那几条下面，大家接着说：\n${replyFeed.followUps.join('\n')}` : '',
         replyFeed && (replyFeed.notes.length > 0 || replyFeed.later.length > 0 || replyFeed.followUps.length > 0)
-            ? '\n想接哪句就写进 replies：quote 原样抄那句话，lines 里一句一条，像聊天那样连着说；这次一句都不想接就留一个空数组。'
+            ? '\n接话写进 replies：quote 照抄「”…”」里那句话，lines 里一句一条，像聊天那样连着说。'
             : '',
         input.noteLimit ? `这次最多划 ${input.noteLimit} 条。` : '',
         '',
@@ -410,19 +410,37 @@ export async function writeCoReadReplies(opts: {
     charId: string;
     chapterIdx: number;
     replies: CoReadReply[];
-}): Promise<number> {
+}): Promise<{ written: number; missed: number }> {
     const { bookId, charId, chapterIdx, replies } = opts;
-    if (replies.length === 0) return 0;
+    if (replies.length === 0) return { written: 0, missed: 0 };
     const [anns, threads] = await Promise.all([listAnnotations(bookId), listThreads(bookId)]);
     const norm = (s: string) => s.replace(/\s+/g, '');
+    /**
+     * 他抄回来的那行可能带着「[谁] 」的前缀或「→ 批注」的尾巴（他看到的名单就是那个样子），
+     * 先把壳剥掉再比——不然他明明回了，一句都对不上，全丢掉（她 09-21）。
+     */
+    const cleanQuote = (s: string): string => {
+        let t = s.trim();
+        const arrow = t.indexOf('→');
+        if (arrow > 0) t = t.slice(0, arrow);
+        t = t.replace(/^\[[^\]]{1,24}\]\s*/, '');
+        t = t.replace(/^你\s*/, '');
+        return norm(t);
+    };
     let n = 0;
+    let missed = 0;
     for (const r of replies) {
-        const q = norm(r.quote);
-        if (!q) continue;
-        const live = anns.filter((a) => a.kind !== 'bookmark');
-        const target = live.find((a) => norm(a.anchor.text) === q)
-            ?? live.find((a) => norm(a.anchor.text).includes(q) || q.includes(norm(a.anchor.text)));
-        if (!target) continue;
+        const q = cleanQuote(r.quote);
+        if (!q) { missed += 1; continue; }
+        // 他自己划的不接（不用回自己）；同一句话多处出现时优先本章的
+        const live = anns.filter((a) => a.kind !== 'bookmark' && a.ownerId !== charId);
+        const inChapter = live.filter((a) => (a.chapterIdx ?? chapterIdx) === chapterIdx);
+        const pick = (pool: typeof live) => pool.find((a) => norm(a.anchor.text) === q)
+            ?? pool.find((a) => norm(a.note ?? '') === q && q.length >= 4)
+            ?? pool.find((a) => norm(a.anchor.text).includes(q) || q.includes(norm(a.anchor.text)))
+            ?? pool.find((a) => q.length >= 4 && norm(a.note ?? '').includes(q));
+        const target = pick(inChapter) ?? pick(live);
+        if (!target) { missed += 1; continue; }
 
         const ci = typeof target.chapterIdx === 'number' ? target.chapterIdx : chapterIdx;
         const thKey = threadKeyOf(ci, target.anchor, target.ownerId);
@@ -441,7 +459,7 @@ export async function writeCoReadReplies(opts: {
         }
         if (th && !th.charIds.includes(charId)) await putThread({ ...th, charIds: [...th.charIds, charId] });
     }
-    return n;
+    return { written: n, missed };
 }
 
 /** 把角色抄回来的句子换算成真锚点并落库；定位不到的丢掉（写入口校验）。 */

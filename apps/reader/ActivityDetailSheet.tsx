@@ -59,6 +59,20 @@ export function RoamCalls({ calls }: { calls: RdRoamActivity[] }) {
                             <div className="rd-tl-ex">第 {a.fromPara + 1}–{a.toPara + 1} 段</div>
                         ))}
                         {a.excerpt && <div className="rd-tl-ex">{a.excerpt}</div>}
+                        {/* 这次摆给他看的名单留了个底（她 09-21：他要是不回，得能查出
+                            是「没给他看」还是「他看了没理」） */}
+                        {a.feedNotes !== undefined && (
+                            <div className="rd-tl-ex">
+                                这次摆给他的：这几页上 {a.feedNotes} 条批注
+                                {a.feedLater && a.feedLater.length > 0 ? ` · 你还没接过话的 ${a.feedLater.length} 条` : ''}
+                            </div>
+                        )}
+                        {a.feedLater?.map((line, i) => (
+                            <div className="rd-tl-reply" key={`f${i}`}>{line}</div>
+                        ))}
+                        {a.replyMissed ? (
+                            <div className="rd-tl-ex">他想接 {a.replyMissed} 条，抄回来的句子没对上原文，没落上</div>
+                        ) : null}
                         {a.replies?.map((line, i) => (
                             <div className="rd-tl-reply" key={i}>{line}</div>
                         ))}

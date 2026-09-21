@@ -27,12 +27,12 @@ import { CaretDown, Check, Circle, Plus, UsersThree } from '@phosphor-icons/reac
 import { useOS } from '../../context/OSContext';
 import type { CharacterProfile } from '../../types';
 import {
-    canSee, getProgress, listAnnotations, listRoamActivities, listThreads, appendRoamActivity,
-    newRoamGroup, putProgress, rdId, type RdAnnotation, type RdBook, type RdRoamActivity,
+    getProgress, listAnnotations, listRoamActivities, listThreads, appendRoamActivity,
+    newRoamGroup, putProgress, rdId, type RdBook, type RdRoamActivity,
 } from '../../utils/reader/readerDb';
 import { recentChatLines, readCoReadPage, resolveReadApi, writeCoReadMarks, writeCoReadReplies, type ReaderCallRuntime } from '../../utils/reader/readerChat';
 import { analyzeCharStyle, needStyleAnalysis } from '../../utils/reader/readerStyle';
-import { threadKeyOf } from '../../utils/reader/readerParticipants';
+import { gatherPageFeed } from '../../utils/reader/readerFeed';
 import { DB } from '../../utils/db';
 import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '../../utils/apiConfigNormalize';
 import { charPrefsOf, clampPageCount, setCharReadPrefs, useReaderCharPrefs, type CharReadPrefs } from './readerCharPrefs';
@@ -290,86 +290,8 @@ export default function ReaderCoRead({
         );
     };
 
-    /**
-     * 开读之前，把他要读的那几页摆给他看（她 09-21 定稿）。
-     *
-     * **一、他眼下这几页**：那几页上**所有的批注**都给他——当风景看也行，感兴趣的自己接。
-     *   原来是两份：一份「全书最近 8 条」（她原话：「我也不知道那最近八条是从哪来的」——撤了），
-     *   一份「他还没回过的」（漏掉了同一页上别人刚说过的，也漏掉了他自己划过的）。
-     *   现在合成一份：他眼下这一页长什么样，他就看到什么样。他接过话的那几条后面标一句，
-     *   省得他对着同一条说第二遍。
-     *
-     * **二、他上几次读到的那几页**（她 09-21 追加）：他读完往后走了以后，她又在那几页上留了话，
-     *   那些话他的窗口里再也扫不到——**他希望的是他能回「以她的话收尾」的那些讨论**，
-     *   所以把他最近三次读过的段落也捞一遍，挑上面**他还没接过话的**摆给他。
-     *   名单是现读的：她删掉那条批注，这儿下一次就没有了。
-     *
-     * **三、他参与过的讨论**里，他说完之后别人接着说——关于他的事他得知道。
-     *   按「他在这条讨论里的最后一句话之后」算，不用时间戳切——不会漏、也不会重复。
-     */
-    const gatherPageFeed = useCallback(async (
-        charId: string,
-        window: Array<{ paraIdx: number; text: string }>,
-    ): Promise<{ notes: string[]; later: string[]; followUps: string[] }> => {
-        const from = window[0]?.paraIdx ?? 0;
-        const to = window[window.length - 1]?.paraIdx ?? from;
-        const [anns, ths] = await Promise.all([listAnnotations(book.id), listThreads(book.id)]);
-
-        // 他接过话的讨论（认锚点）→ 那一条后面标一句
-        const joined = new Set(
-            ths.filter((t) => t.messages.some((m) => m.role === 'char' && m.charId === charId))
-                .map((t) => t.anchorKey),
-        );
-        const keyOf = (a: RdAnnotation) => threadKeyOf(a.chapterIdx ?? chapterIdx, a.anchor, a.ownerId);
-        /** 一条批注 → 给他的那一行 */
-        const lineOf = (a: RdAnnotation) => {
-            const who = a.ownerId === charId ? '你' : `[${nameOf(a.ownerId)}]`;
-            const done = joined.has(keyOf(a)) ? '（你已经接过话了）' : '';
-            return `${who} “${a.anchor.text}” → ${a.note}${done}`;
-        };
-        const readable = anns
-            .filter((a) => a.kind !== 'bookmark' && !!a.note)
-            .filter((a) => canSee(a, charId));
-
-        // 一、他眼下这几页（顺序就是书上从上到下）
-        const here = readable.filter((a) => a.anchor.startPara >= from && a.anchor.startPara <= to);
-        const seen = new Set(here.map((a) => a.id));
-
-        // 二、他最近三次读过的段落，上面还留着他没接过话的（最新的 8 条，按书上的顺序摆）
-        const reads = (await listRoamActivities(charId, 200).catch(() => [] as RdRoamActivity[]))
-            .filter((a) => a.bookId === book.id && a.kind === 'annotate' && a.mode === 'coread'
-                && a.fromPara !== undefined && a.toPara !== undefined)
-            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-            .slice(-3);
-        const later = (reads.length === 0 ? [] : [...readable]
-            .filter((a) => a.ownerId !== charId)     // 「别人说的话你还没接」——他自己划的不算
-            .filter((a) => !seen.has(a.id))
-            .filter((a) => reads.some((r) => a.anchor.startPara >= (r.fromPara ?? 0)
-                && a.anchor.startPara <= (r.toPara ?? 0)))
-            .filter((a) => !joined.has(keyOf(a)))
-            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-            .slice(-8)
-            .sort((a, b) => a.anchor.startPara - b.anchor.startPara
-                || a.anchor.startOffset - b.anchor.startOffset))
-            .map(lineOf);
-
-        const notes = here.map(lineOf);
-
-        // 三、他参与过的讨论里，他说完之后别人接着说
-        const followUps: string[] = [];
-        for (const t of ths) {
-            const his = t.messages.filter((m) => m.role === 'char' && m.charId === charId);
-            if (his.length === 0) continue;           // 他连话都没说过的不打扰他
-            const lastMineAt = his[his.length - 1].createdAt;
-            for (const m of t.messages) {
-                if (m.createdAt <= lastMineAt) continue;
-                if (m.role === 'char' && m.charId === charId) continue;
-                const who = m.role === 'user' ? nameOf('user') : nameOf(m.charId ?? '');
-                followUps.push(`[${who}] 在“${t.anchor.text}”那条下面说：${m.content}`);
-            }
-        }
-        return { notes, later, followUps: followUps.slice(-10) };
-    }, [book.id, chapterIdx, nameOf]);
+    // 开读前摆给他的那三块（他眼下这几页 / 他上几次读过的还没接过话的 / 他参与过的讨论里的新话）
+    // 已经抽成纯函数住在 utils/reader/readerFeed.ts —— 那份有单测盯着（她问过两轮「里面真的有我的批注吗」）
 
     // ── 归档 ──────────────────────────────────────────────────────
     const archiveCtx = useCallback(() => {
@@ -442,12 +364,19 @@ export default function ReaderCoRead({
                     // 回复模式：面板上那个开关，或者他自己设置页里那个（她 09-21——
                     // 原来只有面板那个管用，角色设置页那个开关摆着不动，这儿接上）
                     const replyOn = session.replyMode || prefs.replyMode;
+                    // 摆给他的三块：他眼下这几页 / 他上几次读过的还没接过话的 / 他参与过的讨论里的新话
+                    const feed = replyOn
+                        ? await gatherPageFeed({
+                            charId: char.id, bookId: book.id, chapterIdx,
+                            from: winFrom, to: winTo, nameOf,
+                        })
+                        : null;
                     const res = await readCoReadPage({
                         char, user: userProfile, book, chapterIdx, chapterTitle,
                         paras: window, session, chatLines, api,
                         noteLimit: prefs.noteLimit,
                         preset: prefs.promptPreset,
-                        replyFeed: replyOn ? await gatherPageFeed(char.id, window) : undefined,
+                        replyFeed: feed ?? undefined,
                     });
                     const written = await writeCoReadMarks({
                         bookId: book.id, charId: char.id, contentRev: book.contentRev,
@@ -465,22 +394,30 @@ export default function ReaderCoRead({
                         .filter((p) => p >= readFromPage && p <= readToPage)
                         .sort((x, y) => x - y);
 
-                    // 读的时候顺手接的话（回复模式开着才有）：一句一个气泡，落进对应的讨论
-                    const replied = res.replies.length > 0
+                    // 读的时候顺手接的话（回复模式开着才有）：一句一个气泡，落进对应的讨论。
+                    // `missed` = 他想接、但抄回来的那句话没对上原文（对不上就丢掉不落库）——
+                    // 这个数也记下来，免得「他明明回了却什么都没看见」（她 09-21）
+                    const rep = res.replies.length > 0
                         ? await writeCoReadReplies({
                             bookId: book.id, charId: char.id, chapterIdx, replies: res.replies,
-                        }).catch(() => 0)
-                        : 0;
+                        }).catch(() => ({ written: 0, missed: res.replies.length }))
+                        : { written: 0, missed: 0 };
                     await appendRoamActivity({
                         id: rdId('rr'), charId: char.id, bookId: book.id, kind: 'annotate',
                         group, seq: i,
+                        chapterIdx,
                         fromPara: winFrom, toPara: winTo,
                         fromPage: readFromPage, toPage: readToPage,
                         pages,
                         annCount: written.length,
                         annPages: annPages.length > 0 ? annPages : undefined,
-                        replyCount: replied || undefined,
-                        replies: replied > 0 ? res.replies.flatMap((r) => r.lines).slice(0, 8) : undefined,
+                        replyCount: rep.written || undefined,
+                        replyMissed: rep.missed || undefined,
+                        replies: rep.written > 0 ? res.replies.flatMap((r) => r.lines).slice(0, 8) : undefined,
+                        // 摆给他的那份名单留个底（她 09-21 问「里面真的有我的批注吗」——
+                        // 活动记录里当场翻得出来，不用猜）
+                        feedNotes: feed ? feed.notes.length : undefined,
+                        feedLater: feed && feed.later.length > 0 ? feed.later : undefined,
                         summary: `${char.name} 读了《${book.title}》第 ${chapterIdx + 1} 章`,
                         excerpt: res.excerpt || undefined,
                         feeling: res.feeling || undefined,

@@ -56,7 +56,12 @@ export interface CoReadRule {
 }
 
 /** 默认 31 条讨论 → 总结前 30 条（她 09-16 的原话）。 */
-export const DEFAULT_RULE: CoReadRule = { metric: 'msgs', threshold: 31, timing: 'auto' };
+/**
+ * 默认规则：**每满 10 条讨论总结一条**（她 09-21 拍的板）。
+ * 原来是 31——攒得太多，一次总结要吞掉三十条话，写出来的东西糊成一团，
+ * 角色读聊天上下文时整个人是乱的；改小之后每条记录只覆盖一小段，干净得多。
+ */
+export const DEFAULT_RULE: CoReadRule = { metric: 'msgs', threshold: 10, timing: 'auto' };
 
 export const RULE_METRIC_LABEL: Record<CoReadArchiveMetric, string> = {
     msgs: '讨论句数',
