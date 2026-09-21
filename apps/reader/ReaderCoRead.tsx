@@ -342,6 +342,7 @@ export default function ReaderCoRead({
             .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
             .slice(-3);
         const later = (reads.length === 0 ? [] : [...readable]
+            .filter((a) => a.ownerId !== charId)     // 「别人说的话你还没接」——他自己划的不算
             .filter((a) => !seen.has(a.id))
             .filter((a) => reads.some((r) => a.anchor.startPara >= (r.fromPara ?? 0)
                 && a.anchor.startPara <= (r.toPara ?? 0)))
