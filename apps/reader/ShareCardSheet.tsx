@@ -64,11 +64,13 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
     const data: ShareCardData = useMemo(() => ({
         quote,
         bookTitle: book.title,
-        author: book.author,
+        // **她自己在「书本详情 → 编辑资料」里填的那个优先**（跟详情页一个口径，09-26）：
+        // 导入解析出来的作者常常是空的（epub 的 dc:creator 没写），她手填了却不显示就说不过去了
+        author: book.customAuthor || book.author,
         chapterTitle,
         note,
         date,
-    }), [quote, book.title, book.author, chapterTitle, note, date]);
+    }), [quote, book.title, book.author, book.customAuthor, chapterTitle, note, date]);
 
     // 底图：从 blobref 解出来的 URL 再包成 Image（canvas 只认这个）
     useEffect(() => {
