@@ -2000,6 +2000,17 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 .rd-share-toggle { display: flex; align-items: center; gap: var(--rd-space-2); color: var(--rd-ink); font-size: var(--rd-fs-sm); }
 /* 「传自己的字体」那一格：只有图标，跟旁边的字胶囊一样高 */
 .rd-share-fontup { display: inline-flex; align-items: center; gap: var(--rd-space-1); cursor: pointer; }
+/* 取色器藏在圆点里：点圆点就是点色轮（原生 <input type=color> 铺满整格、透明） */
+.rd-share-dot { position: relative; overflow: hidden; }
+.rd-share-color {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  padding: 0; border: 0; opacity: 0; cursor: pointer;
+}
+/* 不透明度那条：小字 + 滑杆 + 右边那个数 */
+.rd-share-alpha { display: flex; align-items: center; gap: var(--rd-space-3); }
+.rd-share-alpha .rd-share-label { flex: 0 0 auto; white-space: nowrap; }
+.rd-share-alpha .rd-slider { flex: 1 1 auto; min-width: 0; }
+.rd-share-num { flex: 0 0 auto; color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
 
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }

@@ -105,6 +105,29 @@ export const shareBgById = (id: string): RdShareBg => {
     return RD_SHARE_BGS.find((x) => x.id === id) ?? RD_SHARE_BGS[0];
 };
 
+/**
+ * 「卡片底色」那排的常用色（她 09-26 要的三样之一）。
+ * 排面只是**起点**——旁边那颗取色器是原生的色轮，随便调（跟划线那条一个调法）。
+ */
+export const RD_SHARE_CARD_COLORS: string[] = [
+    'rgb(255, 255, 255)',
+    'rgb(248, 244, 236)',
+    'rgb(238, 238, 240)',
+    'rgb(250, 238, 241)',
+    'rgb(237, 242, 248)',
+    'rgb(238, 244, 236)',
+    'rgb(26, 28, 32)',
+];
+
+/** 「字色」那排。深底配浅字、浅底配深字，两边都留了 */
+export const RD_SHARE_INK_COLORS: string[] = [
+    'rgb(38, 36, 33)',
+    'rgb(0, 0, 0)',
+    'rgb(90, 70, 52)',
+    'rgb(120, 118, 114)',
+    'rgb(255, 255, 255)',
+];
+
 /** 纸卡顶上那颗圆的颜色（她给的五张：粉 / 紫 / 草绿 / 蓝 + 一个中性灰） */
 export const RD_SHARE_DOTS: string[] = [
     'rgb(238, 150, 160)',

@@ -39,6 +39,14 @@ export interface ShareCardStyle {
     sign: string;
     /** 带不带想法 */
     withNote: boolean;
+    /**
+     * 卡片底色 / 不透明度 / 字色——她 09-26 追加的三样。
+     * **不写就是「跟这张主题自己的」**（主题那套配色本来就能用）；调过之后以她调的为准。
+     */
+    cardColor?: string;
+    /** 卡片不透明度 0-100 */
+    cardAlpha?: number;
+    inkColor?: string;
 }
 
 export const DEFAULT_SHARE_STYLE: ShareCardStyle = {
@@ -51,11 +59,43 @@ export const DEFAULT_SHARE_STYLE: ShareCardStyle = {
     withNote: true,
 };
 
-/** `rgb(r, g, b)` / `rgba(...)` → 换个透明度（纸卡那层色要拿圆点的颜色兑出来） */
+/**
+ * 认三种写法：`rgb(r, g, b)` / `rgba(...)` / `#rgb` / `#rrggbb`。
+ *
+ * **必须认 hex**：她点「自己挑一个色」出来的原生取色器给的就是 `#rrggbb`，
+ * 只认 rgb() 的话她的选择会被当成解析失败、卡直接变白（这个坑我踩过一次）。
+ */
+function parseColor(css: string): [number, number, number] | null {
+    const s = String(css ?? '').trim();
+    const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(s);
+    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+    const h = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(s);
+    if (h) {
+        const six = h[1].length === 3 ? [...h[1]].map((c) => c + c).join('') : h[1];
+        return [
+            parseInt(six.slice(0, 2), 16),
+            parseInt(six.slice(2, 4), 16),
+            parseInt(six.slice(4, 6), 16),
+        ];
+    }
+    return null;
+}
+
+/** 换个透明度（纸卡那层色要拿圆点的颜色兑出来；卡片的透明度也走它） */
 function withAlpha(css: string, alpha: number): string {
-    const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(String(css ?? ''));
-    if (!m) return `rgba(255, 255, 255, ${alpha})`;
-    return `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${alpha})`;
+    const c = parseColor(css);
+    if (!c) return `rgba(255, 255, 255, ${alpha})`;
+    return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
+}
+
+/**
+ * `rgb(a)` / `rgba(...)` / `#hex` → `#rrggbb`。原生的 `<input type="color">`
+ * **只吃这个格式**，所以「她调过就给她看调过的色」这一步得转一下。
+ */
+export function toHex6(css: string): string {
+    const rgb = parseColor(css);
+    if (!rgb) return '#000000';
+    return `#${rgb.map((n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')).join('')}`;
 }
 
 /** 卡上那个日期戳：`2026.09.26`（给不出时间就用今天） */
@@ -210,6 +250,21 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
     const bg = shareBgById(style.bgId);
     const useThemeCanvas = style.bgId === 'none' || style.bgId === 'image' || style.bgId.startsWith('bi:');
     const themeFill = useThemeCanvas ? theme.canvas : bg.fill;
+    // ── 她调过的那三样（底色 / 透明度 / 字色）：调过以她为准，没调过用主题的 ──
+    const ink = style.inkColor || theme.ink;
+    // 出处、日期那层小字跟着字色一起走，只是淡一档（换浅色字时它们才不会糊在底色里）
+    const inkSoft = style.inkColor ? withAlpha(style.inkColor, 0.62) : theme.inkSoft;
+    const accent = style.inkColor || theme.accent;
+    const rule = style.inkColor ? withAlpha(style.inkColor, 0.18) : theme.rule;
+    /**
+     * 卡片底色：她调过就用她调的（没调透明度就是全不透明）；
+     * 只调了透明度就换主题那一层的透明度；都没调就原样用主题的。
+     */
+    const cardFill = (base: string): string => {
+        if (style.cardColor) return withAlpha(style.cardColor, (style.cardAlpha ?? 100) / 100);
+        if (style.cardAlpha !== undefined) return withAlpha(base, style.cardAlpha / 100);
+        return base;
+    };
     const note = style.withNote ? String(data.note ?? '').trim() : '';
     const sign = String(style.sign ?? '').trim();
     const common = { blocks: [] as ShareTextBlock[], x: 0, w: 0, y: 0 };
@@ -228,16 +283,16 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
             w: SHARE_W - 2 * M - PAD * 2 - BAR - BAR_GAP,
             y: M + PAD,
         };
-        const quote = put(pen, { text: `“${data.quote}”`, size: 46, lineHeight: 78, stack, color: theme.ink }, m);
+        const quote = put(pen, { text: `“${data.quote}”`, size: 46, lineHeight: 78, stack, color: ink }, m);
         const noteBlock = put(pen, {
-            text: note, size: 34, lineHeight: 58, stack, color: theme.inkSoft, gapBefore: note ? 56 : 0,
+            text: note, size: 34, lineHeight: 58, stack, color: inkSoft, gapBefore: note ? 56 : 0,
         }, m);
-        put(pen, { text: data.date, size: 28, lineHeight: 40, stack, color: theme.inkSoft, gapBefore: 48 }, m);
+        put(pen, { text: data.date, size: 28, lineHeight: 40, stack, color: inkSoft, gapBefore: 48 }, m);
         if (sign) {
             const ruleY = pen.y + 40;
-            rules.push({ x1: M + PAD, y1: ruleY, x2: SHARE_W - M - PAD, y2: ruleY, color: theme.rule });
+            rules.push({ x1: M + PAD, y1: ruleY, x2: SHARE_W - M - PAD, y2: ruleY, color: rule });
             pen.y = ruleY;
-            put(pen, { text: sign, size: 26, lineHeight: 36, stack, color: theme.inkSoft, align: 'center', gapBefore: 40 }, m);
+            put(pen, { text: sign, size: 26, lineHeight: 36, stack, color: inkSoft, align: 'center', gapBefore: 40 }, m);
         }
         const cardH = pen.y - M + PAD;
         // 竖线只盖住「原文 + 想法」那一段（参考图里日期是掉在下面的）
@@ -247,8 +302,8 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
         return {
             width: SHARE_W,
             height: M * 2 + cardH,
-            card: { x: M, y: M, w: SHARE_W - 2 * M, h: cardH, radius: 44, fill: theme.card, stroke: theme.border },
-            bar: { x: M + PAD, y: barTop, w: BAR, h: Math.max(24, barBottom - barTop), fill: theme.accent },
+            card: { x: M, y: M, w: SHARE_W - 2 * M, h: cardH, radius: 44, fill: cardFill(theme.card), stroke: theme.border },
+            bar: { x: M + PAD, y: barTop, w: BAR, h: Math.max(24, barBottom - barTop), fill: accent },
             rules,
             blocks: pen.blocks,
             outside,
@@ -265,28 +320,28 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
         const TOP = 96 + R;                       // 圆的另一半露在卡片上面
         const cardW = SHARE_W - CX * 2;
         const pen: Pen = { blocks: common.blocks, x: CX + PAD, w: cardW - PAD * 2, y: TOP + PAD + 72 };
-        put(pen, { text: `《${data.bookTitle}》`, size: 34, lineHeight: 50, stack, color: theme.ink, gapAfter: 30 }, m);
-        rules.push({ x1: CX + PAD, y1: pen.y, x2: CX + cardW - PAD, y2: pen.y, color: theme.rule });
-        put(pen, { text: data.quote, size: 46, lineHeight: 78, stack, color: theme.ink, gapBefore: 46 }, m);
+        put(pen, { text: `《${data.bookTitle}》`, size: 34, lineHeight: 50, stack, color: ink, gapAfter: 30 }, m);
+        rules.push({ x1: CX + PAD, y1: pen.y, x2: CX + cardW - PAD, y2: pen.y, color: rule });
+        put(pen, { text: data.quote, size: 46, lineHeight: 78, stack, color: ink, gapBefore: 46 }, m);
         put(pen, {
             text: [data.author, data.chapterTitle].filter(Boolean).join(' · ') || originOf(data),
-            size: 30, lineHeight: 44, stack, color: theme.inkSoft, gapBefore: 60,
+            size: 30, lineHeight: 44, stack, color: inkSoft, gapBefore: 60,
         }, m);
-        put(pen, { text: data.date, size: 26, lineHeight: 38, stack, color: theme.inkSoft, gapBefore: 10 }, m);
+        put(pen, { text: data.date, size: 26, lineHeight: 38, stack, color: inkSoft, gapBefore: 10 }, m);
         if (note) {
-            put(pen, { text: `◇ ${note}`, size: 32, lineHeight: 54, stack, color: theme.inkSoft, gapBefore: 52 }, m);
+            put(pen, { text: `◇ ${note}`, size: 32, lineHeight: 54, stack, color: inkSoft, gapBefore: 52 }, m);
         }
         if (sign) {
-            rules.push({ x1: CX + PAD, y1: pen.y + 56, x2: CX + cardW - PAD, y2: pen.y + 56, color: theme.rule });
-            put(pen, { text: sign, size: 26, lineHeight: 36, stack, color: theme.inkSoft, align: 'center', gapBefore: 92 }, m);
+            rules.push({ x1: CX + PAD, y1: pen.y + 56, x2: CX + cardW - PAD, y2: pen.y + 56, color: rule });
+            put(pen, { text: sign, size: 26, lineHeight: 36, stack, color: inkSoft, align: 'center', gapBefore: 92 }, m);
         }
         const cardH = pen.y - TOP + PAD;
 
         // 卡片外那段：背景上再来一遍书名 + 原文（最多两行，长了收省略号）
         const outPen: Pen = { blocks: outside, x: 120, w: SHARE_W - 240, y: TOP + cardH + 104 };
-        put(outPen, { text: `《${data.bookTitle}》`, size: 44, lineHeight: 64, stack, color: theme.ink, align: 'center', gapAfter: 26 }, m);
+        put(outPen, { text: `《${data.bookTitle}》`, size: 44, lineHeight: 64, stack, color: ink, align: 'center', gapAfter: 26 }, m);
         put(outPen, {
-            text: data.quote, size: 48, lineHeight: 74, stack, color: theme.ink, align: 'center', maxLines: 2,
+            text: data.quote, size: 48, lineHeight: 74, stack, color: ink, align: 'center', maxLines: 2,
         }, m);
 
         return {
@@ -296,11 +351,12 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
                 x: CX, y: TOP, w: cardW, h: cardH, radius: 10,
                 // 0.78 而不是更透：底图可能是花里胡哨的，卡太透字就糊了
                 // （她 09-26：「花里胡哨的垫在下面，不然会看不清字」）
-                fill: 'rgba(255, 255, 255, 0.78)',
-                tint: withAlpha(style.dot || theme.accent, 0.14),
+                fill: cardFill('rgba(255, 255, 255, 0.78)'),
+                // 她自己挑了底色就不再兑圆点那层色了，不然等于在她的选择上又糊了一层
+                tint: style.cardColor ? undefined : withAlpha(style.dot || accent, 0.14),
                 stroke: theme.border,
             },
-            circle: { cx: SHARE_W / 2, cy: TOP, r: R, fill: style.dot || theme.accent },
+            circle: { cx: SHARE_W / 2, cy: TOP, r: R, fill: style.dot || accent },
             rules,
             blocks: pen.blocks,
             outside,
@@ -315,25 +371,25 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
         const PAD = 78;
         const cardW = SHARE_W - CX * 2;
         const pen: Pen = { blocks: common.blocks, x: CX + PAD, w: cardW - PAD * 2, y: CY + PAD };
-        put(pen, { text: data.bookTitle, size: 62, lineHeight: 86, stack, color: theme.accent, gapAfter: 16 }, m);
+        put(pen, { text: data.bookTitle, size: 62, lineHeight: 86, stack, color: accent, gapAfter: 16 }, m);
         put(pen, {
             text: `□ ${[data.chapterTitle, data.author].filter(Boolean).join(' · ')}`,
-            size: 28, lineHeight: 40, stack, color: theme.inkSoft, gapAfter: 56,
+            size: 28, lineHeight: 40, stack, color: inkSoft, gapAfter: 56,
         }, m);
         put(pen, {
             text: note ? `${data.quote}\n\n◇ ${note}` : data.quote,
-            size: 44, lineHeight: 76, stack, color: theme.ink,
+            size: 44, lineHeight: 76, stack, color: ink,
         }, m);
         put(pen, {
             text: `—— ${[data.author, `《${data.bookTitle}》`].filter(Boolean).join(' ')}`,
-            size: 32, lineHeight: 46, stack, color: theme.inkSoft, gapBefore: 52, gapAfter: sign ? 40 : 0,
+            size: 32, lineHeight: 46, stack, color: inkSoft, gapBefore: 52, gapAfter: sign ? 40 : 0,
         }, m);
-        if (sign) put(pen, { text: sign, size: 24, lineHeight: 34, stack, color: theme.inkSoft }, m);
+        if (sign) put(pen, { text: sign, size: 24, lineHeight: 34, stack, color: inkSoft }, m);
         const cardH = pen.y - CY + PAD;
         return {
             width: SHARE_W,
             height: CY * 2 + cardH,
-            card: { x: CX, y: CY, w: cardW, h: cardH, radius: 6, fill: theme.card, stroke: theme.border },
+            card: { x: CX, y: CY, w: cardW, h: cardH, radius: 6, fill: cardFill(theme.card), stroke: theme.border },
             rules,
             blocks: pen.blocks,
             outside,
@@ -344,17 +400,17 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
     // ── 夜读：满版深色卡 + 原文 + 出处 ──
     const M = 100;
     const pen: Pen = { blocks: common.blocks, x: M, w: SHARE_W - M * 2, y: 0 };
-    put(pen, { text: `“${data.quote}”`, size: 50, lineHeight: 86, stack, color: theme.ink, gapBefore: 108 }, m);
-    if (note) put(pen, { text: `◇ ${note}`, size: 34, lineHeight: 58, stack, color: theme.inkSoft, gapBefore: 56 }, m);
+    put(pen, { text: `“${data.quote}”`, size: 50, lineHeight: 86, stack, color: ink, gapBefore: 108 }, m);
+    if (note) put(pen, { text: `◇ ${note}`, size: 34, lineHeight: 58, stack, color: inkSoft, gapBefore: 56 }, m);
     put(pen, {
-        text: `/ ${originOf(data)}`, size: 30, lineHeight: 44, stack, color: theme.inkSoft, gapBefore: 64,
+        text: `/ ${originOf(data)}`, size: 30, lineHeight: 44, stack, color: inkSoft, gapBefore: 64,
     }, m);
-    if (sign) put(pen, { text: sign, size: 24, lineHeight: 34, stack, color: theme.inkSoft, align: 'center', gapBefore: 72 }, m);
+    if (sign) put(pen, { text: sign, size: 24, lineHeight: 34, stack, color: inkSoft, align: 'center', gapBefore: 72 }, m);
     const h = pen.y + 108;
     return {
         width: SHARE_W,
         height: h,
-        card: { x: 0, y: 0, w: SHARE_W, h, radius: 0, fill: theme.card, stroke: theme.border },
+        card: { x: 0, y: 0, w: SHARE_W, h, radius: 0, fill: cardFill(theme.card), stroke: theme.border },
         rules,
         blocks: pen.blocks,
         outside,

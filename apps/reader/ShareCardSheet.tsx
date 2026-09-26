@@ -11,18 +11,19 @@
 // 排版在 utils/reader/shareCardDraw.ts（纯函数、有单测），这儿只管把它画出来。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DownloadSimple, SquaresFour, UploadSimple, X } from '@phosphor-icons/react';
+import { DownloadSimple, Palette, SquaresFour, UploadSimple, X } from '@phosphor-icons/react';
 import { getBlobForRef, putImageBlob, useBlobRefUrl } from '../../utils/blobRef';
 import { shareOrDownloadBlob } from '../../utils/shareExport';
 import {
     drawShareCard, layoutShareCard, type ShareCardData, type ShareMetrics,
 } from '../../utils/reader/shareCardDraw';
 import {
-    RD_SHARE_BGS, RD_SHARE_BUILTIN_BGS, RD_SHARE_BUILTIN_FONTS, RD_SHARE_CUSTOM_FONT, RD_SHARE_DOTS,
-    RD_SHARE_FONTS, RD_SHARE_THEMES,
+    RD_SHARE_BGS, RD_SHARE_BUILTIN_BGS, RD_SHARE_BUILTIN_FONTS, RD_SHARE_CARD_COLORS,
+    RD_SHARE_CUSTOM_FONT, RD_SHARE_DOTS, RD_SHARE_FONTS, RD_SHARE_INK_COLORS, RD_SHARE_THEMES,
     builtinBgOf, builtinBgThumbUrl, builtinBgUrl, builtinFontFamily, builtinFontOf, builtinFontUrl,
-    shareFontById,
+    shareFontById, shareThemeById,
 } from './readerShareThemes';
+import { toHex6 } from '../../utils/reader/shareCardDraw';
 import { setShareBgRef, setShareFontRef, setShareStyle, useReaderShareStore } from './readerShareStore';
 import type { RdBook } from '../../utils/reader/readerDb';
 
@@ -361,6 +362,81 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
                                 </div>
                             </div>
                         )}
+                        {/* 卡片底色 / 不透明度 / 字色（她 09-26 追加）。三个是一组：
+                            底色调深了通常得连字色一起换，排在一块儿调才顺手。
+                            取色器是原生的色轮，跟划线「这条」那颗一个调法。 */}
+                        <div className="rd-share-row">
+                            <div className="rd-share-label">卡片底色</div>
+                            <div className="rd-share-dots">
+                                <button
+                                    className={`rd-share-dot rd-share-dot-word${style.cardColor ? '' : ' rd-share-dot-on'}`}
+                                    aria-label="跟这张主题自己的底色"
+                                    onClick={() => setShareStyle({ cardColor: undefined, cardAlpha: undefined })}
+                                >跟主题</button>
+                                {RD_SHARE_CARD_COLORS.map((c) => (
+                                    <button
+                                        key={c}
+                                        className={`rd-share-dot${c === style.cardColor ? ' rd-share-dot-on' : ''}`}
+                                        style={{ background: c }}
+                                        aria-label="卡片底色"
+                                        onClick={() => setShareStyle({ cardColor: c })}
+                                    />
+                                ))}
+                                <label className="rd-share-dot rd-share-dot-up" aria-label="自己挑一个卡片色">
+                                    <Palette size={16} />
+                                    <input
+                                        className="rd-share-color"
+                                        type="color"
+                                        aria-label="卡片底色"
+                                        value={toHex6(style.cardColor || shareThemeById(style.themeId).card)}
+                                        onChange={(e) => setShareStyle({ cardColor: e.target.value })}
+                                    />
+                                </label>
+                            </div>
+                            <div className="rd-share-alpha">
+                                <span className="rd-share-label">不透明度</span>
+                                <input
+                                    className="rd-slider"
+                                    type="range"
+                                    min={10}
+                                    max={100}
+                                    value={style.cardAlpha ?? 100}
+                                    aria-label="卡片不透明度"
+                                    onChange={(e) => setShareStyle({ cardAlpha: Number(e.target.value) })}
+                                />
+                                <span className="rd-share-num">{style.cardAlpha ?? 100}%</span>
+                            </div>
+                        </div>
+                        <div className="rd-share-row">
+                            <div className="rd-share-label">字色</div>
+                            <div className="rd-share-dots">
+                                <button
+                                    className={`rd-share-dot rd-share-dot-word${style.inkColor ? '' : ' rd-share-dot-on'}`}
+                                    aria-label="跟这张主题自己的字色"
+                                    onClick={() => setShareStyle({ inkColor: undefined })}
+                                >跟主题</button>
+                                {RD_SHARE_INK_COLORS.map((c) => (
+                                    <button
+                                        key={c}
+                                        className={`rd-share-dot${c === style.inkColor ? ' rd-share-dot-on' : ''}`}
+                                        style={{ background: c }}
+                                        aria-label="字色"
+                                        onClick={() => setShareStyle({ inkColor: c })}
+                                    />
+                                ))}
+                                <label className="rd-share-dot rd-share-dot-up" aria-label="自己挑一个字色">
+                                    <Palette size={16} />
+                                    <input
+                                        className="rd-share-color"
+                                        type="color"
+                                        aria-label="字色"
+                                        value={toHex6(style.inkColor || shareThemeById(style.themeId).ink)}
+                                        onChange={(e) => setShareStyle({ inkColor: e.target.value })}
+                                    />
+                                </label>
+                            </div>
+                        </div>
+
                         <div className="rd-share-row">
                             <div className="rd-share-label">落款</div>
                             <input

@@ -6,7 +6,7 @@
 //   · 开关真的管用（关掉想法就没有想法、落款留空就不画那行）
 import { describe, expect, it } from 'vitest';
 import {
-    DEFAULT_SHARE_STYLE, SHARE_W, layoutShareCard, shareDayOf, wrapText,
+    DEFAULT_SHARE_STYLE, SHARE_W, layoutShareCard, shareDayOf, toHex6, wrapText,
     type ShareCardData, type ShareMetrics,
 } from './shareCardDraw';
 import {
@@ -65,6 +65,58 @@ describe('wrapText · 折行', () => {
     it('宽度给 0 / 空文本 → 空数组（不炸）', () => {
         expect(wrapText('随便', 0, (s) => [...s].length)).toEqual([]);
         expect(wrapText('', 100, (s) => [...s].length)).toEqual(['']);
+    });
+});
+
+describe('卡片底色 / 不透明度 / 字色（她 09-26 追加的三样）', () => {
+    const base = { ...DEFAULT_SHARE_STYLE, themeId: 'plain' } as const;
+
+    it('不调 → 老老实实用主题自己的那套', () => {
+        const t = RD_SHARE_THEMES.find((x) => x.id === 'plain')!;
+        const lay = layoutShareCard(data, base, metrics);
+        expect(lay.card.fill).toBe(t.card);
+        expect(lay.blocks[0].color).toBe(t.ink);
+    });
+
+    it('调了底色就按她的来；不写透明度就是全不透明', () => {
+        const lay = layoutShareCard(data, { ...base, cardColor: 'rgb(20, 30, 40)' }, metrics);
+        expect(lay.card.fill).toBe('rgba(20, 30, 40, 1)');
+    });
+
+    it('透明度单独调 → 换的是主题那一层的透明度', () => {
+        const lay = layoutShareCard(data, { ...base, cardAlpha: 50 }, metrics);
+        expect(lay.card.fill).toBe('rgba(255, 255, 255, 0.5)');
+    });
+
+    it('字色一改，正文和那层小字一起跟着走（小字淡一档，层级还在）', () => {
+        const lay = layoutShareCard(data, { ...base, inkColor: 'rgb(240, 240, 240)' }, metrics);
+        const colors = lay.blocks.map((b) => b.color);
+        expect(colors[0]).toBe('rgb(240, 240, 240)');                 // 原文
+        expect(colors.some((c) => c.startsWith('rgba(240, 240, 240, 0.62)'))).toBe(true);   // 日期/落款
+        for (const r of lay.rules) expect(r.color.startsWith('rgba(240, 240, 240')).toBe(true);
+    });
+
+    it('纸卡自己挑了底色就不再兑圆点那层色（别在她的选择上再糊一层）', () => {
+        const paper = { ...DEFAULT_SHARE_STYLE, themeId: 'paper', dot: 'rgb(238, 150, 160)' } as const;
+        expect(layoutShareCard(data, paper, metrics).card.tint).toBeTruthy();
+        expect(layoutShareCard(data, { ...paper, cardColor: 'rgb(20, 30, 40)' }, metrics).card.tint).toBeUndefined();
+    });
+
+    it('从色轮挑的 #hex 也认——不认的话她的选择会变成白卡', () => {
+        expect(layoutShareCard(data, { ...base, cardColor: '#1a2b3c' }, metrics).card.fill)
+            .toBe('rgba(26, 43, 60, 1)');
+        expect(layoutShareCard(data, { ...base, cardColor: '#abc', cardAlpha: 40 }, metrics).card.fill)
+            .toBe('rgba(170, 187, 204, 0.4)');
+        expect(layoutShareCard(data, { ...base, inkColor: '#ffeedd' }, metrics).blocks[0].color)
+            .toBe('#ffeedd');
+    });
+
+    it('toHex6：#rrggbb 是原生取色器唯一认的格式', () => {
+        expect(toHex6('rgb(255, 255, 255)')).toBe('#ffffff');
+        expect(toHex6('rgba(26, 28, 32, 0.9)')).toBe('#1a1c20');
+        expect(toHex6('#0a0B0c')).toBe('#0a0b0c');
+        expect(toHex6('#abc')).toBe('#aabbcc');
+        expect(toHex6('说不清是什么')).toBe('#000000');
     });
 });
 
