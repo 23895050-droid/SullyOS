@@ -666,14 +666,10 @@ export interface SummarizeInput {
     chars: CharacterProfile[];
     user: UserProfile;
     book: RdBook;
-    from: CoReadPos | null;
-    to: CoReadPos;
     /** 这段时间的**讨论记录**（时间序，一行一条，用 readerTimeline 的 lineOf 念好） */
     rows: string[];
     /** 之前已经总结过的（防重复、保持连续） */
     previous: string[];
-    /** 这一场共读是什么时候开的（材料里给个范围，写出来的东西才不飘） */
-    startedAt?: string;
     api: ReaderCallRuntime;
 }
 
@@ -683,19 +679,18 @@ export interface SummarizeInput {
  * 输入是**按时间排序的讨论记录**（谁划了哪句话、谁在哪条下面说了什么），不是按原文分类的
  * 笔记列表；只读事儿——不给人设、不给用户设定。出一段第三人称的正文，进阅读区的历史摘要、
  * 也按规则同步进聊天。
+ *
+ * **她 09-26**：一段摘要就是一段摘要——材料里不再给「从哪读到哪」「这场持续了多久」，
+ * 免得它把这些数字写进正文（进度和时长归**结算**那张卡管）。
  */
 export async function summarizeDiscussionRange(input: SummarizeInput): Promise<string> {
-    const { chars, user, book, from, to, rows, previous, api } = input;
+    const { chars, user, book, rows, previous, api } = input;
     // 多人一起读时用顿号连起来（「阿一、小满」）——摘要只写事儿，名字是唯一的指代
     const names = chars.map((c) => c.name).join('、');
     const prompt = getPrompt('共读·总结')
         .replace(/\{\{char\}\}/g, names)
         .replace(/\{\{user\}\}/g, user.name)
         .replace(/\{\{book\}\}/g, book.title);
-    const mins = input.startedAt
-        ? Math.max(1, Math.round((Date.now() - new Date(input.startedAt).getTime()) / 60000))
-        : 0;
-    const durText = mins >= 60 ? `${Math.floor(mins / 60)} 小时 ${mins % 60} 分` : `${mins} 分钟`;
     const reply = await postReaderChat(api, {
         model: api.model,
         messages: [
@@ -703,13 +698,7 @@ export async function summarizeDiscussionRange(input: SummarizeInput): Promise<s
             {
                 role: 'user',
                 content: [
-                    `《${book.title}》的共读进行到第 ${to.chapterIdx + 1} 章第 ${to.paraIdx + 1} 段。`,
-                    from
-                        ? `这一段的范围：第 ${from.chapterIdx + 1} 章第 ${from.paraIdx + 1} 段 → 第 ${to.chapterIdx + 1} 章第 ${to.paraIdx + 1} 段。`
-                        : `这一段的范围：从开头读到第 ${to.chapterIdx + 1} 章第 ${to.paraIdx + 1} 段。`,
-                    mins > 0 ? `这一场共读一共持续了 ${durText}。` : '',
-                    // 一起读的人 = 她 + 角色。原来只数了角色（她说三个人写成两个人，就是这儿）
-                    `一起读的人一共 ${chars.length + 1} 位：${user.name}${names ? `、${names}` : ''}。`,
+                    `《${book.title}》，一起读的人一共 ${chars.length + 1} 位：${user.name}${names ? `、${names}` : ''}。`,
                     '',
                     rows.length > 0 ? `这段时间书房里的讨论（按发生的先后）：\n${rows.join('\n')}` : '',
                     '',

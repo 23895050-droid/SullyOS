@@ -127,6 +127,8 @@ export interface CoReadSession {
     /** 上次总结的时间（活动记录按它切：只把这段时间之后的读进来） */
     summarizedAt: string | null;
     startedAt: string;
+    /** 开场时读到全书的百分之几（她 09-26：结算要写「进度从 X% 到 Y%」） */
+    startPercent?: number;
     updatedAt: string;
 }
 
@@ -249,6 +251,8 @@ export function startCoRead(input: {
     contextMode: CoReadContextMode;
     rule?: CoReadRule;
     replyMode?: boolean;
+    /** 开场时读到全书的百分之几（她 09-26：开始卡写「初始阅读进度」，不写第几页） */
+    startPercent?: number;
 }): CoReadSession {
     const now = isoNow();
     const session: CoReadSession = {
@@ -257,6 +261,7 @@ export function startCoRead(input: {
         contextMode: input.contextMode,
         rule: input.rule ?? DEFAULT_RULE,
         replyMode: input.replyMode ?? false,
+        startPercent: typeof input.startPercent === 'number' ? input.startPercent : undefined,
         summarizedMsgs: 0,
         summarizedTo: null,
         summarizedAt: null,

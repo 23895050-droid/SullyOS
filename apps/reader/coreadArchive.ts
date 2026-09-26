@@ -88,18 +88,24 @@ async function activitiesPending(ctx: ArchiveCtx, since: string | null): Promise
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-/** 进聊天那条的抬头：从哪读到哪、一起读的是谁、这一场多久（她 09-20 要的三样，我们拼，不指望模型）。 */
-function chatHead(ctx: ArchiveCtx, from: CoReadPos | null, to: CoReadPos, startedAt: string): string {
-    const names = ctx.chars.map((c) => c.name).join('、');
-    const fromText = from
-        ? `从第 ${from.chapterIdx + 1} 章第 ${from.paraIdx + 1} 段`
-        : '从开头';
-    const mins = startedAt
-        ? Math.max(1, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000))
-        : 0;
-    const dur = mins >= 60 ? `${Math.floor(mins / 60)} 小时 ${mins % 60} 分` : `${mins} 分钟`;
-    return `${fromText}读到第 ${to.chapterIdx + 1} 章第 ${to.paraIdx + 1} 段；一起读的是 ${ctx.user.name}`
-        + `${names ? `、${names}` : ''}${mins > 0 ? `，这一场持续了 ${dur}` : ''}。`;
+/**
+ * 这一段的范围（**只给会话记录用**，不进摘要、也不进聊天）。
+ *
+ * 用的是这批活动记录真正跨过的范围：起点 = 时间序第一条读到哪，终点 = 这批里**到过的最远位置**
+ * （往回翻不算新进度——她 09-26 报的「从 39 页读到 36 页」就是这么来的）。
+ * 没有活动记录时退回上一次总结的落点。
+ */
+function spanOfActivities(acts: RdRoamActivity[], fallback: CoReadPos | null): { from: CoReadPos | null; to: CoReadPos | null } {
+    if (acts.length === 0) return { from: fallback, to: null };
+    const first = acts[0];
+    const from: CoReadPos = { chapterIdx: first.chapterIdx ?? 0, paraIdx: first.fromPara ?? 0 };
+    let to: CoReadPos = { chapterIdx: first.chapterIdx ?? 0, paraIdx: first.toPara ?? 0 };
+    for (const a of acts) {
+        const ci = a.chapterIdx ?? 0;
+        const pi = a.toPara ?? 0;
+        if (ci > to.chapterIdx || (ci === to.chapterIdx && pi > to.paraIdx)) to = { chapterIdx: ci, paraIdx: pi };
+    }
+    return { from, to };
 }
 
 /**
@@ -128,8 +134,7 @@ export async function runArchive(ctx: ArchiveCtx, opts: { force: boolean }): Pro
         };
     }
 
-    const to: CoReadPos = { chapterIdx: ctx.chapterIdx, paraIdx: ctx.pageTo };
-    const from = cur.summarizedTo;
+    const span = spanOfActivities(acts, cur.summarizedTo);
     const job = beginJob({
         kind: 'summary',
         charName: ctx.chars.map((c) => c.name).join('、'),
@@ -163,10 +168,9 @@ export async function runArchive(ctx: ArchiveCtx, opts: { force: boolean }): Pro
             const take = opts.force ? pendingDisc.length : discussTake(pendingDisc.length);
             const batch = pendingDisc.slice(0, take);
             const text = await summarizeDiscussionRange({
-                chars: ctx.chars, user: ctx.user, book: ctx.book, from, to,
+                chars: ctx.chars, user: ctx.user, book: ctx.book,
                 rows: batch.map((r) => lineOf(r)),
                 previous: recentMemoTexts(ctx.book.id, 'discuss'),
-                startedAt: cur.startedAt,
                 api: ctx.api,
             });
             if (text) {
@@ -200,17 +204,22 @@ export async function runArchive(ctx: ArchiveCtx, opts: { force: boolean }): Pro
         }
 
         // 会话自己那份记录（「共读结束」整段送进聊天时拼的就是它；from/to 是它的意义）
-        appendCoReadSummary(from ?? { chapterIdx: ctx.chapterIdx, paraIdx: -1 }, to, texts.join('\n\n'), took);
+        appendCoReadSummary(
+            span.from ?? { chapterIdx: ctx.chapterIdx, paraIdx: -1 },
+            span.to ?? { chapterIdx: ctx.chapterIdx, paraIdx: ctx.pageTo },
+            texts.join('\n\n'),
+            took,
+        );
 
-        // 自动归档：**每个人的聊天里都放同一段摘要**（活动记录还是各归各的）
+        // 自动归档：**每个人的聊天里都放同一段摘要**（活动记录还是各归各的）。
+        // 抬头只有书名——进度、时长、页数归「结束共读」那张结算卡（她 09-26）。
         if (cur.rule.timing === 'auto') {
-            const head = chatHead(ctx, from, to, cur.startedAt);
             for (const c of ctx.chars) {
                 await DB.saveMessage({
                     charId: c.id,
                     role: 'system',
                     type: 'text',
-                    content: `[共读：${ctx.book.title}] ${head}\n${texts.join('\n\n')}`,
+                    content: `[共读：${ctx.book.title}] ${texts.join('\n\n')}`,
                     metadata: {
                         source: 'reader_coread',
                         coread: { bookId: ctx.book.id, title: ctx.book.title, charId: c.id, archived: took },
