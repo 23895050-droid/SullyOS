@@ -6,7 +6,7 @@
 //   · 开关真的管用（关掉想法就没有想法、落款留空就不画那行）
 import { describe, expect, it } from 'vitest';
 import {
-    DEFAULT_SHARE_STYLE, SHARE_W, layoutShareCard, wrapText,
+    DEFAULT_SHARE_STYLE, SHARE_W, layoutShareCard, shareDayOf, wrapText,
     type ShareCardData, type ShareMetrics,
 } from './shareCardDraw';
 import { RD_SHARE_THEMES } from '../../apps/reader/readerShareThemes';
@@ -62,6 +62,20 @@ describe('wrapText · 折行', () => {
     it('宽度给 0 / 空文本 → 空数组（不炸）', () => {
         expect(wrapText('随便', 0, (s) => [...s].length)).toEqual([]);
         expect(wrapText('', 100, (s) => [...s].length)).toEqual(['']);
+    });
+});
+
+describe('shareDayOf · 卡上那个日期戳', () => {
+    it('补齐两位：2026.09.06', () => {
+        expect(shareDayOf(new Date(2026, 8, 6, 12).toISOString())).toBe('2026.09.06');
+    });
+
+    it('给不出时间（没写批注的那种划线）→ 用今天', () => {
+        expect(shareDayOf()).toBe(shareDayOf(new Date().toISOString()));
+    });
+
+    it('脏值不抛，退成空串', () => {
+        expect(shareDayOf('不是时间')).toBe('');
     });
 });
 

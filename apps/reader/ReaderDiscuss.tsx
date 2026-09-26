@@ -32,6 +32,7 @@ import { beginJob, endJob } from './readerJobs';
 import { highlightColorOf, useReaderPrefs } from './readerPrefs';
 import { getCharReadPrefs } from './readerCharPrefs';
 import ShareCardSheet from './ShareCardSheet';
+import { shareDayOf } from '../../utils/reader/shareCardDraw';
 
 interface Props {
     book: RdBook;
@@ -54,13 +55,6 @@ const fmtTime = (iso: string): string => {
         : d.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-/** 分享卡上那个日期戳：2026.09.26 */
-const fmtDay = (iso?: string): string => {
-    const d = iso ? new Date(iso) : new Date();
-    if (Number.isNaN(d.getTime())) return '';
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
-};
 
 const actorOf = (msg: RdThreadMsg): string | null =>
     msg.role === 'user' ? 'user' : (msg.role === 'char' ? (msg.charId ?? null) : null);
@@ -469,7 +463,7 @@ export default function ReaderDiscuss({
                 quote={currentAnchor.text}
                 note={currentAnn?.note}
                 chapterTitle={chapterTitle}
-                date={fmtDay(currentAnn?.createdAt ?? ann.createdAt)}
+                date={shareDayOf(currentAnn?.createdAt ?? ann.createdAt)}
                 notify={notify}
                 onClose={() => setSharing(false)}
             />

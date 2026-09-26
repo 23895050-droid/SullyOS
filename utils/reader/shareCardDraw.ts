@@ -58,6 +58,14 @@ function withAlpha(css: string, alpha: number): string {
     return `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${alpha})`;
 }
 
+/** 卡上那个日期戳：`2026.09.26`（给不出时间就用今天） */
+export function shareDayOf(iso?: string): string {
+    const d = iso ? new Date(iso) : new Date();
+    if (Number.isNaN(d.getTime())) return '';
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+}
+
 /** 排版只需要这一个能力：给定文字和字体，量出宽度（真正的 ctx 由调用方包一层） */
 export interface ShareMetrics {
     width(text: string, font: string): number;

@@ -1960,7 +1960,12 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 .rd-share-grip { display: flex; align-items: center; justify-content: center; padding: var(--rd-space-4) 0 max(var(--rd-space-4), var(--safe-bottom, 0px)); background: transparent; }
 .rd-share-grip > span { width: 44px; height: 4px; border-radius: var(--rd-r-pill); background: var(--rd-on-scrim); opacity: 0.5; }
 /* 底栏那三颗：图标在上、字在下 */
-.rd-share-bar { display: flex; align-items: stretch; justify-content: space-around; padding: var(--rd-space-3) var(--rd-space-2) max(var(--rd-space-4), var(--safe-bottom, 0px)); }
+/* 底下那截留白按三值取大（她 09-26 报的「底部被遮住了」）：--safe-bottom 在有些壳里
+   是 0，env() 才是真值，再兜一个地板——三者取大，不双算。面板顶上的 padding 同理。 */
+.rd-share-bar {
+  display: flex; align-items: stretch; justify-content: space-around;
+  padding: var(--rd-space-3) var(--rd-space-2) max(34px, var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
+}
 .rd-share-act {
   flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: var(--rd-space-1);
   border: 0; background: transparent; color: var(--rd-ink);
@@ -1972,7 +1977,7 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 /* 换模板的抽屉：主题 / 字体 / 背景 / 圆点 / 落款 / 想法 */
 .rd-share-panel {
   display: flex; flex-direction: column; gap: var(--rd-space-4);
-  padding: var(--rd-space-5) var(--rd-space-5) max(var(--rd-space-5), var(--safe-bottom, 0px));
+  padding: var(--rd-space-5) var(--rd-space-5) max(44px, var(--safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
   max-height: 62dvh; overflow-y: auto;
   animation: rd-rise 200ms cubic-bezier(0.32, 0.72, 0.28, 1);
 }
@@ -1993,6 +1998,8 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 .rd-share-dot-word { width: auto; padding: 0 var(--rd-space-3); font-size: var(--rd-fs-caption); }
 .rd-share-sign { flex: 1 1 auto; }
 .rd-share-toggle { display: flex; align-items: center; gap: var(--rd-space-2); color: var(--rd-ink); font-size: var(--rd-fs-sm); }
+/* 「传自己的字体」那一格：只有图标，跟旁边的字胶囊一样高 */
+.rd-share-fontup { display: inline-flex; align-items: center; gap: var(--rd-space-1); cursor: pointer; }
 
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }

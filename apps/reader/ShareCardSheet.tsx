@@ -12,15 +12,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DownloadSimple, SquaresFour, UploadSimple, X } from '@phosphor-icons/react';
-import { putImageBlob, useBlobRefUrl } from '../../utils/blobRef';
+import { getBlobForRef, putImageBlob, useBlobRefUrl } from '../../utils/blobRef';
 import { shareOrDownloadBlob } from '../../utils/shareExport';
 import {
     drawShareCard, layoutShareCard, type ShareCardData, type ShareMetrics,
 } from '../../utils/reader/shareCardDraw';
 import {
-    RD_SHARE_BGS, RD_SHARE_DOTS, RD_SHARE_FONTS, RD_SHARE_THEMES, shareFontById,
+    RD_SHARE_BGS, RD_SHARE_CUSTOM_FONT, RD_SHARE_DOTS, RD_SHARE_FONTS, RD_SHARE_THEMES, shareFontById,
 } from './readerShareThemes';
-import { setShareBgRef, setShareStyle, useReaderShareStore } from './readerShareStore';
+import { setShareBgRef, setShareFontRef, setShareStyle, useReaderShareStore } from './readerShareStore';
 import type { RdBook } from '../../utils/reader/readerDb';
 
 interface Props {
@@ -39,14 +39,20 @@ interface Props {
 
 export default function ShareCardSheet({ book, quote, note, chapterTitle, date, notify, onClose }: Props) {
     const store = useReaderShareStore();
-    const style = store.style;
     const [panel, setPanel] = useState(false);
     const [chrome, setChrome] = useState(true);
     const [busy, setBusy] = useState(false);
     const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
     const [fontsReady, setFontsReady] = useState(false);
+    /** 自己传的那套 ttf 装好了没（装好之前量出来的字宽是错的，得等它） */
+    const [customReady, setCustomReady] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const faceRef = useRef<FontFace | null>(null);
     const bgUrl = useBlobRefUrl(store.bgRef || undefined);
+    // 传过字体才摆「我传的」那一档；没传的时候选了它等于没字体，回落宋体
+    const style = store.fontRef || store.style.fontId !== 'custom'
+        ? store.style
+        : { ...store.style, fontId: 'song' };
 
     const data: ShareCardData = useMemo(() => ({
         quote,
@@ -68,6 +74,32 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
         return () => { alive = false; };
     }, [bgUrl]);
 
+    // 她自己传的 ttf：读出来注册成字体（和日记那个自定义字体一个套路）
+    useEffect(() => {
+        let alive = true;
+        const ref = store.fontRef;
+        const drop = () => {
+            if (faceRef.current) { try { document.fonts.delete(faceRef.current); } catch { /* 已经没了 */ } faceRef.current = null; }
+        };
+        if (!ref) { drop(); setCustomReady(false); return drop; }
+        void (async () => {
+            try {
+                const blob = await getBlobForRef(ref);
+                if (!blob || !alive) return;
+                const face = new FontFace(RD_SHARE_CUSTOM_FONT, await blob.arrayBuffer());
+                await face.load();
+                if (!alive) return;
+                drop();
+                document.fonts.add(face);
+                faceRef.current = face;
+                setCustomReady(true);
+            } catch {
+                if (alive) setCustomReady(false);   // 这个文件当字体用不了
+            }
+        })();
+        return () => { alive = false; drop(); };
+    }, [store.fontRef]);
+
     // 字体要先落地再量字宽，不然第一帧量的是兜底字体、折行位置是错的
     useEffect(() => {
         let alive = true;
@@ -76,7 +108,7 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
             (size) => document.fonts.load(`${size}px ${stack}`).catch(() => undefined),
         )).catch(() => undefined).finally(() => { if (alive) setFontsReady(true); });
         return () => { alive = false; };
-    }, [style.fontId]);
+    }, [style.fontId, customReady]);
 
     /** 画一版；返回排好的版面（保存时不用重算） */
     const paint = useCallback((): void => {
@@ -94,7 +126,9 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
         drawShareCard(ctx, lay, bgImg);
     }, [data, style, bgImg]);
 
-    useEffect(() => { if (fontsReady) paint(); }, [fontsReady, paint]);
+    // 系统字体和「自己传的那套」都就位了才画（不然量出来的字宽是错的，折行会跑）
+    const ready = fontsReady && (style.fontId !== 'custom' || customReady);
+    useEffect(() => { if (ready) paint(); }, [ready, paint]);
 
     const save = async () => {
         const canvas = canvasRef.current;
@@ -146,8 +180,21 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
         }
     };
 
+    /** 传字体：ttf/otf/woff 都行（她是照着「字体那几档看着都一样」提的，09-26） */
+    const pickFont = async (file: File | undefined) => {
+        if (!file) return;
+        try {
+            setShareFontRef(await putImageBlob(file));
+            setShareStyle({ fontId: 'custom' });
+            notify('字体换好了');
+        } catch {
+            notify('这个字体文件用不了');
+        }
+    };
+
     const theme = RD_SHARE_THEMES.find((t) => t.id === style.themeId) ?? RD_SHARE_THEMES[0];
     const dotty = theme.layout === 'circle';
+    const fontChoices = RD_SHARE_FONTS.filter((f) => f.id !== 'custom' || !!store.fontRef);
 
     // 点卡片外面关掉它——**要拦住冒泡**：这张卡是从讨论面板里拉起来的，
     // 不拦的话关卡片会顺手把底下那张讨论面板也关掉
@@ -187,13 +234,23 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
                         <div className="rd-share-row">
                             <div className="rd-share-label">字体</div>
                             <div className="rd-share-chips">
-                                {RD_SHARE_FONTS.map((f) => (
+                                {fontChoices.map((f) => (
                                     <button
                                         key={f.id}
                                         className={`rd-chip${f.id === style.fontId ? ' rd-chip-on' : ''}`}
                                         onClick={() => setShareStyle({ fontId: f.id })}
                                     >{f.label}</button>
                                 ))}
+                                {/* 自己的 ttf（她 09-26：系统那三档看着差不多，愿意给字体） */}
+                                <label className="rd-chip rd-share-fontup" aria-label="传自己的字体">
+                                    <UploadSimple size={14} />
+                                    <input
+                                        type="file"
+                                        accept=".ttf,.otf,.woff,.woff2,font/*"
+                                        style={{ display: 'none' }}
+                                        onChange={(e) => { void pickFont(e.target.files?.[0]); e.target.value = ''; }}
+                                    />
+                                </label>
                             </div>
                         </div>
                         <div className="rd-share-row">

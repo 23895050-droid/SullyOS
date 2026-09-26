@@ -114,14 +114,22 @@ export interface RdShareFont {
     id: string;
     /** 卡片上的「字体」那一排的显示名 */
     label: string;
-    /** canvas 用的字体栈（中文衬线在各端的落点不一样，多写几个兜底） */
+    /**
+     * canvas 用的字体栈。**第一个必须是中文里真有的那套**——系统给的
+     * Georgia / -apple-system 只是西文兜底，中文字会一路落到后面的中文字体上。
+     */
     stack: string;
 }
 
+/** 她自己传的那套 ttf 注册成这个族名（和日记那个自定义字体同一个套路） */
+export const RD_SHARE_CUSTOM_FONT = 'RDShareCustom';
+
 export const RD_SHARE_FONTS: RdShareFont[] = [
-    { id: 'song', label: '宋体', stack: 'Georgia, "Songti SC", "SimSun", "Noto Serif SC", serif' },
-    { id: 'hei', label: '黑体', stack: '-apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif' },
-    { id: 'kai', label: '楷体', stack: '"Kaiti SC", "KaiTi", "STKaiti", "Noto Serif SC", serif' },
+    { id: 'song', label: '宋体', stack: '"Songti SC", "SimSun", "Noto Serif SC", Georgia, serif' },
+    { id: 'hei', label: '黑体', stack: '"PingFang SC", "Heiti SC", "Microsoft YaHei", "Noto Sans SC", sans-serif' },
+    { id: 'kai', label: '楷体', stack: '"Kaiti SC", "KaiTi", "STKaiti", "Kaiti TC", serif' },
+    // 传过 ttf 之后这一档才会在面板上露脸（没传的时候选它等于没字体，不摆空档）
+    { id: 'custom', label: '我传的', stack: RD_SHARE_CUSTOM_FONT },
 ];
 
 export const shareFontById = (id: string): RdShareFont =>

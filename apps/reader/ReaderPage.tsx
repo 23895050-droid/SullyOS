@@ -41,6 +41,8 @@ import { useReaderCharPrefs } from './readerCharPrefs';
 import HighlightColorSheet from './HighlightColorSheet';
 import ReaderCoRead from './ReaderCoRead';
 import ReaderDiscuss from './ReaderDiscuss';
+import ShareCardSheet from './ShareCardSheet';
+import { shareDayOf } from '../../utils/reader/shareCardDraw';
 import { useCoReadStore } from './coreadStore';
 import { useOS } from '../../context/OSContext';
 import TokenImg from '../../components/os/TokenImg';
@@ -306,6 +308,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const tapHitRef = useRef<RdAnnotation | null>(null);
     /** 讨论面板：长按命中的那条线 */
     const [discuss, setDiscuss] = useState<RdAnnotation | null>(null);
+    /** 书摘分享卡（她 09-26）：工具条上点「分享书摘」时抓下来的那一条 */
+    const [sharing, setSharing] = useState<{ quote: string; note?: string; at?: string } | null>(null);
 
     const disarmLongPress = useCallback(() => {
         if (longPressRef.current) window.clearTimeout(longPressRef.current.timer);
@@ -1687,7 +1691,15 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                         >
                             <Copy size={18} weight="bold" /><span>复制</span>
                         </button>
-                        <button className="rd-bar-tb-item" onClick={() => notify('分享书摘要等转发卡片（第三批）')}>
+                        {/* 分享书摘（她 09-26）：拿这条划线做一张能存成图片的卡片。
+                            点开先把工具条收掉——不然它压在卡片上面。 */}
+                        <button
+                            className="rd-bar-tb-item"
+                            onClick={() => {
+                                setSharing({ quote: bar.text, note: bar.ann?.note, at: bar.ann?.createdAt });
+                                setBar(null);
+                            }}
+                        >
                             <ShareNetwork size={18} weight="bold" /><span>分享书摘</span>
                         </button>
                         <button
@@ -1716,6 +1728,19 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     notify={notify}
                     onClose={() => setDiscuss(null)}
                     onChanged={() => void reloadAnns()}
+                />
+            )}
+
+            {/* ── 书摘分享卡（工具条上的「分享书摘」拉起来的） ── */}
+            {sharing && book && chapter && (
+                <ShareCardSheet
+                    book={book}
+                    quote={sharing.quote}
+                    note={sharing.note}
+                    chapterTitle={chapter.title}
+                    date={shareDayOf(sharing.at)}
+                    notify={notify}
+                    onClose={() => setSharing(null)}
                 />
             )}
 
