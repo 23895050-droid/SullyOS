@@ -1,14 +1,17 @@
-// 读书模块 · **开读之前摆到他眼前的东西**（她 09-21 定稿；09-21 深夜抽成纯函数 + 单测）
+// 读书模块 · **开读之前摆到他眼前的东西**（她 09-21 定稿；09-25 文档改了「未读」的口径）
 //
-// 三块：
-//   ① **他眼下这几页上所有的批注**——当风景看也行，想接哪句就接。他接过话的那几条后面
-//      标一句，省得他对着同一条说第二遍；他自己划的也在里头（那一页本来就是他看到的样子）。
-//   ② **他最近几次读过的那几页上，他还没接过话的**——他读完往后走了以后，她又在那些页上
-//      留了话，他的窗口再也扫不到。她原话：「我还是希望他能回那些以我的话收尾的讨论」。
-//      名单**现读**：她删掉那条批注，下一次这儿就没有了。
-//   ③ **他参与过的讨论**里，他说完之后别人接着说——关于他的事他得知道。
+// 两块：
+//   ① **他眼下这几页上所有的批注**——当风景看也行，想接哪句就接。他接过话的那几条后面标一句，
+//      省得他对着同一条说第二遍；他自己划的也在里头（那一页本来就是他看到的样子）。
+//   ② **未读的**——她 09-25 文档的定义：**他还没接收过的**。以他上次读到什么时候为准（水位线），
+//      那之后书房里新出现的批注和回复都算。落在他读过的那些页上的，**一页一块**摆给他：
+//      那一页的原文 + 那一页大家的批注 + 谁说过什么话（她 09-21 要的「回话得带着记录」）；
+//      落在他还没读到的页上的，就简单列一行，让他知道有这么回事。
 //
-// 抽出来的原因：她连着两轮问「里面真的有我最近的批注吗」，光靠嘴说不如让单测把这句话钉住
+// **别把「未读」和「没接过话」当成一回事**（文档原话）：他看过没接的，下一次不再重复摆。
+// 水位线由调用方给（`reader_context_v1` 里按角色存 `seen`），他每读一次就推一次。
+//
+// 抽成纯函数的原因：她连着两轮问「里面真的有我最近的批注吗」，光靠嘴说不如让单测把这句话钉住
 // （`readerFeed.test.ts`）。组件那边只负责取数据 + 拼行。
 //
 // 「有哪几页」全部用**章内段号**；跨章的段号会撞车，所以过滤时章号也要对。
@@ -18,13 +21,15 @@ import {
     type RdAnnotation, type RdRoamActivity, type RdThread,
 } from './readerDb';
 import { threadKeyOf } from './readerParticipants';
+import { activeWindow, buildTimeline, lineOf, type TimelineRow } from './readerTimeline';
+import { recentMemos, seenAt } from '../../apps/reader/readerContextStore';
 
 export interface PageFeed {
     /** 他眼下这几页上的批注（一行一条，按书上顺序） */
     notes: string[];
-    /** 他最近几次读过的那几页上还没接过话的，**一页一条**（带那页原文 + 那页的批注和讨论） */
+    /** 他上次读完之后新出现的、落在他读过那几页上的，**一页一条**（带原文 + 批注 + 讨论） */
     later: string[];
-    /** 他参与过的讨论里，他说完之后别人接着说的 */
+    /** 别处新出现的（他还没读到的页上）——一行一条，让他知道有这么回事 */
     followUps: string[];
 }
 
@@ -37,6 +42,8 @@ const PAGE_TEXT_MAX = 900;
 /** 一页上最多摆几条批注 / 每条的讨论最多摆几句 */
 const PAGE_ANNS_MAX = 6;
 const THREAD_LINES_MAX = 6;
+/** 别处那些最多列几条 */
+const ELSEWHERE_MAX = 10;
 
 export interface BuildFeedInput {
     charId: string;
@@ -46,6 +53,8 @@ export interface BuildFeedInput {
     /** 他眼下读的段落范围（章内段号，含两头） */
     from: number;
     to: number;
+    /** 他的未读水位线：上次读到什么时候（null / 不给 = 什么都还没接收过） */
+    since?: string | null;
     anns: RdAnnotation[];
     threads: RdThread[];
     /** 他的活动记录（这个函数自己挑「读过的」那几条、自己排序） */
@@ -85,14 +94,22 @@ function pagesOfRead(r: RdRoamActivity, fallbackChapter: number): PageRef[] {
     return out;
 }
 
+/** `HH:MM` */
+const clock = (iso: string): string => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
 /** 把数据摆成三块（纯函数：同样的数据进来，同样的行出去）。 */
 export function buildPageFeed(input: BuildFeedInput): PageFeed {
-    const { charId, bookId, chapterIdx, from, to, anns, threads, reads, parasOf, nameOf } = input;
+    const { charId, chapterIdx, from, to, anns, threads, reads, parasOf, nameOf } = input;
+    const since = input.since ?? null;
     const keyOf = (a: RdAnnotation): string => threadKeyOf(a.chapterIdx ?? chapterIdx, a.anchor, a.ownerId);
-    /** 批注落在哪一段：章号跟段号是一对（段号是章内的，只看段号会串章） */
-    const inWindow = (a: RdAnnotation, w: { chapterIdx: number; from: number; to: number }): boolean =>
-        (a.chapterIdx ?? chapterIdx) === w.chapterIdx
-        && a.anchor.startPara >= w.from && a.anchor.startPara <= w.to;
+
+    const readable = anns
+        .filter((a) => a.kind !== 'bookmark' && !!a.note)
+        .filter((a) => canSee(a, charId));
 
     // 他接过话的讨论（认锚点）→ 那一条后面标一句
     const joined = new Set(
@@ -100,75 +117,53 @@ export function buildPageFeed(input: BuildFeedInput): PageFeed {
             .filter((t) => t.messages.some((m) => m.role === 'char' && m.charId === charId))
             .map((t) => t.anchorKey),
     );
-    /** 一条批注 → 给他的那一行 */
-    const lineOf = (a: RdAnnotation): string => {
+
+    // ① 他眼下这几页（顺序就是书上从上到下）
+    const key = (a: RdAnnotation): string => `${a.chapterIdx ?? chapterIdx}|${a.anchor.startPara}`;
+    const here = readable.filter((a) => (a.chapterIdx ?? chapterIdx) === chapterIdx
+        && a.anchor.startPara >= from && a.anchor.startPara <= to);
+    const notes = here.map((a) => {
         const who = a.ownerId === charId ? '你' : `[${nameOf(a.ownerId)}]`;
         const done = joined.has(keyOf(a)) ? '（你已经接过话了）' : '';
         return `${who} “${a.anchor.text}” → ${a.note}${done}`;
-    };
-    const readable = anns
-        .filter((a) => a.kind !== 'bookmark' && !!a.note)
-        .filter((a) => canSee(a, charId));
+    });
+    const noteKeys = new Set(here.map(key));
 
-    // ① 他眼下这几页（顺序就是书上从上到下）
-    const here = readable.filter((a) => inWindow(a, { chapterIdx, from, to }));
-    const seen = new Set(here.map((a) => a.id));
+    // ② 未读：他上次读完之后新出现的（别人写的），落在他读过的那些页上的按页归堆
+    const rows = buildTimeline({ anns, threads, viewer: charId, nameOf, chapterFallback: chapterIdx });
+    const unread = (since ? rows.filter((r) => r.at > since) : rows)
+        .filter((r) => r.ownerId !== charId)
+        // 眼下这几页上的批注已经当风景摆过一遍了，不再重复
+        .filter((r) => !(r.kind === 'note' && r.chapterIdx === chapterIdx
+            && r.para >= from && r.para <= to));
 
-    // ② 他最近几次读过的**页**：哪几页上还留着他没接过的话，一页摆一块
-    const clock = (iso: string): string => {
-        const d = new Date(iso);
-        if (Number.isNaN(d.getTime())) return '';
-        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    };
-    const threadOf = (a: RdAnnotation): RdThread | undefined =>
-        threads.find((t) => t.anchorKey === keyOf(a));
-    /**
-     * 这一条还需要他回吗？
-     *   · 别人留的：他没在这条下面说过话（说过就不再催）
-     *   · **他自己划的**（她 09-21：我自己都回了他划的线，怎么就不算）：只要别人在这条
-     *     下面说过话、而最后一句不是他，就得给他看——那正是「她回了我，我还没回她」
-     */
-    const needsAnswer = (a: RdAnnotation): boolean => {
-        const th = threadOf(a);
-        const msgs = th?.messages ?? [];
-        if (a.ownerId === charId) {
-            const others = msgs.filter((m) => !(m.role === 'char' && m.charId === charId));
-            if (others.length === 0) return false;
-            const last = msgs[msgs.length - 1];
-            return !(last && last.role === 'char' && last.charId === charId);
-        }
-        return !joined.has(keyOf(a));
-    };
     const pages: PageRef[] = reads
-        .filter((a) => a.bookId === bookId && a.kind === 'annotate' && a.mode === 'coread')
+        .filter((a) => a.kind === 'annotate' && a.mode === 'coread')
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
         .slice(-FEED_READ_LOOKBACK)
         .flatMap((r) => pagesOfRead(r, chapterIdx));
 
-    /** 这一页上他还得回的话 */
-    const pendingOn = (pg: PageRef): RdAnnotation[] => readable.filter((a) => (
-        (a.chapterIdx ?? chapterIdx) === pg.chapterIdx
-        && a.anchor.startPara >= pg.from && a.anchor.startPara <= pg.to
-        && !seen.has(a.id)            // 眼下这几页已经摆过的，不重复
-        && needsAnswer(a)
-    ));
-
-    // 同一页可能在好几次记录里都出现 → 按「章 + 页号」合成一块
-    const byPage = new Map<string, { pg: PageRef; items: RdAnnotation[] }>();
-    for (const pg of pages) {
-        const items = pendingOn(pg);
-        if (items.length === 0) continue;
+    const elsewhere: TimelineRow[] = [];
+    const byPage = new Map<string, { pg: PageRef; rows: TimelineRow[] }>();
+    for (const r of unread) {
+        const pg = [...pages].reverse().find((p) => p.chapterIdx === r.chapterIdx
+            && r.para >= p.from && r.para <= p.to);
+        if (!pg) { elsewhere.push(r); continue; }
         const k = `${pg.chapterIdx}|${pg.page}`;
         const hit = byPage.get(k);
-        if (hit) {
-            for (const a of items) if (!hit.items.some((x) => x.id === a.id)) hit.items.push(a);
-        } else {
-            byPage.set(k, { pg, items });
-        }
+        if (hit) hit.rows.push(r);
+        else byPage.set(k, { pg, rows: [r] });
     }
 
+    /** 这一页上能看见的批注（谁留的都摆——他要回话得有那一页的全貌） */
+    const annsOnPage = (pg: PageRef): RdAnnotation[] => readable.filter((a) => (
+        (a.chapterIdx ?? chapterIdx) === pg.chapterIdx
+        && a.anchor.startPara >= pg.from && a.anchor.startPara <= pg.to
+        && !noteKeys.has(key(a))       // 眼下这几页上的，风景那块已经摆过
+    ));
+
     /** 一页 = 那一页的原文 + 那一页上的批注和讨论（她 09-21：他回话得带着这些） */
-    const pageBlock = (pg: PageRef, items: RdAnnotation[]): string => {
+    const pageBlock = (pg: PageRef, fresh: TimelineRow[]): string => {
         const span = pg.pageFrom === pg.pageTo ? `第 ${pg.pageFrom} 页` : `第 ${pg.pageFrom}–${pg.pageTo} 页`;
         const lines = [`■ 第 ${pg.page} 页${pg.at ? `（你 ${clock(pg.at)} 读的是${span}）` : ''}`];
         const paras = parasOf?.(pg.chapterIdx);
@@ -182,15 +177,23 @@ export function buildPageFeed(input: BuildFeedInput): PageFeed {
             }
             lines.push('那一页的原文：', cut ? `${text}\n……（这一页后面还有）` : text);
         }
+        const items = annsOnPage(pg).slice(0, PAGE_ANNS_MAX);
         lines.push('那一页上的批注和讨论：');
-        for (const a of items.slice(0, PAGE_ANNS_MAX)) {
+        for (const a of items) {
             const who = a.ownerId === charId ? '你' : `[${nameOf(a.ownerId)}]`;
             lines.push(`${who} “${a.anchor.text}” → ${a.note}`);
-            for (const m of (threadOf(a)?.messages ?? []).slice(-THREAD_LINES_MAX)) {
+            const th = threads.find((t) => t.anchorKey === keyOf(a));
+            for (const m of (th?.messages ?? []).slice(-THREAD_LINES_MAX)) {
                 const mine = m.role === 'char' && m.charId === charId;
                 const said = m.role === 'user' ? nameOf('user') : nameOf(m.charId ?? '');
                 lines.push(`　↳ ${mine ? '你' : said}：${m.content}`);
             }
+        }
+        // 新出现的那几句单列出来（可能落在没批注的段上，别漏）
+        const freshLines = fresh.map((r) => lineOf(r, { withTime: true }));
+        if (freshLines.length > 0) {
+            lines.push('你上次读完之后新出现的：');
+            for (const l of freshLines) lines.push(`　${l}`);
         }
         return lines.join('\n');
     };
@@ -199,23 +202,38 @@ export function buildPageFeed(input: BuildFeedInput): PageFeed {
         .sort((x, y) => y.pg.at.localeCompare(x.pg.at))                       // 最近读过的那几页在前
         .slice(0, FEED_LATER_MAX)
         .sort((x, y) => x.pg.chapterIdx - y.pg.chapterIdx || x.pg.page - y.pg.page)
-        .map(({ pg, items }) => pageBlock(pg, items));
+        .map(({ pg, rows: fresh }) => pageBlock(pg, fresh));
 
-    // ③ 他参与过的讨论里，他说完之后别人接着说
-    const followUps: string[] = [];
-    for (const t of threads) {
-        const his = t.messages.filter((m) => m.role === 'char' && m.charId === charId);
-        if (his.length === 0) continue;           // 他连话都没说过的不打扰他
-        const lastMineAt = his[his.length - 1].createdAt;
-        for (const m of t.messages) {
-            if (m.createdAt <= lastMineAt) continue;
-            if (m.role === 'char' && m.charId === charId) continue;
-            const who = m.role === 'user' ? nameOf('user') : nameOf(m.charId ?? '');
-            followUps.push(`[${who}] 在“${t.anchor.text}”那条下面说：${m.content}`);
-        }
-    }
+    const followUps = elsewhere.slice(-ELSEWHERE_MAX).map((r) => lineOf(r, { withTime: true }));
 
-    return { notes: here.map(lineOf), later, followUps: followUps.slice(-10) };
+    return { notes, later, followUps };
+}
+
+/** 历史阅读摘要最多给几条（她 09-26：读最近十条） */
+export const FEED_SUMMARY_MAX = 10;
+
+/**
+ * 阅读上下文里的另外两块（她 09-25 文档、09-26 定的拼接顺序）：
+ *   · **历史阅读摘要**：最近十条（每满 10 条活动记录揉一条那条 + 讨论归档那条，按时间混排）
+ *   · **最近的讨论记录**：活跃窗口最近 15 条（15 条以外的已经归档进摘要了，不重复塞）
+ */
+export async function gatherReaderWindow(opts: {
+    charId: string;
+    bookId: string;
+    chapterIdx: number;
+    nameOf: (ownerId: string) => string;
+}): Promise<{ summaries: string[]; discussion: string[] }> {
+    const [anns, threads] = await Promise.all([
+        listAnnotations(opts.bookId).catch(() => [] as RdAnnotation[]),
+        listThreads(opts.bookId).catch(() => [] as RdThread[]),
+    ]);
+    const rows = buildTimeline({
+        anns, threads, viewer: opts.charId, nameOf: opts.nameOf, chapterFallback: opts.chapterIdx,
+    });
+    return {
+        summaries: recentMemos(opts.bookId, FEED_SUMMARY_MAX).map((r) => r.text),
+        discussion: activeWindow(rows).map((r) => lineOf(r, { withTime: true })),
+    };
 }
 
 /** 取数据 + 摆盘（组件用这个）。 */
@@ -248,6 +266,7 @@ export async function gatherPageFeed(opts: {
     return buildPageFeed({
         ...opts,
         anns, threads, reads,
+        since: seenAt(opts.bookId, opts.charId),
         parasOf: (ci) => chapters.get(ci),
     });
 }

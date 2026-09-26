@@ -65,6 +65,16 @@ export interface CoReadRule {
  */
 export const DEFAULT_RULE: CoReadRule = { metric: 'calls', threshold: 10, timing: 'auto' };
 
+/** 带多少条聊天原文的默认值（她 09-26：核心人设 20、chat 同款 50）。 */
+export const DEFAULT_CHAT_LINES: Record<CoReadContextMode, number> = { focused: 20, immersive: 50 };
+
+/** 这一场共读带多少条聊天原文：手调过就用手调的，没调过按档来。 */
+export const chatLimitOf = (session: { chatLines?: number; contextMode: CoReadContextMode }): number => {
+    const n = Math.round(Number(session.chatLines));
+    if (Number.isFinite(n) && n > 0) return Math.max(1, Math.min(200, n));
+    return DEFAULT_CHAT_LINES[session.contextMode] ?? 50;
+};
+
 export const RULE_METRIC_LABEL: Record<CoReadArchiveMetric, string> = {
     calls: '记录',
     msgs: '讨论句数',
@@ -85,13 +95,16 @@ export const RULE_TIMING_LABEL: Record<CoReadArchiveTiming, string> = {
 };
 
 /** 规则的一句话说明（确认设置 / 信息页里那行小字）。 */
-export const ruleHint = (rule: CoReadRule): string => {
-    const unit = RULE_METRIC_UNIT[rule.metric];
-    const tail = rule.timing === 'auto'
-        ? '总结完立刻同步进他的聊天；共读结束时把剩下的补齐。'
-        : '先不打扰聊天；点「共读结束」才把整段经历一次送进他的聊天。';
-    return `每满 ${rule.threshold} ${unit}自动总结一次（最新那条留着做衔接），${tail}`;
-};
+/**
+ * 面板上那行小字（规则全文）。
+ * 她 09-25 的文档把**整理节奏**定死了（两条线，不让人改），能选的只剩「什么时候进聊天」，
+ * 所以这里只念时机。
+ */
+export const ruleHint = (rule: CoReadRule): string => (
+    rule.timing === 'auto'
+        ? '整理按两条线走（他每满 10 次读书记录揉一条内容；讨论满 45 条归档 30 条），整理好立刻同步进他的聊天；共读结束时把剩下的补齐。'
+        : '整理按两条线走（他每满 10 次读书记录揉一条内容；讨论满 45 条归档 30 条），先攒着；点「共读结束」才一次送进他的聊天。'
+);
 
 export interface CoReadSession {
     bookId: string;
@@ -102,6 +115,11 @@ export interface CoReadSession {
     rule: CoReadRule;
     /** 回复模式：开了他就不必等你点 ⚡——他自己决定回不回、要不要往下读 */
     replyMode: boolean;
+    /**
+     * 带多少条聊天原文（她 09-26）：没手调过就按档来——**核心人设 20 条 / chat 同款 50 条**，
+     * 读书面板里随时能改（改完存这儿，这一场共读都按它）。
+     */
+    chatLines?: number;
     /** **水位线**：讨论流水已经总结到第几条（0 = 一条都还没总结） */
     summarizedMsgs: number;
     /** 上次总结时读到哪（展示用；也是「这段读了什么」的兜底范围） */

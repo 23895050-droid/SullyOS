@@ -1,60 +1,35 @@
-// 归档水位线的纯函数（她 09-16 照 TRPG 定的规矩：攒够阈值就总结，最新那条留着做衔接；
-// 09-21 她把默认阈值从 31 改成 10——攒太多会糊成一团）；
-// 09-20 拆成「口径 × 时机」两个维度）+ 后台任务胶囊的显示窗口。
+// 书房归档 · 两把尺子（她 09-25 文档定的）+ 后台任务胶囊的显示窗口。
+//
+// 尺子的纯函数本体住在 `utils/reader/readerTimeline`（那边有完整单测），这里只钉
+// 「归档这一层怎么用它」：内容汇总每满 10 条**活动记录**；讨论摘要满 45 条归档较早的 30 条。
 // （放在 utils/reader 下是因为 vitest 的 include 只吃这几个目录）
 import { describe, expect, it } from 'vitest';
-import { archiveTake, countRecords, planArchive } from '../../apps/reader/coreadArchive';
-import { DEFAULT_RULE } from '../../apps/reader/coreadStore';
+import { CONTENT_TAKE } from '../../apps/reader/coreadArchive';
+import { DEFAULT_CHAT_LINES, DEFAULT_RULE } from '../../apps/reader/coreadStore';
+import {
+    ACTIVE_WINDOW, ARCHIVE_TAKE, CONTENT_TRIGGER, discussTake, planContentSummary, planDiscussArchive,
+} from './readerTimeline';
 import { JOB_LINGER_MS, visibleJobs, type ReaderJob } from '../../apps/reader/readerJobs';
 
-const T = DEFAULT_RULE.threshold;   // 10（她 09-21 改的）
-
-
-describe('共读归档 · 「记录」口径（她 09-21 拍板）', () => {
-    const t = (min: number) => new Date(Date.UTC(2026, 8, 21, 10, min)).toISOString();
-
-    it('角色一次调用算一条', () => {
-        expect(countRecords({ calls: [t(0), t(10), t(20)], hers: [] })).toBe(3);
+describe('归档 · 两把尺子（她 09-25 文档）', () => {
+    it('内容汇总：满 10 条活动记录才汇总一次；一趟最多吃 CONTENT_TAKE 条', () => {
+        expect(planContentSummary(CONTENT_TRIGGER - 1)).toBe(false);
+        expect(planContentSummary(CONTENT_TRIGGER)).toBe(true);
+        expect(CONTENT_TAKE).toBeGreaterThanOrEqual(CONTENT_TRIGGER);
     });
 
-    it('她五分钟之内连着留下的一堆，合起来算一条', () => {
-        expect(countRecords({ calls: [], hers: [t(0), t(1), t(2), t(4)] })).toBe(1);
+    it('讨论摘要：可总结的记录满 45 条 → 归档较早的 30 条，活跃窗口留 15 条', () => {
+        expect(planDiscussArchive(ARCHIVE_TAKE + ACTIVE_WINDOW - 1)).toBe(false);
+        expect(planDiscussArchive(ARCHIVE_TAKE + ACTIVE_WINDOW)).toBe(true);
+        expect(discussTake(ARCHIVE_TAKE + ACTIVE_WINDOW)).toBe(ARCHIVE_TAKE);
     });
 
-    it('隔开超过五分钟就算下一堆', () => {
-        expect(countRecords({ calls: [], hers: [t(0), t(1), t(9), t(10)] })).toBe(2);
+    it('规则只剩时机这一件事：默认自动归档', () => {
+        expect(DEFAULT_RULE.timing).toBe('auto');
     });
 
-    it('两边加起来才是记录数', () => {
-        expect(countRecords({ calls: [t(3), t(30)], hers: [t(0), t(2), t(40), t(42)] })).toBe(4);
-    });
-});
-describe('共读归档 · 水位线', () => {
-    it('差一条还不总结（阈值才触发，最后那条留着做衔接）', () => {
-        expect(planArchive({ pending: T - 1, threshold: T, force: false })).toBe(false);
-    });
-    it('阈值一到 → 触发；一次吃掉阈值减一条', () => {
-        expect(planArchive({ pending: T, threshold: T, force: false })).toBe(true);
-        expect(archiveTake({ pendingMsgs: T, force: false })).toBe(T - 1);
-    });
-    it('水位线推过之后，再看剩下的够不够再来一批', () => {
-        expect(planArchive({ pending: T - 1, threshold: T, force: false })).toBe(false);
-        expect(planArchive({ pending: T, threshold: T, force: false })).toBe(true);
-    });
-    it('共读结束（force）：不管攒没攒够都跑，没到水位线的部分一次补齐', () => {
-        expect(planArchive({ pending: 7, threshold: T, force: true })).toBe(true);
-        expect(archiveTake({ pendingMsgs: 7, force: true })).toBe(7);
-    });
-    it('一条没攒下就别空跑一趟', () => {
-        expect(archiveTake({ pendingMsgs: 0, force: true })).toBe(0);
-        expect(archiveTake({ pendingMsgs: 0, force: false })).toBe(0);
-    });
-    it('口径换一个只是换触发条件：按页数推时，攒够页数就触发（不看讨论条数）', () => {
-        expect(planArchive({ pending: 10, threshold: 10, force: false })).toBe(true);
-        expect(planArchive({ pending: 9, threshold: 10, force: false })).toBe(false);
-    });
-    it('默认规则本身：按记录、10 条、自动归档（她 09-21 拍板）', () => {
-        expect(DEFAULT_RULE).toEqual({ metric: 'calls', threshold: 10, timing: 'auto' });
+    it('带多少条聊天原文：核心人设 20 条、chat 同款 50 条（她 09-26）', () => {
+        expect(DEFAULT_CHAT_LINES).toEqual({ focused: 20, immersive: 50 });
     });
 });
 

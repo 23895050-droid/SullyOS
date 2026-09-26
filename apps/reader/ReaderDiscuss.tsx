@@ -19,9 +19,12 @@ import {
     type RdAnnotation, type RdBook, type RdOwnerId, type RdThread, type RdThreadMsg,
 } from '../../utils/reader/readerDb';
 import { isSameSentence, participantsOfSentence, threadKeyOf } from '../../utils/reader/readerParticipants';
-import { generateThreadReply, resolveReadApi } from '../../utils/reader/readerChat';
+import { formatChatLines, generateThreadReply, recentChatMessages, resolveReadApi } from '../../utils/reader/readerChat';
+import { buildReaderLiveState } from '../../utils/reader/readerLive';
+import { gatherReaderWindow } from '../../utils/reader/readerFeed';
 import { appendRoamActivity, newRoamGroup } from '../../utils/reader/readerDb';
-import { getCoReadStore, readApiSlots, useCoReadStore } from './coreadStore';
+import { chatLimitOf, getCoReadStore, readApiSlots, useCoReadStore } from './coreadStore';
+import { markSeen } from './readerContextStore';
 import { runArchive } from './coreadArchive';
 import { beginJob, endJob } from './readerJobs';
 import { highlightColorOf, useReaderPrefs } from './readerPrefs';
@@ -222,15 +225,34 @@ export default function ReaderDiscuss({
             });
             const mine = anns.find((x) => x.ownerId === 'user' && isSameSentence(x.anchor, a));
 
+            // 手动叫他回也走同一套阅读上下文（她 09-26 的整改：原来这条路聊天记录是空写死的）：
+            // 材料里带聊天 N 条 + 历史摘要 + 最近讨论，末尾贴实时状态；回完推他的未读水位线。
+            const chatMsgs = session.contextMode === 'immersive'
+                ? await recentChatMessages(char, chatLimitOf(session))
+                : [];
+            const [win, liveState] = await Promise.all([
+                gatherReaderWindow({ charId: char.id, bookId: book.id, chapterIdx, nameOf })
+                    .catch(() => ({ summaries: [] as string[], discussion: [] as string[] })),
+                session.contextMode === 'immersive'
+                    ? buildReaderLiveState(char).catch(() => '')
+                    : Promise.resolve(''),
+            ]);
+            const lookedAt = new Date().toISOString();
+
             const res = await generateThreadReply({
                 char, user: userProfile, book, chapterIdx, chapterTitle,
                 quote: a.text, context, threadLines: lines,
                 herNote: mine?.note ?? '',
                 contextMode: session.contextMode,
                 preset: getCharReadPrefs(char.id).promptPreset,
-                chatLines: '',
+                chatLines: chatMsgs.length > 0 ? formatChatLines(chatMsgs, char, userProfile) : '',
+                summaries: win.summaries,
+                discussion: win.discussion,
+                liveState,
+                scanMsgs: chatMsgs,
                 api,
             });
+            markSeen(book.id, char.id, lookedAt);
 
             // 他回的是**当前这条批注**的讨论（他划的那条就落回他自己那条里）。
             // **分气泡**（她 09-20：回复像聊天那样连着发几条短话）：一句一个气泡，一条一条落。

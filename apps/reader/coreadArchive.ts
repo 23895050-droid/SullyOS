@@ -1,15 +1,16 @@
-// 读书模块 · 共读归档（2026-09-16，09-20 扩成三维规则 + 多角色）
+// 读书模块 · 书房归档（2026-09-16 起；09-26 照她的《阅读上下文与摘要规则说明》重排）
 //
-// 她 09-20 把规则拆成**两个维度**（面板上是三枚胶囊 = 自动 / 手动 / 自定义）：
-//   · 口径 metric：拿什么推水位线——讨论句数（默认）/ 笔记条数 / 读了多少页
-//   · 时机 timing：总结完什么时候进聊天——auto 立刻同步 / manual 结束时整段送
-// 水位线是同一条：攒到 threshold 就总结，**最新那条留着做衔接**；没攒够就点结束 →
-// 把水位线以下剩下的全补总结。
+// 她 09-25 的文档把摘要分成**两类**，各有一把尺子（都在 utils/reader/readerTimeline）：
+//   · **内容汇总**（kind:'content'）：每满 10 条**活动记录**（他一次调用一条），把这批里
+//     每次读完留下的「原文小总结 + 感受」揉成一条轻的——她 09-26 说这条的用处是让模型
+//     记得自己读过什么、有过什么感受，不至于每次读新内容都对之前读到的一无所知。
+//   · **讨论摘要**（kind:'discuss'）：讨论记录（批注 + 回复，按发生时间排）满 45 条时，
+//     把**较早的 30 条**归档成一条，活跃窗口留最近 15 条（那 15 条留在阅读上下文里）。
 //
-// **总结模型只读事儿**（她 09-16 钉死）：喂进去的是 ① 大家这段时间读到了什么（活动记录，
-// 含当时写下的内心活动）② 这段时间说了什么（讨论流水）。不读角色人设、不读用户设定。
-// 多人一起读时，**一份摘要写几个人的事**，同步进各自聊天的是同一段内容，
-// 但活动记录各归各的（她 09-20 的原话）。
+// 两条水位线都**按书**存（`reader_context_v1`）：讨论记录是一本书一条河，跨会话接着数。
+// 摘要进阅读上下文当背景（他下次读书看得见），也按面板上的时机开关同步进聊天：
+//   · 自动归档：这一趟新写出来的摘要**立刻**进聊天
+//   · 手动归档：先攒着，点「共读结束」时整段送（范围 / 时长 / 人数由我们拼在抬头，不指望模型写）
 //
 // 活儿是普通 Promise：组件卸载、面板收起、退回书架都不打断（她 09-16：要能后台进行）；
 // 进度写在 readerJobs 的胶囊上。
@@ -18,11 +19,19 @@ import type { CharacterProfile, UserProfile } from '../../types';
 import { DB } from '../../utils/db';
 import {
     appendRoamActivity, listAnnotations, listRoamActivities, listThreads, newRoamGroup, rdId,
-    type RdBook, type RdRoamActivity,
+    type RdAnnotation, type RdBook, type RdRoamActivity, type RdThread,
 } from '../../utils/reader/readerDb';
-import { summarizeCoReadRange, type ReaderCallRuntime } from '../../utils/reader/readerChat';
-import { appendCoReadSummary, getCoReadStore, type CoReadPos, type CoReadRule } from './coreadStore';
+import {
+    buildTimeline, discussTake, lineOf, pendingRows, planContentSummary, planDiscussArchive,
+    type TimelineRow,
+} from '../../utils/reader/readerTimeline';
+import { summarizeContentFlow, summarizeDiscussionRange, type ReaderCallRuntime } from '../../utils/reader/readerChat';
+import { appendCoReadSummary, getCoReadStore, type CoReadPos } from './coreadStore';
+import { appendMemo, bookContext, recentMemoTexts, setContentAt, setDiscussAt } from './readerContextStore';
 import { beginJob, endJob } from './readerJobs';
+
+/** 一次内容汇总最多吃掉多少条活动记录（多了就分几趟，剩下的下次再汇总） */
+export const CONTENT_TAKE = 30;
 
 export interface ArchiveCtx {
     book: RdBook;
@@ -45,130 +54,56 @@ export interface ArchiveResult {
     ran: boolean;
     /** 这次吃掉了几条讨论 */
     took: number;
-    /** 总结出来的那段（没跑就是空串） */
+    /** 总结出来的（两类拼在一起；没跑就是空串） */
     text: string;
     /** 为什么没跑（没配 API / 没攒够 / 没东西可总结） */
     reason?: 'no-api' | 'below-trigger' | 'nothing';
 }
 
 /**
- * 这一趟该不该总结（纯函数，单测盯着）。
- * 口径只决定**什么时候**推水位线；`force`（共读结束）时无条件跑，
- * 把水位线以下剩下的全补上。
- */
-export function planArchive(opts: { pending: number; threshold: number; force: boolean }): boolean {
-    if (opts.force) return true;
-    return opts.pending >= Math.max(1, opts.threshold);
-}
-
-/**
- * 一次总结吃几条讨论（纯函数，单测盯着）。
- * **最新那条留着做衔接**——她 09-16 的原话「讨论到 31 条总结前 30 条」，
- * 阈值 31 时正好吃 30。force（共读结束）时全吃。
- */
-export function archiveTake(opts: { pendingMsgs: number; force: boolean }): number {
-    if (opts.pendingMsgs <= 0) return 0;
-    if (opts.force) return opts.pendingMsgs;
-    return Math.max(1, opts.pendingMsgs - 1);
-}
-
-/**
- * 这本书的讨论流水（时间序）——水位线数的是它。
+ * 这本书的**讨论记录**（时间序）——摘要数的是它。
  *
- * **`since` 之前的一律不算**（她 09-21）：这本书的讨论是**一本书一条河**，从第一次读就有；
- * 水位线却从 0 起数，不切时间的话，新开一场共读会把**以前**的话（她自己读书时说的、
- * 上一个会话的旧账）当成「这段时间说的」总结进去——她看到的「把之前非共读的批注
- * 也算进共读的总结」就是这个。传会话开始时间就干净了。
+ * 摘要会同步进每个人的聊天，所以**只拿公开的**：别人设成「只给自己看」的批注不掺进来。
+ * （她 09-26：讨论记录按时间排序，裁剪也按这条线的顺序，不按原文笔记分组。）
  */
-export async function collectDiscussion(
-    bookId: string,
-    nameOf: (ownerId: string) => string,
-    since?: string,
-): Promise<Array<{ who: string; text: string; at: string }>> {
-    const threads = await listThreads(bookId);
-    const rows: Array<{ who: string; text: string; at: string }> = [];
-    for (const t of threads) {
-        for (const m of t.messages) {
-            if (since && m.createdAt <= since) continue;
-            const who = m.role === 'user' ? 'user' : (m.role === 'char' ? (m.charId ?? null) : null);
-            rows.push({ who: who ? nameOf(who) : '旁白', text: m.content, at: m.createdAt });
-        }
-    }
-    rows.sort((a, b) => a.at.localeCompare(b.at));
-    return rows;
+async function discussionRows(ctx: ArchiveCtx): Promise<TimelineRow[]> {
+    const [anns, threads] = await Promise.all([
+        listAnnotations(ctx.book.id).catch(() => [] as RdAnnotation[]),
+        listThreads(ctx.book.id).catch(() => [] as RdThread[]),
+    ]);
+    const shared = anns.filter((a) => (a.visibility ?? 'public') === 'public');
+    return buildTimeline({
+        anns: shared, threads, viewer: 'user', nameOf: ctx.nameOf, chapterFallback: ctx.chapterIdx,
+    });
 }
 
-/**
- * 这段时间里大家读到了什么（参与共读的每个人各自的调用都算），时间序。
- * **只认这场共读读出来的**（`mode === 'coread'`，她 09-21）：他自己单独读书、
- * 翻笔记那些不算「我们一起读到的」。
- */
-async function activitiesSince(ctx: ArchiveCtx, since: string): Promise<RdRoamActivity[]> {
+/** 水位线之后的活动记录（他这一批读了什么；summary 那条本身不算）。 */
+async function activitiesPending(ctx: ArchiveCtx, since: string | null): Promise<RdRoamActivity[]> {
     const groups = await Promise.all(
         ctx.chars.map((c) => listRoamActivities(c.id, 200).catch(() => [] as RdRoamActivity[])),
     );
     return groups
         .flat()
-        .filter((a) => a.bookId === ctx.book.id && a.createdAt > since && a.kind !== 'summary'
-            && a.mode === 'coread')
+        .filter((a) => a.bookId === ctx.book.id && a.kind !== 'summary' && !(since && a.createdAt <= since))
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-/** 口径是「笔记条数」时，这段时间留下了几条笔记（谁留的都算）。 */
-async function notesSince(ctx: ArchiveCtx, since: string): Promise<number> {
-    const anns = await listAnnotations(ctx.book.id).catch(() => []);
-    return anns.filter((a) => a.kind !== 'bookmark' && a.createdAt > since).length;
+/** 进聊天那条的抬头：从哪读到哪、一起读的是谁、这一场多久（她 09-20 要的三样，我们拼，不指望模型）。 */
+function chatHead(ctx: ArchiveCtx, from: CoReadPos | null, to: CoReadPos, startedAt: string): string {
+    const names = ctx.chars.map((c) => c.name).join('、');
+    const fromText = from
+        ? `从第 ${from.chapterIdx + 1} 章第 ${from.paraIdx + 1} 段`
+        : '从开头';
+    const mins = startedAt
+        ? Math.max(1, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000))
+        : 0;
+    const dur = mins >= 60 ? `${Math.floor(mins / 60)} 小时 ${mins % 60} 分` : `${mins} 分钟`;
+    return `${fromText}读到第 ${to.chapterIdx + 1} 章第 ${to.paraIdx + 1} 段；一起读的是 ${ctx.user.name}`
+        + `${names ? `、${names}` : ''}${mins > 0 ? `，这一场持续了 ${dur}` : ''}。`;
 }
 
 /**
- * 这段时间她自己的动作时刻（批注 + 在讨论里说的话）——「记录」口径要用。
- */
-async function herTouchesSince(bookId: string, since: string): Promise<string[]> {
-    const [anns, threads] = await Promise.all([
-        listAnnotations(bookId).catch(() => []),
-        listThreads(bookId).catch(() => []),
-    ]);
-    const out: string[] = [];
-    for (const a of anns) {
-        if (a.ownerId === 'user' && a.kind !== 'bookmark' && a.createdAt > since) out.push(a.createdAt);
-    }
-    for (const t of threads) {
-        for (const m of t.messages) {
-            if (m.role === 'user' && m.createdAt > since) out.push(m.createdAt);
-        }
-    }
-    return out;
-}
-
-/**
- * 「记录」口径（她 09-21 的原话）：**角色一次调用算一条**；
- * **她五分钟之内连着留下的一堆批注、回复合起来算一条**。
- * 所以 = 角色的调用条数 + 她那堆动作按五分钟切出来的段数。
- */
-export function countRecords(opts: {
-    /** 角色的调用时刻（一次读 = 一条） */
-    calls: string[];
-    /** 她自己的动作时刻（批注 / 回复；乱序也行） */
-    hers: string[];
-    /** 多近算「一堆」（默认 5 分钟） */
-    gapMs?: number;
-}): number {
-    const gap = opts.gapMs ?? 5 * 60 * 1000;
-    const times = opts.hers
-        .map((t) => new Date(t).getTime())
-        .filter((n) => Number.isFinite(n))
-        .sort((a, b) => a - b);
-    let bursts = 0;
-    let prev = Number.NEGATIVE_INFINITY;
-    for (const t of times) {
-        if (t - prev > gap) bursts += 1;
-        prev = t;
-    }
-    return opts.calls.length + bursts;
-}
-
-/**
- * 跑一次归档。`force=true` 时**不管攒没攒够**，把水位线以下剩下的全总结掉（共读结束走它）。
+ * 跑一次归档。`force=true`（共读结束）时**不管攒没攒够**，把水位线以下剩下的全总结掉。
  * 自己管胶囊（跑起来才开，跑完标成功/失败）——攒不够就静悄悄什么都不做。
  */
 export async function runArchive(ctx: ArchiveCtx, opts: { force: boolean }): Promise<ArchiveResult> {
@@ -179,93 +114,115 @@ export async function runArchive(ctx: ArchiveCtx, opts: { force: boolean }): Pro
     }
     if (!ctx.api) return { ran: false, took: 0, text: '', reason: 'no-api' };
 
-    const since = cur.summarizedAt ?? cur.startedAt;
-    // 只数**这场共读开始之后**说的话（她 09-21：以前的旧账不算这次的）
-    const all = await collectDiscussion(ctx.book.id, ctx.nameOf, cur.startedAt);
-    const pendingMsgs = Math.max(0, all.length - cur.summarizedMsgs);
-    const activities = await activitiesSince(ctx, since);
+    const bk = bookContext(ctx.book.id);
+    const rows = await discussionRows(ctx);
+    const pendingDisc = pendingRows(rows, bk.discussAt);
+    const acts = await activitiesPending(ctx, bk.contentAt);
 
-    // 口径（她 09-20 定的三维；09-21 加了「记录」）：拿什么数推水位线
-    const pending = cur.rule.metric === 'calls'
-        ? countRecords({
-            calls: activities.map((a) => a.createdAt),
-            hers: await herTouchesSince(ctx.book.id, since),
-        })
-        : cur.rule.metric === 'msgs' ? pendingMsgs
-            : cur.rule.metric === 'notes' ? await notesSince(ctx, since)
-                : activities.reduce((n, a) => n + (a.pages ?? 0), 0);
-
-    if (!planArchive({ pending, threshold: cur.rule.threshold, force: opts.force })) {
-        return { ran: false, took: 0, text: '', reason: 'below-trigger' };
-    }
-
-    const take = archiveTake({ pendingMsgs, force: opts.force });
-    const batch = all.slice(cur.summarizedMsgs, cur.summarizedMsgs + take);
-    if (batch.length === 0 && activities.length === 0) {
-        return { ran: false, took: 0, text: '', reason: 'nothing' };
+    const wantContent = opts.force ? acts.length > 0 : planContentSummary(acts.length);
+    const wantDiscuss = opts.force ? pendingDisc.length > 0 : planDiscussArchive(pendingDisc.length);
+    if (!wantContent && !wantDiscuss) {
+        return {
+            ran: false, took: 0, text: '',
+            reason: acts.length === 0 && pendingDisc.length === 0 ? 'nothing' : 'below-trigger',
+        };
     }
 
     const to: CoReadPos = { chapterIdx: ctx.chapterIdx, paraIdx: ctx.pageTo };
     const from = cur.summarizedTo;
-    const startPara = from && from.chapterIdx === ctx.chapterIdx ? from.paraIdx + 1 : 0;
-    const excerpt = ctx.chapterParas.slice(startPara, ctx.pageTo + 1).join('\n').slice(0, 800);
-
     const job = beginJob({
         kind: 'summary',
         charName: ctx.chars.map((c) => c.name).join('、'),
         bookTitle: ctx.book.title,
         message: '这段一起读的，正在整理成一条记录…',
     });
+
+    const texts: string[] = [];
+    let took = 0;
+    let didContent = false;
     try {
-        const text = await summarizeCoReadRange({
-            chars: ctx.chars, user: ctx.user, book: ctx.book,
-            from, to,
-            activities: activities.map((a) => ({ summary: a.summary, feeling: a.feeling })),
-            lines: batch.map(({ who, text: t }) => ({ who, text: t })),
-            excerpt,
-            previous: s.summaries.slice(-3).map((x) => x.text),
-            startedAt: cur.startedAt,
-            api: ctx.api,
-        });
+        // ① 内容汇总：原文小总结 + 感受（每满 10 条活动记录一次）
+        if (wantContent) {
+            const use = acts.slice(0, Math.min(acts.length, CONTENT_TAKE));
+            const text = await summarizeContentFlow({
+                chars: ctx.chars, book: ctx.book,
+                events: use.map((a) => ({ summary: a.summary, excerpt: a.excerpt, feeling: a.feeling })),
+                previous: recentMemoTexts(ctx.book.id, 'content'),
+                api: ctx.api,
+            });
+            if (text) {
+                appendMemo(ctx.book.id, { kind: 'content', text, covers: use.length });
+                setContentAt(ctx.book.id, use[use.length - 1].createdAt);
+                texts.push(text);
+                didContent = true;
+            }
+        }
 
-        // 摘要本身就是一条活动记录（kind:'summary'）——挂在**这段里最后一次活动**的 group 下，
-        // 这样点开那条活动就能看到「里面每条调用 + 这次的摘要」（她 09-20 的口径）。
-        const anchorAct = activities[activities.length - 1];
-        await appendRoamActivity({
-            id: rdId('rr'),
-            charId: anchorAct?.charId ?? ctx.chars[0].id,
-            bookId: ctx.book.id,
-            kind: 'summary',
-            group: anchorAct?.group ?? newRoamGroup(),
-            seq: (anchorAct?.seq ?? -1) + 1,
-            summary: `记录了这段一起读的（${take} 条讨论）`,
-            excerpt: text.slice(0, 300),
-            mode: 'coread',
-            createdAt: new Date().toISOString(),
-        });
+        // ② 讨论摘要：讨论记录满 45 条 → 归档较早的 30 条（结束时把剩下的全归档）
+        if (wantDiscuss) {
+            const take = opts.force ? pendingDisc.length : discussTake(pendingDisc.length);
+            const batch = pendingDisc.slice(0, take);
+            const text = await summarizeDiscussionRange({
+                chars: ctx.chars, user: ctx.user, book: ctx.book, from, to,
+                rows: batch.map((r) => lineOf(r)),
+                previous: recentMemoTexts(ctx.book.id, 'discuss'),
+                startedAt: cur.startedAt,
+                api: ctx.api,
+            });
+            if (text) {
+                appendMemo(ctx.book.id, { kind: 'discuss', text, covers: batch.length });
+                setDiscussAt(ctx.book.id, batch[batch.length - 1].at);
+                took = batch.length;
+                texts.push(text);
 
-        appendCoReadSummary(from ?? { chapterIdx: ctx.chapterIdx, paraIdx: -1 }, to, text, take);
+                // 摘要本身就是一条活动记录（kind:'summary'）——挂在**这段里最后一次活动**的 group 下，
+                // 这样点开那条活动就能看到「里面每条调用 + 这次的摘要」（她 09-20 的口径）。
+                const anchorAct = acts[acts.length - 1];
+                const label = [didContent ? '记下了读到的和心里的' : '', `${batch.length} 条讨论`].filter(Boolean).join(' · ');
+                await appendRoamActivity({
+                    id: rdId('rr'),
+                    charId: anchorAct?.charId ?? ctx.chars[0].id,
+                    bookId: ctx.book.id,
+                    kind: 'summary',
+                    group: anchorAct?.group ?? newRoamGroup(),
+                    seq: (anchorAct?.seq ?? -1) + 1,
+                    summary: `整理了这段时间的读书记录（${label}）`,
+                    excerpt: text.slice(0, 300),
+                    mode: 'coread',
+                    createdAt: new Date().toISOString(),
+                });
+            }
+        }
+
+        if (texts.length === 0) {
+            endJob(job, 'error', '这一趟没写出东西');
+            return { ran: false, took: 0, text: '', reason: 'nothing' };
+        }
+
+        // 会话自己那份记录（「共读结束」整段送进聊天时拼的就是它；from/to 是它的意义）
+        appendCoReadSummary(from ?? { chapterIdx: ctx.chapterIdx, paraIdx: -1 }, to, texts.join('\n\n'), took);
 
         // 自动归档：**每个人的聊天里都放同一段摘要**（活动记录还是各归各的）
         if (cur.rule.timing === 'auto') {
+            const head = chatHead(ctx, from, to, cur.startedAt);
             for (const c of ctx.chars) {
                 await DB.saveMessage({
                     charId: c.id,
                     role: 'system',
                     type: 'text',
-                    content: `[共读：${ctx.book.title}] ${text}`,
+                    content: `[共读：${ctx.book.title}] ${head}\n${texts.join('\n\n')}`,
                     metadata: {
                         source: 'reader_coread',
-                        coread: { bookId: ctx.book.id, title: ctx.book.title, charId: c.id, archived: take },
+                        coread: { bookId: ctx.book.id, title: ctx.book.title, charId: c.id, archived: took },
                     },
                 });
             }
         }
 
         endJob(job, 'ok', cur.rule.timing === 'auto'
-            ? `总结好了，已同步进聊天（${take} 条讨论）`
-            : `总结好了（${take} 条讨论，结束共读时一起进聊天）`);
-        return { ran: true, took: take, text };
+            ? `整理好了，已同步进聊天${took ? `（${took} 条讨论）` : ''}`
+            : `整理好了${took ? `（${took} 条讨论，结束共读时一起进聊天）` : '（结束共读时一起进聊天）'}`);
+        return { ran: true, took, text: texts.join('\n\n') };
     } catch (err) {
         endJob(job, 'error', `总结失败：${err instanceof Error ? err.message : '未知错误'}`);
         return { ran: false, took: 0, text: '' };

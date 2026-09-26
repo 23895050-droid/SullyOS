@@ -11,7 +11,7 @@
 // 写入口校验（抄 tasogare 的教训）：角色抄回来的句子**必须真的在这一页里**，
 // 找不到就丢掉那一条——宁可少一条批注，也不要一条没有锚点的假批注。
 
-import type { CharacterProfile, UserProfile } from '../../types';
+import type { CharacterProfile, Message, UserProfile } from '../../types';
 import { ContextBuilder } from '../context';
 import { DB } from '../db';
 import { getPrompt } from '../promptRegistry';
@@ -206,7 +206,13 @@ const coReadProtocol = (book: RdBook, chapterTitle: string, charName: string, us
 - ${VISIBILITY_RULE}`;
 
 /** 快照：immersive = chat 同款；focused = 核心人设（照协同工作的两个 snapshot 分支）。 */
-export function buildCoReadSnapshot(char: CharacterProfile, user: UserProfile, mode: CoReadContextMode): string {
+export function buildCoReadSnapshot(
+    char: CharacterProfile,
+    user: UserProfile,
+    mode: CoReadContextMode,
+    /** 最近几条聊天原文：世界书按关键词扫它（和聊天同一个口径） */
+    scanMsgs?: Message[],
+): string {
     if (mode === 'focused') {
         return [
             ContextBuilder.buildRoleSettingsContext(char, { skipMemories: true }),
@@ -216,25 +222,41 @@ export function buildCoReadSnapshot(char: CharacterProfile, user: UserProfile, m
         ].join('');
     }
     return [
-        ContextBuilder.buildCoreContext(char, user),
-        '### 当前模式\n本次共读用「chat 同款」：完整保留角色、关系、世界观、世界书、用户印象和日常记忆，最近几条聊天每轮实时读取。\n\n',
+        // 稳定段，**和聊天一样的开头**（她 09-26：照原版结构——稳定的在最前、实时的贴生成点）。
+        // deferVolatile = 时间 / 记忆宫殿召回 / 情绪 buff 这三块不进正文，由 buildReaderLiveState
+        // 拼成「实时状态」贴到消息末尾（原版 buildVolatileCoreState 同款）。
+        ContextBuilder.buildCoreContext(
+            char, user, true, undefined, undefined,
+            scanMsgs ? { worldbookMessages: scanMsgs } : undefined,
+            { deferVolatile: true },
+        ),
+        '### 当前模式\n本次共读用「chat 同款」：完整保留角色、关系、世界观、世界书、用户印象和日常记忆；此刻的时间、日程这些实时的东西贴在后面。\n\n',
     ].join('');
+}
+
+/** 最近几条聊天原文（原始消息：世界书按关键词扫的是同一批）。 */
+export async function recentChatMessages(char: CharacterProfile, limit = 20): Promise<Message[]> {
+    try {
+        const msgs = await DB.getMessagesByCharId(char.id);
+        return msgs.slice(-Math.max(1, limit));
+    } catch {
+        return [];
+    }
+}
+
+/** 把聊天消息念成一行一行（系统卡念成 [系统]，不挂角色名下——她 09-26）。 */
+export function formatChatLines(msgs: Message[], char: CharacterProfile, user: UserProfile): string {
+    return msgs
+        .map((m) => {
+            const who = m.role === 'user' ? user.name : m.role === 'system' ? '[系统]' : char.name;
+            return `[${new Date(m.timestamp).toLocaleTimeString()}] ${who}: ${normalizeMessageContent(m, char.name, user.name)}`;
+        })
+        .join('\n');
 }
 
 /** 最近几条聊天原文（immersive 才给；协同的 chatContextLimit 默认 20）。 */
 export async function recentChatLines(char: CharacterProfile, user: UserProfile, limit = 20): Promise<string> {
-    try {
-        const msgs = await DB.getMessagesByCharId(char.id);
-        return msgs
-            .slice(-limit)
-            .map(
-                (m) =>
-                    `[${new Date(m.timestamp).toLocaleTimeString()}] ${m.role === 'user' ? user.name : char.name}: ${normalizeMessageContent(m, char.name, user.name)}`,
-            )
-            .join('\n');
-    } catch {
-        return '';
-    }
+    return formatChatLines(await recentChatMessages(char, limit), char, user);
 }
 
 // ─── 读一页 ──────────────────────────────────────────────────────
@@ -326,6 +348,16 @@ export interface ReadPageInput {
      * 开着就不必她点 ⚡——他自己决定回不回、要不要往下读。
      */
     replyFeed?: { notes: string[]; later: string[]; followUps: string[] };
+    /** 历史阅读摘要：他之前读过的地方记下来的（十条摘要，时间从早到晚） */
+    summaries?: string[];
+    /** 最近 15 条讨论记录（时间序，已经念成一行一行） */
+    discussion?: string[];
+    /** 实时状态段（时间 / 宫殿召回 / 情绪 / 日程）——非核心模式才有，贴消息末尾 */
+    liveState?: string;
+    /** 两个人各自读到哪（文档第 1 块：主聊天背景与阅读状态） */
+    readState?: string;
+    /** 最近几条聊天原文：世界书按关键词扫它 */
+    scanMsgs?: Message[];
     /** 用哪套提示词（'' = 默认套；'rp' = 角色扮演套）。来自角色自己的读书设置 */
     preset?: string;
     api: ReaderCallRuntime;
@@ -340,39 +372,55 @@ export async function readCoReadPage(input: ReadPageInput): Promise<CoReadPageRe
 
     // 阅读气质（她 09-20）：读书时带的是**气质**，不是偏好；只当基调参考，别当设定
     const vibe = vibeInjection(char.id);
-    const snapshot = [
-        buildCoReadSnapshot(char, user, session.contextMode),
-        coReadProtocol(book, chapterTitle, char.name, user.name),
-        vibe ? `### 你的阅读气质（只是气质基调参考，不是要求，也不要把它写进批注）\n${vibe}\n\n` : '',
-    ].join('');
     const instruction = expand('共读·读书', char, user, book, input.preset ?? '');
+    // ── 稳定段（system）= 角色本体 + 情境说明 + 共读提示词 + 一起读书规则 + 气质 ──
+    // 顺序是她 09-26 定的；前面四块每轮都一样 → 稳定段整段能吃到前缀缓存。
+    const snapshot = [
+        buildCoReadSnapshot(char, user, session.contextMode, input.scanMsgs),
+        `### 你现在在做什么\n${expand('共读·情境说明', char, user, book, input.preset ?? '')}\n\n`,
+        instruction,
+        `\n${coReadProtocol(book, chapterTitle, char.name, user.name)}`,
+        vibe ? `\n### 你的阅读气质（只是气质基调参考，不是要求，也不要把它写进批注）\n${vibe}\n\n` : '',
+    ].join('');
 
-    const userBlock = [
-        `《${book.title}》· ${chapterTitle} · 你正在读的这几页（段号是它在章节里的位置）：`,
-        '',
-        pageText,
-        '',
+    // ── 材料（user）= 在读什么 · 双方进度 · 聊天 N 条 · 十条摘要 · 15 条讨论 · 当前原文 · 已有批注 ──
+    // 顺序她 09-26 定；越靠后越新鲜，眼前这几页压在最下面。
+    const material = [
+        `《${book.title}》· ${chapterTitle}`,
+        input.readState ? `\n${input.readState}` : '',
         session.contextMode === 'immersive' && chatLines ? `\n你们最近在聊天里说的话：\n${chatLines}` : '',
+        input.summaries && input.summaries.length > 0
+            ? `\n你之前读过的部分，当时记下来的（时间从早到晚）：\n${input.summaries.join('\n')}` : '',
+        input.discussion && input.discussion.length > 0
+            ? `\n书房里最近的讨论（按发生的先后）：\n${input.discussion.join('\n')}` : '',
+        `\n你正在读的这几页（段号是它在章节里的位置）：\n\n${pageText}`,
         // 他读的这几页上原本就有的批注（她 09-21：读哪页就看到哪页，当风景看也行）
         replyFeed && replyFeed.notes.length > 0
             ? `\n这几页上已经留着的批注（当风景看也行，想接哪句就接）：\n${replyFeed.notes.join('\n')}` : '',
+    ].filter(Boolean).join('\n');
+
+    // ── 收尾（system）= 实时状态 · 要他接的话 · 格式要求（贴着生成点，原版同款）──
+    const tail = [
+        input.liveState
+            ? `[System: 实时状态 (Live Context)]\n（以下是此刻的实时状态；你的人设与读书的规矩见最上方的系统设定，此处不再重复。）\n\n${input.liveState}`
+            : '',
         replyFeed && replyFeed.later.length > 0
-            ? `\n你上几次读到的那几页上，还留着这些你还没接过话的（先说这几条）：\n${replyFeed.later.join('\n')}` : '',
+            ? `你上次读完之后，你读过的那些页上又有新的话（先说这几条）：\n${replyFeed.later.join('\n')}` : '',
         replyFeed && replyFeed.followUps.length > 0
-            ? `\n你参与过的那几条下面，大家接着说：\n${replyFeed.followUps.join('\n')}` : '',
+            ? `书房里别处新出现的（你还没读到的页上）：\n${replyFeed.followUps.join('\n')}` : '',
         replyFeed && (replyFeed.notes.length > 0 || replyFeed.later.length > 0 || replyFeed.followUps.length > 0)
-            ? '\n接话写进 replies：quote 照抄「”…”」里那句话，lines 里一句一条，像聊天那样连着说。'
+            ? '接话写进 replies：quote 照抄「”…”」里那句话，lines 里一句一条，像聊天那样连着说。'
             : '',
         input.noteLimit ? `这次最多划 ${input.noteLimit} 条。` : '',
-        '',
         `你读到的是第 ${chapterIdx + 1} 章的这几页，读完按格式回复。`,
     ].filter(Boolean).join('\n');
 
     const reply = await postReaderChat(api, {
         model: api.model,
         messages: [
-            { role: 'system', content: `${instruction}\n\n${snapshot}` },
-            { role: 'user', content: userBlock },
+            { role: 'system', content: snapshot },
+            { role: 'user', content: material },
+            { role: 'system', content: tail },
         ],
         temperature: 0.85,
         max_tokens: 4000,
@@ -536,6 +584,14 @@ export interface ThreadReplyInput {
     /** 用哪套提示词（'' = 默认套；'rp' = 角色扮演套） */
     preset?: string;
     chatLines: string;
+    /** 历史阅读摘要（十条摘要，时间从早到晚）——当背景 */
+    summaries?: string[];
+    /** 最近 15 条讨论记录（时间序）——当背景 */
+    discussion?: string[];
+    /** 实时状态段（非核心模式才有，贴末尾） */
+    liveState?: string;
+    /** 最近几条聊天原文：世界书按关键词扫它 */
+    scanMsgs?: Message[];
     api: ReaderCallRuntime;
 }
 
@@ -545,32 +601,41 @@ export interface ThreadReplyInput {
  */
 export async function generateThreadReply(input: ThreadReplyInput): Promise<ThreadReply> {
     const { char, user, book, chapterTitle, quote, context, threadLines, herNote, contextMode, chatLines, api } = input;
+    // 同一套分段：稳定段（角色本体 + 情境说明 + 回讨论提示词 + 读书规则）→ 材料 → 收尾（实时状态 + 格式）
     const snapshot = [
-        buildCoReadSnapshot(char, user, contextMode),
-        coReadProtocol(book, chapterTitle, char.name, user.name),
+        buildCoReadSnapshot(char, user, contextMode, input.scanMsgs),
+        `### 你现在在做什么\n${expand('共读·情境说明', char, user, book, input.preset ?? '')}\n\n`,
+        expand('共读·回讨论', char, user, book, input.preset ?? ''),
+        `\n${coReadProtocol(book, chapterTitle, char.name, user.name)}`,
     ].join('');
+    const material = [
+        `你们在读《${book.title}》· ${chapterTitle}。`,
+        contextMode === 'immersive' && chatLines ? `\n你们最近在聊天里说的话：\n${chatLines}` : '',
+        input.summaries && input.summaries.length > 0
+            ? `\n你之前读过的部分，当时记下来的（时间从早到晚）：\n${input.summaries.join('\n')}` : '',
+        input.discussion && input.discussion.length > 0
+            ? `\n书房里最近的讨论（按发生的先后）：\n${input.discussion.join('\n')}` : '',
+        `\n被划出来的是这句：「${quote}」`,
+        '',
+        '它所在的正文：',
+        context,
+        '',
+        herNote ? `${user.name} 的批注：${herNote}` : `${user.name} 还没写批注，只划了这句。`,
+        '',
+        threadLines.length > 0 ? `这条讨论到现在：\n${threadLines.join('\n')}` : '这条讨论还没有人说过话。',
+    ].filter(Boolean).join('\n');
+    const tail = [
+        input.liveState
+            ? `[System: 实时状态 (Live Context)]\n（以下是此刻的实时状态；你的人设与读书的规矩见最上方的系统设定，此处不再重复。）\n\n${input.liveState}`
+            : '',
+        '回一句（按格式给 JSON）。',
+    ].filter(Boolean).join('\n');
     const reply = await postReaderChat(api, {
         model: api.model,
         messages: [
-            { role: 'system', content: `${expand('共读·回讨论', char, user, book, input.preset ?? '')}\n\n${snapshot}` },
-            {
-                role: 'user',
-                content: [
-                    `你们在读《${book.title}》· ${chapterTitle}。`,
-                    `被划出来的是这句：「${quote}」`,
-                    '',
-                    '它所在的正文：',
-                    context,
-                    '',
-                    herNote ? `${user.name} 的批注：${herNote}` : `${user.name} 还没写批注，只划了这句。`,
-                    '',
-                    threadLines.length > 0 ? `这条讨论到现在：\n${threadLines.join('\n')}` : '这条讨论还没有人说过话。',
-                    '',
-                    contextMode === 'immersive' && chatLines ? `你们最近在聊天里说的话：\n${chatLines}` : '',
-                    '',
-                    '回一句（按格式给 JSON）。',
-                ].filter(Boolean).join('\n'),
-            },
+            { role: 'system', content: snapshot },
+            { role: 'user', content: material },
+            { role: 'system', content: tail },
         ],
         temperature: 0.85,
         max_tokens: 2000,
@@ -603,40 +668,30 @@ export interface SummarizeInput {
     book: RdBook;
     from: CoReadPos | null;
     to: CoReadPos;
-    /** 这一段里**他读到了什么**（活动记录：做了什么的摘要 + 那一次的内心活动） */
-    activities: Array<{ summary: string; feeling?: string }>;
-    /** 这一段里**两个人说了什么**（讨论流水，时间序；调用方截到最后 20 条） */
-    lines: Array<{ who: string; text: string }>;
-    /** 两边都空的时候拿来兜底的一小段正文 */
-    excerpt: string;
+    /** 这段时间的**讨论记录**（时间序，一行一条，用 readerTimeline 的 lineOf 念好） */
+    rows: string[];
     /** 之前已经总结过的（防重复、保持连续） */
     previous: string[];
-    /** 这一场共读是什么时候开的（她 09-20：摘要里要写「整场持续了多久」） */
+    /** 这一场共读是什么时候开的（材料里给个范围，写出来的东西才不飘） */
     startedAt?: string;
     api: ReaderCallRuntime;
 }
 
 /**
- * 把 [from, to] 这段时间的共读压成一条备忘。
+ * **讨论记录摘要**（她 09-25 文档里的 B 类）。
  *
- * **她 09-16 把口径钉死**：摘要总结 ≠ 感受状态——感受是每次「读这一页」自然带出来的
- * （活动记录里的 feeling 字段），摘要只做一件事：**第三人称**记下这段时间两个人
- * 聊了什么、看了什么（参考 TRPG 的总结规则）。所以这里喂进去的**不是正文**，
- * 是活动 + 讨论；正文只在两者都空时兜底。
+ * 输入是**按时间排序的讨论记录**（谁划了哪句话、谁在哪条下面说了什么），不是按原文分类的
+ * 笔记列表；只读事儿——不给人设、不给用户设定。出一段第三人称的正文，进阅读区的历史摘要、
+ * 也按规则同步进聊天。
  */
-export async function summarizeCoReadRange(input: SummarizeInput): Promise<string> {
-    const { chars, user, book, from, to, activities, lines, excerpt, previous, api } = input;
+export async function summarizeDiscussionRange(input: SummarizeInput): Promise<string> {
+    const { chars, user, book, from, to, rows, previous, api } = input;
     // 多人一起读时用顿号连起来（「阿一、小满」）——摘要只写事儿，名字是唯一的指代
     const names = chars.map((c) => c.name).join('、');
     const prompt = getPrompt('共读·总结')
         .replace(/\{\{char\}\}/g, names)
         .replace(/\{\{user\}\}/g, user.name)
         .replace(/\{\{book\}\}/g, book.title);
-    const readLines = activities.map((a) => (
-        a.feeling ? `· ${a.summary}（他当时心里：${a.feeling}）` : `· ${a.summary}`
-    ));
-    const talkLines = lines.map((l) => `${l.who}：${l.text}`);
-    // 整场共读持续了多久（她 09-20：摘要里要写这个）
     const mins = input.startedAt
         ? Math.max(1, Math.round((Date.now() - new Date(input.startedAt).getTime()) / 60000))
         : 0;
@@ -656,14 +711,59 @@ export async function summarizeCoReadRange(input: SummarizeInput): Promise<strin
                     // 一起读的人 = 她 + 角色。原来只数了角色（她说三个人写成两个人，就是这儿）
                     `一起读的人一共 ${chars.length + 1} 位：${user.name}${names ? `、${names}` : ''}。`,
                     '',
-                    readLines.length > 0 ? `这段时间大家读到的：\n${readLines.join('\n')}` : '',
-                    '',
-                    talkLines.length > 0 ? `这段时间大家说的话（时间序）：\n${talkLines.join('\n')}` : '',
-                    '',
-                    readLines.length === 0 && talkLines.length === 0 && excerpt
-                        ? `这段时间没什么可记的，只有这一小段正文：\n${excerpt}` : '',
+                    rows.length > 0 ? `这段时间书房里的讨论（按发生的先后）：\n${rows.join('\n')}` : '',
                     '',
                     previous.length > 0 ? `你之前总结过的（只做衔接参考，不要重复）：\n${previous.join('\n')}` : '',
+                ].filter(Boolean).join('\n'),
+            },
+        ],
+        temperature: 0.6,
+        max_tokens: 2000,
+    });
+    return reply.text.trim();
+}
+
+export interface ContentFlowInput {
+    /** 一起读的人（多人时名字都写进材料） */
+    chars: CharacterProfile[];
+    book: RdBook;
+    /** 这一批**活动记录**（老 → 新）：每次读完留下的原文小总结 + 当时的感受 */
+    events: Array<{ summary: string; excerpt?: string; feeling?: string }>;
+    previous: string[];
+    api: ReaderCallRuntime;
+}
+
+/**
+ * **原文小总结 + 阅读感受的轻量汇总**（她 09-25 文档里的 A 类）。
+ *
+ * 她 09-26 说这条的用途：**让模型记得自己读过什么、有过什么感受**——不至于每次读新内容
+ * 都对之前读过的一无所知，也不至于每次把感受和原文小结全读一遍。所以它只揉这两样，
+ * 不逐条复述，也不替他把原文和感受混成一团说不清的叙述。
+ */
+export async function summarizeContentFlow(input: ContentFlowInput): Promise<string> {
+    const { chars, book, events, previous, api } = input;
+    const names = chars.map((c) => c.name).join('、') || '他';
+    const prompt = getPrompt('共读·内容汇总')
+        .replace(/\{\{char\}\}/g, names)
+        .replace(/\{\{book\}\}/g, book.title);
+    const lines = events.map((e, i) => {
+        const seg = [`${i + 1}. 读了：${e.summary}`];
+        if (e.excerpt) seg.push(`   这一段讲了：${e.excerpt}`);
+        if (e.feeling) seg.push(`   当时心里：${e.feeling}`);
+        return seg.join('\n');
+    });
+    const reply = await postReaderChat(api, {
+        model: api.model,
+        messages: [
+            { role: 'system', content: prompt },
+            {
+                role: 'user',
+                content: [
+                    `《${book.title}》，读书的人是：${names}。`,
+                    '',
+                    lines.length > 0 ? `这段时间一条一条的记录（按先后）：\n${lines.join('\n')}` : '',
+                    '',
+                    previous.length > 0 ? `你之前汇总过的（只做衔接参考，不要重复）：\n${previous.join('\n')}` : '',
                 ].filter(Boolean).join('\n'),
             },
         ],

@@ -1,7 +1,9 @@
 // 读书模块 · 摆给他的那几页（buildPageFeed 纯函数）
 //
-// 她 09-21 连着问了两轮「里面真的有我最近的批注吗」，所以这份单测主要盯一件事：
-// **她在「他已经读过的那几页」上留的话，一定要出现在 later 里**——以及它什么时候不该出现。
+// 她 09-21 连着问了两轮「里面真的有我最近的批注吗」，09-25 的文档把「未读」的口径钉死成
+// **他还没接收过的**（时间水位线），所以这份单测主要盯两件事：
+//   · 她在「他上次读完之后」留的话，一定要出现在 later 里
+//   · 他看过没接的，下一次不再重复催
 
 import { describe, expect, it } from 'vitest';
 import { buildPageFeed, FEED_LATER_MAX, FEED_READ_LOOKBACK } from './readerFeed';
@@ -70,6 +72,7 @@ const base = {
     chapterIdx: 0,
     from: 10,
     to: 14,          // 他眼下读第 10–14 段
+    reads: [] as RdRoamActivity[],
     threads: [] as RdThread[],
     nameOf,
 };
@@ -78,7 +81,6 @@ describe('buildPageFeed · 他眼下这几页', () => {
     it('这几页上的批注都摆出来（谁的都摆，包括他自己划的）', () => {
         const feed = buildPageFeed({
             ...base,
-            reads: [],
             anns: [
                 ann({ ownerId: 'user', para: 11, note: '她的话' }),
                 ann({ ownerId: 'A', para: 12, note: '他自己的' }),
@@ -95,7 +97,6 @@ describe('buildPageFeed · 他眼下这几页', () => {
         const a = ann({ ownerId: 'user', para: 11, note: '她的话' });
         const feed = buildPageFeed({
             ...base,
-            reads: [],
             anns: [a],
             threads: [thread({
                 anchorKey: threadKeyOf(0, a.anchor, 'user'),
@@ -106,11 +107,12 @@ describe('buildPageFeed · 他眼下这几页', () => {
     });
 });
 
-describe('buildPageFeed · 他上几次读到的那几页上还没接过话的', () => {
-    it('**她在他读过的那几页上留的话，一定在里面**（她问了两轮的那件事）', () => {
+describe('buildPageFeed · 未读（她 09-25 文档：他还没接收过的）', () => {
+    it('**她在他上次读完之后留的话，一定在里面**（她问了两轮的那件事）', () => {
         const feed = buildPageFeed({
             ...base,
             from: 20, to: 24,                       // 他眼下读到第 20–24 段了
+            since: iso(5),                          // 上次读到 10:05
             reads: [readRec({ fromPara: 10, toPara: 14, createdAt: iso(5) })],
             anns: [ann({ ownerId: 'user', para: 12, note: '我读完了，留一句', createdAt: iso(6) })],
         });
@@ -118,40 +120,56 @@ describe('buildPageFeed · 他上几次读到的那几页上还没接过话的',
         expect(feed.later[0]).toContain('我读完了，留一句');
     });
 
-    it('他已经接过话的，不再催', () => {
-        const a = ann({ ownerId: 'user', para: 12, note: '她的话' });
+    it('他上次读之前就有的话，不再催（看过了没接的也不重复摆）', () => {
         const feed = buildPageFeed({
             ...base,
             from: 20, to: 24,
+            since: iso(6),                          // 上次读到 10:06
             reads: [readRec({ fromPara: 10, toPara: 14 })],
-            anns: [a],
-            threads: [thread({
-                anchorKey: threadKeyOf(0, a.anchor, 'user'),
-                messages: [{ id: 'm1', role: 'char', charId: 'A', content: '接了', kind: 'chat', createdAt: iso(3) }],
-            })],
+            anns: [ann({ ownerId: 'user', para: 12, note: '他上次已经看过这句了', createdAt: iso(5) })],
         });
         expect(feed.later).toHaveLength(0);
     });
 
-    it('他自己划的不算（不用他回自己）', () => {
+    it('他自己划的不算未读（不用他回自己）', () => {
         const feed = buildPageFeed({
             ...base,
             from: 20, to: 24,
+            since: iso(5),
             reads: [readRec({ fromPara: 10, toPara: 14 })],
-            anns: [ann({ ownerId: 'A', para: 12, note: '他自己留的' })],
+            anns: [ann({ ownerId: 'A', para: 12, note: '他自己留的', createdAt: iso(6) })],
         });
         expect(feed.later).toHaveLength(0);
     });
 
-    it('别人留的、他没接过的也算', () => {
+    it('别人留的、他还没接收过的也算', () => {
         const feed = buildPageFeed({
             ...base,
             from: 20, to: 24,
+            since: iso(5),
             reads: [readRec({ fromPara: 10, toPara: 14 })],
-            anns: [ann({ ownerId: 'B', para: 13, note: '小满说的' })],
+            anns: [ann({ ownerId: 'B', para: 13, note: '小满说的', createdAt: iso(6) })],
         });
         expect(feed.later).toHaveLength(1);
         expect(feed.later[0]).toContain('小满');
+    });
+
+    it('**她回了他划的线**，这条回复算未读（她 09-21 亲口要的）', () => {
+        const his = ann({ ownerId: 'A', para: 12, note: '他划的', createdAt: iso(2) });
+        const feed = buildPageFeed({
+            ...base,
+            from: 20, to: 24,
+            since: iso(5),
+            reads: [readRec({ fromPara: 10, toPara: 14 })],
+            anns: [his],
+            threads: [thread({
+                anchorKey: threadKeyOf(0, his.anchor, 'A'),
+                anchor: his.anchor,
+                messages: [{ id: 'm1', role: 'user', content: '我回了他划的这句', kind: 'chat', createdAt: iso(6) }],
+            })],
+        });
+        expect(feed.later).toHaveLength(1);
+        expect(feed.later[0]).toContain('我回了他划的这句');
     });
 
     it('他读过太久以前的那几页不算（只往前看最近几次）', () => {
@@ -162,10 +180,12 @@ describe('buildPageFeed · 他上几次读到的那几页上还没接过话的',
         const feed = buildPageFeed({
             ...base,
             from: 80, to: 84,
+            since: iso(18),
             reads: [old, ...newer],
-            anns: [ann({ ownerId: 'user', para: 12, note: '很久以前那页上的' })],
+            anns: [ann({ ownerId: 'user', para: 12, note: '很久以前那页上的', createdAt: iso(19) })],
         });
         expect(feed.later).toHaveLength(0);
+        expect(feed.followUps).toHaveLength(1);      // 还是会告诉他一声（别处新出现的）
     });
 
     it('上一章读过的也认（章号对上才算，段号相同不串章）', () => {
@@ -173,14 +193,16 @@ describe('buildPageFeed · 他上几次读到的那几页上还没接过话的',
             ...base,
             chapterIdx: 1,
             from: 20, to: 24,
+            since: iso(5),
             reads: [readRec({ chapterIdx: 0, fromPara: 10, toPara: 14 })],
             anns: [
-                ann({ ownerId: 'user', chapterIdx: 0, para: 12, note: '上一章她留的' }),
-                ann({ ownerId: 'user', chapterIdx: 3, para: 12, note: '别的章、段号撞上了' }),
+                ann({ ownerId: 'user', chapterIdx: 0, para: 12, note: '上一章她留的', createdAt: iso(6) }),
+                ann({ ownerId: 'user', chapterIdx: 3, para: 12, note: '别的章、段号撞上了', createdAt: iso(7) }),
             ],
         });
         expect(feed.later).toHaveLength(1);
         expect(feed.later[0]).toContain('上一章她留的');
+        expect(feed.followUps).toHaveLength(1);      // 别的章那条列一行
     });
 
     it('最多摆 FEED_LATER_MAX 页（一页一块，不是一条一块）', () => {
@@ -188,6 +210,7 @@ describe('buildPageFeed · 他上几次读到的那几页上还没接过话的',
         const feed = buildPageFeed({
             ...base,
             from: 90, to: 94,
+            since: iso(0),
             reads: [readRec({ fromPara: 10, toPara: 39, perPage: 5, fromPage: 1, toPage: 6 })],
             anns: [10, 15, 20, 25, 30, 35].map((para, i) =>
                 ann({ ownerId: 'user', para, note: `第 ${i} 页的话`, createdAt: iso(i + 1) })),
@@ -196,45 +219,21 @@ describe('buildPageFeed · 他上几次读到的那几页上还没接过话的',
         expect(feed.later[0]).toContain('■ 第 1 页');   // 摆的时候按书上的顺序
     });
 
-    it('他自己划的、她回了 → 也算「还没接过话的」（她 09-21 亲口要的）', () => {
-        const his = ann({ ownerId: 'A', para: 12, note: '他划的' });
-        const feed = buildPageFeed({
-            ...base,
-            from: 20, to: 24,
-            reads: [readRec({ fromPara: 10, toPara: 14 })],
-            anns: [his],
-            threads: [thread({
-                anchorKey: threadKeyOf(0, his.anchor, 'A'),
-                messages: [{ id: 'm1', role: 'user', content: '我回了他划的这句', kind: 'chat', createdAt: iso(3) }],
-            })],
-        });
-        expect(feed.later).toHaveLength(1);
-        expect(feed.later[0]).toContain('我回了他划的这句');   // 讨论里她的话也在
-    });
-
-    it('他自己划的、没人理 → 不摆（不用他回自己）', () => {
-        const feed = buildPageFeed({
-            ...base,
-            from: 20, to: 24,
-            reads: [readRec({ fromPara: 10, toPara: 14 })],
-            anns: [ann({ ownerId: 'A', para: 12, note: '他划的' })],
-        });
-        expect(feed.later).toHaveLength(0);
-    });
-
     it('一块里带齐他回话要的东西：那一页的原文 + 那一页的批注 + 谁说过什么', () => {
-        const hers = ann({ ownerId: 'user', para: 11, note: '她的话' });
-        const his = ann({ ownerId: 'A', para: 12, note: '他划的' });
+        const hers = ann({ ownerId: 'user', para: 11, note: '她的话', createdAt: iso(6) });
+        const his = ann({ ownerId: 'A', para: 12, note: '他划的', createdAt: iso(2) });
         const feed = buildPageFeed({
             ...base,
             from: 20, to: 24,
+            since: iso(5),
             reads: [readRec({ fromPara: 10, toPara: 14, perPage: 5, fromPage: 3, toPage: 3 })],
             anns: [hers, his],
             parasOf: () => ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九',
                 '第十段正文', '第十一段正文', '第十二段正文', '第十三段', '第十四段'],
             threads: [thread({
                 anchorKey: threadKeyOf(0, hers.anchor, 'user'),
-                messages: [{ id: 'm1', role: 'user', content: '她接着说', kind: 'chat', createdAt: iso(4) }],
+                anchor: hers.anchor,
+                messages: [{ id: 'm1', role: 'user', content: '她接着说', kind: 'chat', createdAt: iso(6) }],
             })],
         });
         const block = feed.later.find((b) => b.includes('■ 第 3 页')) ?? '';
@@ -243,48 +242,18 @@ describe('buildPageFeed · 他上几次读到的那几页上还没接过话的',
         expect(block).toContain('那一页上的批注和讨论');
         expect(block).toContain('她的话');                    // 那页的批注
         expect(block).toContain('↳ Angelica：她接着说');       // 谁说过什么
+        expect(block).toContain('你上次读完之后新出现的');      // 新出现的那几条单列
     });
 
     it('他看不见的（别人 self 档）不摆', () => {
         const feed = buildPageFeed({
             ...base,
             from: 20, to: 24,
+            since: iso(5),
             reads: [readRec({ fromPara: 10, toPara: 14 })],
             anns: [ann({ ownerId: 'B', para: 12, note: '只给自己看的', visibility: 'self' })],
         });
         expect(feed.later).toHaveLength(0);
         expect(feed.notes).toHaveLength(0);
-    });
-});
-
-describe('buildPageFeed · 他参与过的讨论', () => {
-    it('他说完之后别人接着说 → 摆给他', () => {
-        const feed = buildPageFeed({
-            ...base,
-            reads: [],
-            anns: [],
-            threads: [thread({
-                anchorKey: 'k1',
-                messages: [
-                    { id: 'm1', role: 'char', charId: 'A', content: '他说的', kind: 'chat', createdAt: iso(1) },
-                    { id: 'm2', role: 'user', content: '她接的', kind: 'chat', createdAt: iso(2) },
-                ],
-            })],
-        });
-        expect(feed.followUps).toHaveLength(1);
-        expect(feed.followUps[0]).toContain('她接的');
-    });
-
-    it('他没说过话的讨论不动他', () => {
-        const feed = buildPageFeed({
-            ...base,
-            reads: [],
-            anns: [],
-            threads: [thread({
-                anchorKey: 'k2',
-                messages: [{ id: 'm1', role: 'user', content: '她一个人的话', kind: 'chat', createdAt: iso(1) }],
-            })],
-        });
-        expect(feed.followUps).toHaveLength(0);
     });
 });

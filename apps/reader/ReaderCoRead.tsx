@@ -30,9 +30,11 @@ import {
     getProgress, listAnnotations, listRoamActivities, listThreads, appendRoamActivity,
     newRoamGroup, putProgress, rdId, type RdBook, type RdRoamActivity,
 } from '../../utils/reader/readerDb';
-import { recentChatLines, readCoReadPage, resolveReadApi, writeCoReadMarks, writeCoReadReplies, type ReaderCallRuntime } from '../../utils/reader/readerChat';
+import { formatChatLines, readCoReadPage, recentChatMessages, resolveReadApi, writeCoReadMarks, writeCoReadReplies, type ReaderCallRuntime } from '../../utils/reader/readerChat';
+import { buildReaderLiveState } from '../../utils/reader/readerLive';
 import { analyzeCharStyle, needStyleAnalysis } from '../../utils/reader/readerStyle';
-import { gatherPageFeed } from '../../utils/reader/readerFeed';
+import { gatherPageFeed, gatherReaderWindow } from '../../utils/reader/readerFeed';
+import { markSeen } from './readerContextStore';
 import { DB } from '../../utils/db';
 import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '../../utils/apiConfigNormalize';
 import { charPrefsOf, clampPageCount, setCharReadPrefs, useReaderCharPrefs, type CharReadPrefs } from './readerCharPrefs';
@@ -42,10 +44,10 @@ import { runArchive } from './coreadArchive';
 import ReaderCharStyleSheet from './ReaderCharStyleSheet';
 import { beginJob, endJob } from './readerJobs';
 import {
-    addCoReadChars, DEFAULT_RULE, endCoRead, getCoReadStore, readApiSlots, RULE_METRIC_LABEL,
-    RULE_METRIC_UNIT, RULE_TIMING_LABEL, ruleHint, setReadApiSlot, startCoRead, updateCoReadSession,
-    useCoReadStore,
-    type CoReadApiConfig, type CoReadArchiveMetric, type CoReadArchiveTiming, type CoReadContextMode,
+    addCoReadChars, chatLimitOf, DEFAULT_CHAT_LINES, DEFAULT_RULE, endCoRead, getCoReadStore, readApiSlots,
+    ruleHint, setReadApiSlot, startCoRead,
+    updateCoReadSession, useCoReadStore,
+    type CoReadApiConfig, type CoReadContextMode,
     type CoReadRule, type ReadApiSlot,
 } from './coreadStore';
 
@@ -101,11 +103,8 @@ const fmtTok = (n: number | undefined): string => {
     return String(v);
 };
 
-/** 这一步的规则算「哪一种」（三枚胶囊的判定） */
-const ruleKindOf = (rule: CoReadRule): 'auto' | 'manual' | 'custom' => {
-    if (rule.metric !== DEFAULT_RULE.metric || rule.threshold !== DEFAULT_RULE.threshold) return 'custom';
-    return rule.timing;
-};
+/** 这一步的规则算「哪一种」（两枚胶囊的判定）：只剩「什么时候进聊天」 */
+const ruleKindOf = (rule: CoReadRule): 'auto' | 'manual' => (rule.timing === 'manual' ? 'manual' : 'auto');
 
 /**
  * 一条活动记录的「轻量表面」——她文档里**简要活动记录**的口径：
@@ -132,6 +131,29 @@ function briefLine(who: string, a: RdRoamActivity): string {
     }
     const tk = (a.tokensIn ?? 0) + (a.tokensOut ?? 0);
     return `${who}：${bits.join(' · ')}${tk > 0 ? `（${fmtTok(tk)} token）` : ''}`;
+}
+
+/**
+ * 一次共读的**结算**（她 09-25 文档：主聊天这边要能读出「进度变化 / 批注数 / 页数 / token」）。
+ * 从这场共读里的活动记录现算——不额外存一份（文档：不重复存储同一份数据）。
+ */
+function settleLine(acts: RdRoamActivity[]): string {
+    const reads = acts.filter((a) => a.kind !== 'summary');
+    if (reads.length === 0) return '';
+    const pages = reads.reduce((n, a) => n + (a.pages ?? 0), 0);
+    const anns = reads.reduce((n, a) => n + (a.annCount ?? 0), 0);
+    const replies = reads.reduce((n, a) => n + (a.replyCount ?? 0), 0);
+    const tok = acts.reduce((n, a) => n + (a.tokens ?? 0), 0);
+    const first = reads[0];
+    const last = reads[reads.length - 1];
+    const span = `从第 ${(first.chapterIdx ?? 0) + 1} 章第 ${(first.fromPara ?? 0) + 1} 段读到第 ${(last.chapterIdx ?? 0) + 1} 章第 ${(last.toPara ?? 0) + 1} 段`;
+    return [
+        span,
+        pages > 0 ? `读了 ${pages} 页` : '',
+        anns > 0 ? `留下 ${anns} 条批注` : '',
+        replies > 0 ? `回了 ${replies} 条讨论` : '',
+        tok > 0 ? `花掉 ${fmtTok(tok)} token` : '',
+    ].filter(Boolean).join(' · ');
 }
 
 export default function ReaderCoRead({
@@ -386,26 +408,55 @@ export default function ReaderCoRead({
                     message: `${char.name}正在读这段…`,
                 });
                 try {
-                    const chatLines = session.contextMode === 'immersive'
-                        ? await recentChatLines(char, userProfile)
+                    // 聊天那边最近说的话：条数由这场共读定（核心人设档默认 20、chat 同款档默认 50，
+                    // 面板里随时能改——她 09-26）。同一批原始消息也喂给世界书扫关键词，和聊天一个口径。
+                    const chatMsgs = session.contextMode === 'immersive'
+                        ? await recentChatMessages(char, chatLimitOf(session))
+                        : [];
+                    const chatLines = chatMsgs.length > 0 ? formatChatLines(chatMsgs, char, userProfile) : '';
+                    // 实时状态（时间 / 记忆宫殿召回 / 情绪 / 日程）：**非核心模式才带**（她 09-26：
+                    // 该有的生活还是要有；核心模式是省成本那档，一点不带）
+                    const liveState = session.contextMode === 'immersive'
+                        ? await buildReaderLiveState(char).catch(() => '')
                         : '';
+                    // 双方进度（文档第 1 块）：他读到哪、你读到哪——他才知道要不要追你的进度
+                    const [hisPos, herPos] = await Promise.all([
+                        getProgress(book.id, char.id).catch(() => null),
+                        getProgress(book.id, 'user').catch(() => null),
+                    ]);
+                    const posText = (p: { chapterIdx: number; paraIdx: number } | null): string =>
+                        p ? `第 ${p.chapterIdx + 1} 章 · 第 ${p.paraIdx + 1} 段` : '还没开始读';
+                    const readState = `你们各自读到哪儿（这本书）：\n· 你：${posText(hisPos)}\n· ${userProfile?.name ?? '她'}：${posText(herPos)}`;
                     // 回复模式：面板上那个开关，或者他自己设置页里那个（她 09-21——
                     // 原来只有面板那个管用，角色设置页那个开关摆着不动，这儿接上）
                     const replyOn = session.replyMode || prefs.replyMode;
-                    // 摆给他的三块：他眼下这几页 / 他上几次读过的还没接过话的 / 他参与过的讨论里的新话
-                    const feed = replyOn
-                        ? await gatherPageFeed({
-                            charId: char.id, bookId: book.id, chapterIdx,
-                            from: winFrom, to: winTo, nameOf,
-                        })
-                        : null;
+                    // 他「看了这几页」的时刻——未读水位线按它推（看过的下次不再当未读催）：
+                    //   · 他眼下这几页 + 上次读完之后的新话（gatherPageFeed）
+                    //   · 历史阅读摘要（最近十条）+ 最近 15 条讨论（gatherReaderWindow，不分模式都给）
+                    const lookedAt = new Date().toISOString();
+                    const [feed, win] = await Promise.all([
+                        replyOn
+                            ? gatherPageFeed({
+                                charId: char.id, bookId: book.id, chapterIdx,
+                                from: winFrom, to: winTo, nameOf,
+                            })
+                            : Promise.resolve(null),
+                        gatherReaderWindow({ charId: char.id, bookId: book.id, chapterIdx, nameOf })
+                            .catch(() => ({ summaries: [], discussion: [] })),
+                    ]);
                     const res = await readCoReadPage({
                         char, user: userProfile, book, chapterIdx, chapterTitle,
                         paras: window, session, chatLines, api,
                         noteLimit: prefs.noteLimit,
                         preset: prefs.promptPreset,
                         replyFeed: feed ?? undefined,
+                        liveState,
+                        readState,
+                        scanMsgs: chatMsgs,
+                        summaries: win.summaries,
+                        discussion: win.discussion,
                     });
+                    markSeen(book.id, char.id, lookedAt);
                     const written = await writeCoReadMarks({
                         bookId: book.id, charId: char.id, contentRev: book.contentRev,
                         chapterIdx, percent, paras: chapterParas, marks: res.marks,
@@ -517,25 +568,31 @@ export default function ReaderCoRead({
                 }
             }
 
-            // 收尾再落一张：【结束共读】+ **双方简要活动记录**（她文档：本次共读期间全部活动记录，
-            // 无笔记正文；详细记录已经落库了，这版不重复落库）。两边的活动都在里头。
+            // 收尾再落一张：【结束共读】+ **结算**（她 09-25 文档：进度变化 / 批注数 / 页数 / token）
+            // + 双方简要活动记录（本次共读期间全部活动记录，无笔记正文；详细记录已经落库了）。
+            const all: RdRoamActivity[] = [];
             const brief: string[] = [];
             for (const id of [...cur.charIds, 'user']) {
                 const acts = (await listRoamActivities(id))
                     .filter((a) => a.bookId === book.id && a.createdAt >= cur.startedAt)
                     .sort((x, y) => x.createdAt.localeCompare(y.createdAt));
                 const who = id === 'user' ? (userProfile?.name ?? '你') : nameOf(id);
-                for (const a of acts) brief.push(briefLine(who, a));
+                for (const a of acts) { all.push(a); brief.push(briefLine(who, a)); }
             }
+            const settle = settleLine(all);
             for (const id of cur.charIds) {
                 await DB.saveMessage({
                     charId: id,
                     role: 'system',
                     type: 'text',
-                    content: `【结束共读】${names}和你把《${book.title}》这一段读完了。`,
+                    content: `【结束共读】${names}和你把《${book.title}》这一段读完了。`
+                        + (settle ? `\n这一次：${settle}` : ''),
                     metadata: {
                         source: 'reader_coread',
-                        coread: { bookId: book.id, title: book.title, charId: id, closed: true, brief },
+                        coread: {
+                            bookId: book.id, title: book.title, charId: id, closed: true,
+                            brief: settle ? [settle, ...brief] : brief,
+                        },
                     },
                 });
             }
@@ -641,14 +698,11 @@ export default function ReaderCoRead({
         );
     };
 
-    // ── 规则三选一 ──
-    const ruleCard = (kind: 'auto' | 'manual' | 'custom', label: string, desc: string) => (
+    // ── 规则两选一（口径不让人选了：整理节奏按她 09-25 的文档定死）──
+    const ruleCard = (kind: 'auto' | 'manual', label: string, desc: string) => (
         <button
             className={`rd-rule${ruleKindOf(rule) === kind ? ' rd-rule-on' : ''}`}
-            onClick={() => {
-                if (kind === 'custom') setRule((r) => ({ ...r, metric: 'calls' }));
-                else setRule({ ...DEFAULT_RULE, timing: kind });
-            }}
+            onClick={() => setRule({ ...DEFAULT_RULE, timing: kind })}
         >
             <span className="rd-rule-name">{label}</span>
             <span className="rd-rule-desc">{desc}</span>
@@ -656,31 +710,12 @@ export default function ReaderCoRead({
         </button>
     );
 
-    const customBody = ruleKindOf(rule) === 'custom' && (
+    /** 整理节奏的说明（她 09-25 文档；两条线都不让人改） */
+    const ruleBody = (
         <div className="rd-rule-body">
-            <div className="rd-row-label">水线按什么推</div>
-            <div className="rd-btn-row">
-                {(['calls', 'msgs', 'notes', 'pages'] as CoReadArchiveMetric[]).map((m) => (
-                    <button key={m} className={`rd-chip${rule.metric === m ? ' rd-chip-on' : ''}`}
-                        onClick={() => setRule((r) => ({ ...r, metric: m }))}>
-                        {RULE_METRIC_LABEL[m]}
-                    </button>
-                ))}
-            </div>
-            <div className="rd-field-row">
-                <span className="rd-muted">满</span>
-                <input className="rd-field rd-field-num" type="number" min={2} max={200} value={rule.threshold}
-                    onChange={(e) => setRule((r) => ({ ...r, threshold: Math.max(2, Math.min(200, Number(e.target.value) || 2)) }))} />
-                <span className="rd-muted">推一次水线</span>
-            </div>
-            <div className="rd-row-label">什么时候进他的聊天</div>
-            <div className="rd-btn-row">
-                {(['auto', 'manual'] as CoReadArchiveTiming[]).map((t) => (
-                    <button key={t} className={`rd-chip${rule.timing === t ? ' rd-chip-on' : ''}`}
-                        onClick={() => setRule((r) => ({ ...r, timing: t }))}>
-                        {RULE_TIMING_LABEL[t]}
-                    </button>
-                ))}
+            <div className="rd-muted">
+                整理按两条线走：他每满 10 次读书记录，把这批里「读到了什么 + 当时的感受」揉成一条；
+                讨论记录满 45 条，把较早的 30 条归档成一条，最近的 15 条留在上下文里。
             </div>
         </div>
     );
@@ -698,10 +733,31 @@ export default function ReaderCoRead({
                 </div>
                 <div className="rd-muted">
                     {mode === 'immersive'
-                        ? 'chat 同款：完整人设 + 世界书 + 用户印象 + 日常记忆，最近几条聊天每轮现读。'
-                        : '核心人设：只有核心人格 / 世界观 / 用户设定，不载世界书与用户印象——更专注在书上。'}
+                        ? 'chat 同款：完整人设 + 世界书 + 用户印象 + 日常记忆；时间、日程这些实时的也带着。'
+                        : '核心人设：只有核心人格 / 世界观 / 用户设定，不载世界书与用户印象；实时的也不带——更专注、更省。'}
                 </div>
             </div>
+
+            {/* 带多少条聊天原文（她 09-26：核心档默认 20、chat 同款档默认 50，读书过程里随时能调） */}
+            {session && (
+                <div className="rd-fold-row">
+                    <div className="rd-row-label">带多少条聊天记录</div>
+                    <div className="rd-field-row">
+                        <RdNumField
+                            value={chatLimitOf(session)}
+                            min={1}
+                            max={200}
+                            ariaLabel="带多少条聊天记录"
+                            onCommit={(n) => updateCoReadSession({ chatLines: n })}
+                        />
+                        <span className="rd-muted">
+                            条{typeof session.chatLines === 'number'
+                                ? '（手调的）'
+                                : `（${mode === 'focused' ? '核心人设' : 'chat 同款'}默认 ${DEFAULT_CHAT_LINES[mode]} 条）`}
+                        </span>
+                    </div>
+                </div>
+            )}
 
             <div className="rd-fold-row rd-switch-row">
                 <div className="rd-row-label">回复模式</div>
@@ -826,11 +882,10 @@ export default function ReaderCoRead({
                         <button className="rd-btn rd-coread-back" onClick={() => setStep(1)}>‹ 上一步</button>
                         <div className="rd-step-title">摘要规则</div>
                         <div className="rd-rules">
-                            {ruleCard('auto', '自动归档', '一满就总结，并立刻同步进他的聊天')}
-                            {ruleCard('manual', '手动归档', '照样总结，先不打扰聊天；共读结束才整段送进去')}
-                            {ruleCard('custom', '自定义', '自己定水线按什么推、什么时候进聊天')}
+                            {ruleCard('auto', '自动归档', '整理好就立刻同步进他的聊天')}
+                            {ruleCard('manual', '手动归档', '照样整理，先攒着；共读结束才整段送进去')}
                         </div>
-                        {customBody}
+                        {ruleBody}
                         <div className="rd-actions">
                             <button className="rd-btn rd-btn-primary rd-btn-block" onClick={() => setStep(3)}>下一步</button>
                         </div>
@@ -863,21 +918,33 @@ export default function ReaderCoRead({
                                 startCoRead({
                                     bookId: book.id, charIds: picks, contextMode: mode, rule, replyMode,
                                 });
-                                // 开读的这一下要在聊天里留个印子（她文档：聊天界面发一张邀请卡）
+                                // 开读的这一下要在聊天里留个印子（她文档：聊天界面发一张邀请卡），
+                                // 卡上带**当时双方各自的进度**（文档第 1 块「开始阅读的状态记录」）
                                 const who = userProfile?.name ?? '你';
                                 const names = picks.map((id) => nameOf(id)).join('、');
-                                for (const id of picks) {
-                                    void DB.saveMessage({
-                                        charId: id,
-                                        role: 'system',
-                                        type: 'text',
-                                        content: `【${who} 邀请 ${names} 一起读《${book.title}》】`,
-                                        metadata: {
-                                            source: 'reader_coread',
-                                            coread: { bookId: book.id, title: book.title, charId: id, opened: true },
-                                        },
-                                    }).catch(() => { /* 聊天那条发不出去也别拦着开读 */ });
-                                }
+                                void (async () => {
+                                    const [herPos, ...charsPos] = await Promise.all([
+                                        getProgress(book.id, 'user').catch(() => null),
+                                        ...picks.map((id) => getProgress(book.id, id).catch(() => null)),
+                                    ]);
+                                    const posText = (p: { chapterIdx: number; paraIdx: number } | null): string =>
+                                        p ? `第 ${p.chapterIdx + 1} 章第 ${p.paraIdx + 1} 段` : '还没开始';
+                                    const content = `【${who} 邀请 ${names} 一起读《${book.title}》】`
+                                        + `\n各自读到：${who} ${posText(herPos)} · `
+                                        + picks.map((id, i) => `${nameOf(id)} ${posText(charsPos[i])}`).join('、');
+                                    for (const id of picks) {
+                                        await DB.saveMessage({
+                                            charId: id,
+                                            role: 'system',
+                                            type: 'text',
+                                            content,
+                                            metadata: {
+                                                source: 'reader_coread',
+                                                coread: { bookId: book.id, title: book.title, charId: id, opened: true },
+                                            },
+                                        }).catch(() => { /* 聊天那条发不出去也别拦着开读 */ });
+                                    }
+                                })();
                                 notify(`和 ${names} 开始读了`);
                             }}>
                                 开始共读
@@ -908,11 +975,8 @@ export default function ReaderCoRead({
                         </div>
 
                         {/* 表面上只报进度，规则的全文在下面的「共读设置」里 */}
-                        {/* 「已归档 N 条」只对讨论句数有意义——别的口径是按时间窗推的 */}
                         <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-4)' }}>
-                            {session.rule.metric === 'msgs'
-                                ? `水线：已归档 ${session.summarizedMsgs} 条 · 满 ${session.rule.threshold} 条讨论总结一次`
-                                : `水线：满 ${session.rule.threshold} ${RULE_METRIC_UNIT[session.rule.metric]}总结一次`}
+                            {`已归档 ${session.summarizedMsgs} 条讨论 · 最近的 15 条留在上下文里`}
                         </div>
 
                         {recent.length > 0 && (
