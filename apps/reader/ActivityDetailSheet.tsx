@@ -86,7 +86,8 @@ export function RoamCalls({ calls }: { calls: RdRoamActivity[] }) {
                                 a.kind === 'summary'
                                     ? '总结'
                                     : [
-                                        a.pages ? `读了 ${a.pages} 页` : '',
+                                        // 页数只报角色的（她 09-26：user 那边的页数口径全是 bug，不显示了）
+                                        a.pages && a.charId !== 'user' ? `读了 ${a.pages} 页` : '',
                                         a.annCount ? `留下 ${a.annCount} 条批注` : '',
                                         a.replyCount ? `回了 ${a.replyCount} 条讨论` : '',
                                     ].filter(Boolean).join(' · ') || '读了一段',

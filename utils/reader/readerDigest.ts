@@ -186,7 +186,8 @@ export function runMeta(run: RoamRun, percent?: number): string {
     const sum = (pick: (a: RdRoamActivity) => number) => run.calls.reduce((n, a) => n + pick(a), 0);
     const bits: string[] = [];
     const pages = sum((a) => num(a.pages));
-    if (pages) bits.push(`看了 ${pages} 页`);
+    // 页数只报角色的（她 09-26：user 那边的页数口径全是 bug）
+    if (pages && run.ownerId !== 'user') bits.push(`看了 ${pages} 页`);
     if (percent !== undefined && percent > 0) bits.push(`进度 ${Math.round(percent)}%`);
     const anns = sum((a) => num(a.annCount));
     if (anns) bits.push(`${anns} 条批注`);

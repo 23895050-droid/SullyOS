@@ -229,14 +229,16 @@ export default function ReaderCoRead({
         const names = ids.map((id) => nameOf(id)).join('、');
         const who = userProfile?.name ?? '你';
         const invited = nameOf(charId);
-        // 新卡再报一次**大家的阅读进度**（她 09-26）
+        // 新卡再报一次**大家的阅读进度**（她 09-26 定的结构）：
+        //   ① 谁加入了  ② 现在共读的人有谁  ③ 每个人的进度
         const line = await progressLine(book.id, ids, who, nameOf);
         for (const id of ids) {
             void DB.saveMessage({
                 charId: id,
                 role: 'system',
                 type: 'text',
-                content: `【${who} 邀请 ${invited} 加入共读，目前一起读书的人有 ${names}。】\n阅读进度：${line}`,
+                content: `【${invited}加入了共读】\n现在共读的人有：${ids.map((x) => nameOf(x)).join('、')}`
+                    + `\n阅读进度：${line}`,
                 metadata: {
                     source: 'reader_coread',
                     coread: { bookId: book.id, title: book.title, charId: id, opened: true, joined: invited },

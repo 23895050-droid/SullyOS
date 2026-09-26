@@ -172,11 +172,11 @@ describe('readerDigest · 活动记录的合并', () => {
         expect(runMeta(run, 42)).toBe('看了 3 页 · 进度 42% · 3 条批注 · 2 条回复 · 1.7k token');
     });
 
-    it('自己那条不写 token（她 09-21：读了几分钟也拿掉了）', () => {
+    it('自己那条只报批注/回复（她 09-21 拿掉 token 和时长；09-26 连页数也不报了——口径有 bug）', () => {
         const [run] = mergeRuns([mkRoam({
-            charId: 'user', mode: 'user', kind: 'read', durationMs: 26 * 60000, pages: 5, tokens: 900,
+            charId: 'user', mode: 'user', kind: 'read', durationMs: 26 * 60000, pages: 5, tokens: 900, annCount: 2,
         })]);
-        expect(runMeta(run)).toBe('看了 5 页');
+        expect(runMeta(run)).toBe('2 条批注');
         expect(runVerbs(run)).toBe('读了书');
     });
 

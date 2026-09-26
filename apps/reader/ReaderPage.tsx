@@ -368,9 +368,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     pageIdxRef.current = pageIdx;
     /** 这次进来翻到过哪些页（统计/书签） */
     const pagesSeenRef = useRef<Set<string>>(new Set());
-    /** 「往后翻了几页」要的三个数：起点、最远的点、各章页数（跨章时把中间整章算进去） */
-    const startPosRef = useRef<{ chapterIdx: number; pageIdx: number } | null>(null);
-    const farPosRef = useRef<{ chapterIdx: number; pageIdx: number } | null>(null);
+    /** 各章页数（版面量出来的，别处也可能要） */
     const pageCountsRef = useRef<Record<number, number>>({});
     /** 用户活动记录只落一次（退出 / 页面被关 二选一，先到先算） */
     const sessionLoggedRef = useRef(false);
@@ -641,30 +639,17 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     useEffect(() => {
         if (!restoredRef.current || pageCount === 0) return;
         pageCountsRef.current[chapterIdx] = Math.max(pageCountsRef.current[chapterIdx] ?? 0, pageCount);
-        if (!startPosRef.current) startPosRef.current = { chapterIdx, pageIdx };
-        const far = farPosRef.current;
-        if (!far || chapterIdx > far.chapterIdx || (chapterIdx === far.chapterIdx && pageIdx > far.pageIdx)) {
-            farPosRef.current = { chapterIdx, pageIdx };
-        }
     }, [chapterIdx, pageIdx, pageCount]);
 
     /**
      * 一次「进书 → 退出」= 一条**用户活动记录**（她 09-20 的活动记录口径）。
-     * 你自己读书不调 llm，所以这条是纯事件记录：读了多久 / 看了多少页 / 留了几条批注 /
-     * 参与多少回复。**不同步聊天**，可手动删改（入口在书库页的全局活动记录）。
+     * 你自己读书不调 llm，所以这条是纯事件记录：读了多久 / 留了几条批注 / 参与多少回复。
+     * **不同步聊天**，可手动删改（入口在书库页的全局活动记录）。
      * 挂在 render 上取最新值，交给一个 [] 依赖的卸载 effect 调——闭包不会拿到旧数组。
+     *
+     * **页数不记了**（她 09-26：「所有算我页数的都别算了，整个充满了bug」）——
+     * 原来按「进门那页 → 到过的最远那页」算，往回翻、跳章都会算歪（她撞见 1% 进度配 99 页）。
      */
-    /** 进门那页 → 最远那页，中间隔了几页（跨章就把中间的整章算上；往回翻不扣） */
-    const pagesForward = (): number => {
-        const s = startPosRef.current;
-        const f = farPosRef.current;
-        if (!s || !f) return 1;
-        if (f.chapterIdx === s.chapterIdx) return Math.max(1, f.pageIdx - s.pageIdx + 1);
-        let n = Math.max(1, (pageCountsRef.current[s.chapterIdx] ?? s.pageIdx + 1) - s.pageIdx);
-        for (let c = s.chapterIdx + 1; c < f.chapterIdx; c += 1) n += pageCountsRef.current[c] ?? 1;
-        return Math.max(1, n + f.pageIdx + 1);
-    };
-
     const sessionLoggerRef = useRef<() => void>(() => {});
     sessionLoggerRef.current = () => {
         // 恢复没落地 = 这一趟还没真的开始读（顺手挡住 StrictMode 的假卸载）
@@ -674,7 +659,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         void appendRoamActivity({
             id: rdId('rr'), charId: 'user', bookId: book.id, kind: 'read',
             group: newRoamGroup(), seq: 0,
-            pages: pagesForward(),
             annCount: anns.filter((a) => a.ownerId === 'user' && a.createdAt >= since).length,
             replyCount: threads.reduce(
                 (n, t) => n + t.messages.filter((m) => m.role === 'user' && m.createdAt >= since).length, 0),
