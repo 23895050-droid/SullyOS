@@ -27,7 +27,7 @@ import { CaretDown, Check, Circle, Plus, UsersThree } from '@phosphor-icons/reac
 import { useOS } from '../../context/OSContext';
 import type { CharacterProfile } from '../../types';
 import {
-    getProgress, listAnnotations, listRoamActivities, listThreads, appendRoamActivity,
+    getProgress, listAnnotations, listProgressByBook, listRoamActivities, listThreads, appendRoamActivity,
     newRoamGroup, putProgress, rdId, type RdBook, type RdRoamActivity,
 } from '../../utils/reader/readerDb';
 import { formatChatLines, readCoReadPage, recentChatMessages, resolveReadApi, writeCoReadMarks, writeCoReadReplies, type ReaderCallRuntime } from '../../utils/reader/readerChat';
@@ -107,30 +107,21 @@ const fmtTok = (n: number | undefined): string => {
 const ruleKindOf = (rule: CoReadRule): 'auto' | 'manual' => (rule.timing === 'manual' ? 'manual' : 'auto');
 
 /**
- * 一条活动记录的「轻量表面」——她文档里**简要活动记录**的口径：
- * 读了哪本书 / 几页 / 进度 / 留了几个批注 / 多少回复 / 单次总 token，**无笔记正文**
- * （详细记录已经落过库了，这儿只做一行流水）。
+ * 大家各自读到全书的百分之几（她 09-26：开始卡要列**所有参与的人**的进度；中途加人时
+ * 新卡再报一次）。没读过的人写「还没开始」。
  */
-function briefLine(who: string, a: RdRoamActivity): string {
-    const bits: string[] = [];
-    if (a.kind === 'summary') {
-        bits.push(a.summary || '总结了一段');
-    } else {
-        // 读的是「第几页到第几页」（她 09-21 要的：一眼看出他到底读没读）；
-        // 09-21 之前的老记录没有页号，退回段号
-        if (a.fromPage !== undefined && a.toPage !== undefined && a.kind === 'annotate') {
-            bits.push(a.fromPage === a.toPage ? `第 ${a.fromPage} 页` : `第 ${a.fromPage}–${a.toPage} 页`);
-        } else if (a.fromPara !== undefined && a.toPara !== undefined && a.kind === 'annotate') {
-            bits.push(`第 ${a.fromPara + 1}–${a.toPara + 1} 段`);
-        }
-        if (a.pages) bits.push(`读了 ${a.pages} 页`);
-        if (a.annCount) bits.push(`留下 ${a.annCount} 条批注`);
-        if (a.replyCount) bits.push(`回了 ${a.replyCount} 条讨论`);
-        if (a.durationMs) bits.push(`${Math.max(1, Math.round(a.durationMs / 60000))} 分钟`);
-        if (bits.length === 0) bits.push(a.summary || '读了一会儿');
-    }
-    const tk = (a.tokensIn ?? 0) + (a.tokensOut ?? 0);
-    return `${who}：${bits.join(' · ')}${tk > 0 ? `（${fmtTok(tk)} token）` : ''}`;
+async function progressLine(
+    bookId: string,
+    ids: string[],
+    userName: string,
+    nameOf: (ownerId: string) => string,
+): Promise<string> {
+    const rows = await listProgressByBook(bookId).catch(() => []);
+    const at = (id: string): string => {
+        const p = rows.find((r) => r.ownerId === id);
+        return p ? `${p.percent}%` : '还没开始';
+    };
+    return [`${userName} ${at('user')}`, ...ids.map((id) => `${nameOf(id)} ${at(id)}`)].join(' · ');
 }
 
 /**
@@ -138,12 +129,15 @@ function briefLine(who: string, a: RdRoamActivity): string {
  * 从这场共读里的活动记录现算——不额外存一份（文档：不重复存储同一份数据）。
  *
  * **她 09-26**：写「进度从 X% 到 Y%」，不写「从第几段读到第几段」——往回翻的时候那种写法会
- * 倒着念（她撞见的「从 39 页读到 36 页」就是这么来的）。
+ * 倒着念（她撞见的「从 39 页读到 36 页」就是这么来的）。**页数只算角色读的**：user 那边的
+ * 页数口径不准（她报的「进度 1% 却有 99 页」）。
  */
 function settleLine(acts: RdRoamActivity[], startPercent?: number, endPercent?: number): string {
     const reads = acts.filter((a) => a.kind !== 'summary');
     if (reads.length === 0 && typeof startPercent !== 'number') return '';
-    const pages = reads.reduce((n, a) => n + (a.pages ?? 0), 0);
+    const pages = reads
+        .filter((a) => a.charId !== 'user')
+        .reduce((n, a) => n + (a.pages ?? 0), 0);
     const anns = reads.reduce((n, a) => n + (a.annCount ?? 0), 0);
     const replies = reads.reduce((n, a) => n + (a.replyCount ?? 0), 0);
     const tok = acts.reduce((n, a) => n + (a.tokens ?? 0), 0);
@@ -159,6 +153,24 @@ function settleLine(acts: RdRoamActivity[], startPercent?: number, endPercent?: 
         replies > 0 ? `回了 ${replies} 条讨论` : '',
         tok > 0 ? `花掉 ${fmtTok(tok)} token` : '',
     ].filter(Boolean).join(' · ');
+}
+
+/**
+ * 每人一行汇总（她 09-26：结束卡不要**逐条明细**了，写清谁读了多少、说了多少就够）。
+ * `withPages` 只对角色开——她自己那条不算页数（口径不准，见 settleLine）。
+ */
+function personLine(who: string, acts: RdRoamActivity[], withPages: boolean): string {
+    const reads = acts.filter((a) => a.kind !== 'summary');
+    if (reads.length === 0) return '';
+    const pages = withPages ? reads.reduce((n, a) => n + (a.pages ?? 0), 0) : 0;
+    const anns = reads.reduce((n, a) => n + (a.annCount ?? 0), 0);
+    const replies = reads.reduce((n, a) => n + (a.replyCount ?? 0), 0);
+    const bits = [
+        pages > 0 ? `读了 ${pages} 页` : '',
+        anns > 0 ? `留下 ${anns} 条批注` : '',
+        replies > 0 ? `回了 ${replies} 条讨论` : '',
+    ].filter(Boolean);
+    return `${who}：${bits.join(' · ') || '读了一会儿'}`;
 }
 
 export default function ReaderCoRead({
@@ -217,12 +229,14 @@ export default function ReaderCoRead({
         const names = ids.map((id) => nameOf(id)).join('、');
         const who = userProfile?.name ?? '你';
         const invited = nameOf(charId);
+        // 新卡再报一次**大家的阅读进度**（她 09-26）
+        const line = await progressLine(book.id, ids, who, nameOf);
         for (const id of ids) {
             void DB.saveMessage({
                 charId: id,
                 role: 'system',
                 type: 'text',
-                content: `【${who} 邀请 ${invited} 加入共读，目前一起读书的人有 ${names}。】`,
+                content: `【${who} 邀请 ${invited} 加入共读，目前一起读书的人有 ${names}。】\n阅读进度：${line}`,
                 metadata: {
                     source: 'reader_coread',
                     coread: { bookId: book.id, title: book.title, charId: id, opened: true, joined: invited },
@@ -573,8 +587,7 @@ export default function ReaderCoRead({
                 }
             }
 
-            // 收尾再落一张：【结束共读】+ **结算**（她 09-25 文档：进度变化 / 批注数 / 页数 / token）
-            // + 双方简要活动记录（本次共读期间全部活动记录，无笔记正文；详细记录已经落库了）。
+            // 收尾再落一张：【结束共读】+ **结算** + 每人一行汇总（她 09-26：逐条明细不要了）
             const all: RdRoamActivity[] = [];
             const brief: string[] = [];
             for (const id of [...cur.charIds, 'user']) {
@@ -582,7 +595,9 @@ export default function ReaderCoRead({
                     .filter((a) => a.bookId === book.id && a.createdAt >= cur.startedAt)
                     .sort((x, y) => x.createdAt.localeCompare(y.createdAt));
                 const who = id === 'user' ? (userProfile?.name ?? '你') : nameOf(id);
-                for (const a of acts) { all.push(a); brief.push(briefLine(who, a)); }
+                all.push(...acts);
+                const line = personLine(who, acts, id !== 'user');
+                if (line) brief.push(line);
             }
             const settle = settleLine(all, cur.startPercent, percent);
             for (const id of cur.charIds) {
@@ -925,23 +940,26 @@ export default function ReaderCoRead({
                                     startPercent: percent,
                                 });
                                 // 开读的这一下要在聊天里留个印子（她文档：聊天界面发一张邀请卡）。
-                                // 她 09-26：卡上写**初始阅读进度**（百分之几），不写各自读到第几页。
+                                // 她 09-26：卡上列**所有参与的人**的阅读进度（百分之几），不写第几页。
                                 const who = userProfile?.name ?? '你';
                                 const names = picks.map((id) => nameOf(id)).join('、');
-                                const content = `【${who} 邀请 ${names} 一起读《${book.title}》】`
-                                    + `\n初始阅读进度：${percent}%`;
-                                for (const id of picks) {
-                                    void DB.saveMessage({
-                                        charId: id,
-                                        role: 'system',
-                                        type: 'text',
-                                        content,
-                                        metadata: {
-                                            source: 'reader_coread',
-                                            coread: { bookId: book.id, title: book.title, charId: id, opened: true },
-                                        },
-                                    }).catch(() => { /* 聊天那条发不出去也别拦着开读 */ });
-                                }
+                                void (async () => {
+                                    const line = await progressLine(book.id, picks, who, nameOf);
+                                    const content = `【${who} 邀请 ${names} 一起读《${book.title}》】`
+                                        + `\n初始阅读进度：${line}`;
+                                    for (const id of picks) {
+                                        await DB.saveMessage({
+                                            charId: id,
+                                            role: 'system',
+                                            type: 'text',
+                                            content,
+                                            metadata: {
+                                                source: 'reader_coread',
+                                                coread: { bookId: book.id, title: book.title, charId: id, opened: true },
+                                            },
+                                        }).catch(() => { /* 聊天那条发不出去也别拦着开读 */ });
+                                    }
+                                })();
                                 notify(`和 ${names} 开始读了`);
                             }}>
                                 开始共读

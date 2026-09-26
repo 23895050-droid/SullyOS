@@ -125,7 +125,7 @@ export async function runArchive(ctx: ArchiveCtx, opts: { force: boolean }): Pro
     const pendingDisc = pendingRows(rows, bk.discussAt);
     const acts = await activitiesPending(ctx, bk.contentAt);
 
-    const wantContent = opts.force ? acts.length > 0 : planContentSummary(acts.length);
+    const wantContent = planContentSummary(acts.length);
     const wantDiscuss = opts.force ? pendingDisc.length > 0 : planDiscussArchive(pendingDisc.length);
     if (!wantContent && !wantDiscuss) {
         return {
