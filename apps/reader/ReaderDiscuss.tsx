@@ -13,7 +13,7 @@
 // 旧工具条上的「写想法」「讨论」两个按钮已经删了，功能全并到这张卡里。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CaretLeft, CaretRight, Lightning, PaperPlaneRight, ShareNetwork } from '@phosphor-icons/react';
+import { CaretLeft, CaretRight, Lightning, NotePencil, PaperPlaneRight, ShareNetwork } from '@phosphor-icons/react';
 import { useOS } from '../../context/OSContext';
 import type { CharacterProfile } from '../../types';
 import {
@@ -76,6 +76,15 @@ export default function ReaderDiscuss({
     const [busy, setBusy] = useState(false);
     /** 书摘分享卡开着没（她 09-26） */
     const [sharing, setSharing] = useState(false);
+    /**
+     * 「我也批一句」点了没（她 09-26 深夜二）。
+     * 09-16 定的是「看着别人的批注打字 = 回复，不另建批注」，那条还作数；
+     * 这个是**她明确点出来的另一条路**：在人家划的那句上起一条自己的批注。
+     * 点了之后输入框改成写批注，发出去才落库（不点就不会多出空批注）。
+     */
+    const [addingMine, setAddingMine] = useState(false);
+    /** 刚落下自己那条批注，等 speakers 刷新之后把镜头切到她身上 */
+    const jumpMineRef = useRef(false);
     const listRef = useRef<HTMLDivElement | null>(null);
 
     const nameOf = useCallback((ownerId: string): string => (
@@ -148,6 +157,15 @@ export default function ReaderDiscuss({
         if (el) el.scrollTop = el.scrollHeight;
     }, [thread?.messages.length, at]);
 
+    // 自己那条批注刚落库：speakers 一刷新就把镜头切到自己身上（不然她还停在人家那条上）
+    useEffect(() => {
+        if (!jumpMineRef.current) return;
+        const i = speakers.findIndex((s) => s.ownerId === 'user');
+        if (i < 0) return;
+        jumpMineRef.current = false;
+        setSpeaker(i);
+    }, [speakers]);
+
     /** 往**某一条批注**的讨论里追加一句（唯一的写入口）。 */
     const post = async (ownerId: RdOwnerId, msg: Omit<RdThreadMsg, 'id' | 'createdAt'> & { createdAt?: string }) => {
         const now = new Date().toISOString();
@@ -166,11 +184,11 @@ export default function ReaderDiscuss({
     };
 
     /**
-     * 发送规则（她 09-16 把口径钉死）：
+     * 发送规则（她 09-16 把口径钉死，09-26 深夜二加了第一条）：
+     *   · **点了「我也批一句」→ 在人家划的那句上起一条自己的批注**（她 09-26 点名的路）
      *   · 正在改自己的批注 → 改那条批注
      *   · 看的是自己的批注、还没写 → 这一句就是我的批注
-     *   · 看的是**别人的**批注 → 这是回复，进**那条批注**的讨论
-     *     （以前这里会给她另建一条批注、盖在人家划的线上，她一眼就看出来了）
+     *   · 看的是**别人的**批注（没点「我也批一句」）→ 这是回复，进**那条批注**的讨论
      */
     const send = async () => {
         const text = draft.trim();
@@ -179,9 +197,18 @@ export default function ReaderDiscuss({
         try {
             const now = new Date().toISOString();
             const mine = current?.ownerId === 'user' ? currentAnn : null;
-            if (mine && (editing || !mine.note)) {
+            if (addingMine && !mine) {
+                await putAnnotation({
+                    id: rdId('an'), bookId: book.id, ownerId: 'user', anchor: currentAnchor,
+                    kind: 'note', note: text, styleSlot: 1, contentRev: book.contentRev, status: 'active',
+                    chapterIdx, percent, createdAt: now, updatedAt: now,
+                });
+                setAddingMine(false);
+                jumpMineRef.current = true;
+            } else if (mine && (editing || !mine.note)) {
                 await putAnnotation({ ...mine, note: text, kind: 'note', updatedAt: now });
                 setEditing(false);
+                setAddingMine(false);
             } else if (current) {
                 await post(current.ownerId, { role: 'user', content: text, kind: 'chat' });
             } else {
@@ -351,7 +378,7 @@ export default function ReaderDiscuss({
                     <button
                         className="rd-discuss-arrow"
                         aria-label="上一个人"
-                        onClick={() => setSpeaker((v) => (v - 1 + speakers.length) % speakers.length)}
+                        onClick={() => { setAddingMine(false); setSpeaker((v) => (v - 1 + speakers.length) % speakers.length); }}
                     >
                         <CaretLeft size={18} />
                     </button>
@@ -361,7 +388,7 @@ export default function ReaderDiscuss({
                     <button
                         className="rd-discuss-arrow"
                         aria-label="下一个人"
-                        onClick={() => setSpeaker((v) => (v + 1) % speakers.length)}
+                        onClick={() => { setAddingMine(false); setSpeaker((v) => (v + 1) % speakers.length); }}
                     >
                         <CaretRight size={18} />
                     </button>
@@ -397,6 +424,36 @@ export default function ReaderDiscuss({
                         {currentAnn?.note || <span className="rd-discuss-empty">还没写批注</span>}
                     </div>
                     {editing && <div className="rd-discuss-hint">改自己的批注，改完点发送</div>}
+                    {/* 人家划的那一句上，她也能起一条自己的（她 09-26 深夜二） */}
+                    {current.ownerId !== 'user' && !addingMine && (
+                        <button
+                            className="rd-nb-goto"
+                            style={{ marginTop: 'var(--rd-space-3)' }}
+                            onClick={() => {
+                                // 这句上她要已经有一条，就别再建一条重复的——直接跳过去改那条
+                                const mineRow = anns.find((a) => (
+                                    a.ownerId === 'user' && a.kind !== 'bookmark' && isSameSentence(a.anchor, currentAnchor)
+                                ));
+                                if (mineRow) {
+                                    setDraft(mineRow.note ?? '');
+                                    setEditing(true);
+                                    setAddingMine(false);
+                                    setSpeaker(speakers.findIndex((s) => s.ownerId === 'user'));
+                                    return;
+                                }
+                                setAddingMine(true);
+                                setEditing(false);
+                                setDraft('');
+                            }}
+                        >
+                            <NotePencil size={13} /> 我也批一句
+                        </button>
+                    )}
+                    {addingMine && (
+                        <div className="rd-discuss-hint">
+                            写你自己的批注，写完点发送——{nameOf(current.ownerId)}划的这句上就有你一条了
+                        </div>
+                    )}
                 </div>
             ) : (
                 <div className="rd-discuss-note">
@@ -408,9 +465,11 @@ export default function ReaderDiscuss({
             <div className="rd-discuss-list" ref={listRef}>
                 {all.length === 0 ? (
                     <div className="rd-discuss-hint">
-                        {current && current.ownerId !== 'user'
-                            ? `底下说一句，就是回${nameOf(current.ownerId)}这条批注。`
-                            : '底下说第一句，就成了这条线上的批注。'}
+                        {addingMine
+                            ? '底下写第一句，就是你自己的批注。'
+                            : current && current.ownerId !== 'user'
+                                ? `底下说一句，就是回${nameOf(current.ownerId)}这条批注。`
+                                : '底下说第一句，就成了这条线上的批注。'}
                     </div>
                 ) : all.map((m) => {
                     const who = actorOf(m);
@@ -435,9 +494,11 @@ export default function ReaderDiscuss({
             <div className="rd-discuss-input-row">
                 <input
                     className="rd-field"
-                    placeholder={editing
-                        ? '改批注…'
-                        : (current && current.ownerId !== 'user' ? `回${nameOf(current.ownerId)}这条批注…` : '说点什么…')}
+                    placeholder={addingMine
+                        ? '写你的批注…'
+                        : editing
+                            ? '改批注…'
+                            : (current && current.ownerId !== 'user' ? `回${nameOf(current.ownerId)}这条批注…` : '说点什么…')}
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') void send(); }}

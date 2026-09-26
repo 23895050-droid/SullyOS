@@ -9,7 +9,7 @@
 //     展开只有他接的那几条话。所以现在展开 = 原批注（衬线，和讨论聊天气泡分开）+ 全部讨论话。
 //
 // 收着：原文那一句 + 他写的那句（有的话）
-// 展开：原批注（`note`，没有就不占位）→ 讨论 → 转发 / 查看原文
+// 展开：原批注（`note`，没有就不占位）→ 讨论 → 存成图片 / 转发 / 查看原文
 
 import { useState, type ReactNode } from 'react';
 import { CaretDown } from '@phosphor-icons/react';
@@ -26,13 +26,14 @@ interface Props {
     /** 展开后：讨论（自己拼好传进来） */
     thread?: ReactNode;
     /** 展开后才有 */
+    onShare?: () => void;
     onForward?: () => void;
     onOpenAt?: () => void;
     /** 时间线上那颗点（不传就不画） */
     dotColor?: string;
 }
 
-export default function NoteFold({ meta, quote, text, note, thread, onForward, onOpenAt, dotColor }: Props) {
+export default function NoteFold({ meta, quote, text, note, thread, onShare, onForward, onOpenAt, dotColor }: Props) {
     const [open, setOpen] = useState(false);
     return (
         <div className={`rd-fn${open ? ' rd-fn-open' : ''}`}>
@@ -50,8 +51,11 @@ export default function NoteFold({ meta, quote, text, note, thread, onForward, o
                 <div className="rd-fn-body">
                     {note}
                     {thread}
-                    {(onForward || onOpenAt) && (
+                    {(onShare || onForward || onOpenAt) && (
                         <div className="rd-fn-acts">
+                            {onShare && (
+                                <button className="rd-fn-act" onClick={onShare}>存成图片</button>
+                            )}
                             {onForward && (
                                 <button className="rd-fn-act" onClick={onForward}>转发</button>
                             )}

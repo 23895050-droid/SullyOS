@@ -8,14 +8,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-    ArrowLeft, BookmarkSimple, CheckCircle, Clock, FileText, Heart, Star,
+    ArrowLeft, BookmarkSimple, CheckCircle, Clock, FileText, Heart, ImageSquare, Star,
 } from '@phosphor-icons/react';
 import {
     deleteBookDeep, getBook, getProgress, listAnnotations, listBooks, patchBook,
     type RdAnnotation, type RdBook, type RdProgress,
 } from '../../utils/reader/readerDb';
 import { addCat, addTag, allCatNames, loadTags } from './readerCats';
+import { shareDayOf } from '../../utils/reader/shareCardDraw';
 import HighlightColorSheet from './HighlightColorSheet';
+import ShareCardSheet from './ShareCardSheet';
 import { highlightColorOf, useReaderPrefs } from './readerPrefs';
 import ReaderCover, { shrinkCoverImage } from './ReaderCover';
 
@@ -57,6 +59,8 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
     const [tagNames, setTagNames] = useState<string[]>([]);
     const [newTag, setNewTag] = useState('');
     const [confirmDelete, setConfirmDelete] = useState(false);
+    /** 正在做分享卡的那条划线批注（存成图片） */
+    const [sharing, setSharing] = useState<RdAnnotation | null>(null);
     const [draft, setDraft] = useState({ title: '', author: '', category: '', intro: '', tags: [] as string[] });
 
     const load = useCallback(async () => {
@@ -271,6 +275,9 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
                                     <div className="rd-bmk-foot">
                                         <span>{stampOf(a.createdAt)}</span>
                                         <span>{pctOfAnn(a)}%</span>
+                                        <button className="rd-nb-goto" onClick={() => setSharing(a)}>
+                                            <ImageSquare size={13} /> 存成图片
+                                        </button>
                                     </div>
                                 </div>
                             ))}
@@ -331,6 +338,19 @@ export default function BookDetails({ bookId, notify, onRead, onDeleted, onBack 
 
             {/* ── 划线颜色：跟阅读页、设置页共用同一张弹卡（她：四处要打通） ── */}
             {sheet === 'hl' && <HighlightColorSheet onClose={() => setSheet(null)} />}
+
+            {/* ── 把一条划线批注做成分享卡存成图片（跟笔记库、阅读页是同一张卡） ── */}
+            {sharing && (
+                <ShareCardSheet
+                    book={book}
+                    quote={sharing.anchor.text}
+                    note={sharing.note}
+                    chapterTitle={chapterTitleOf(sharing.chapterIdx ?? chapterOfPara(sharing.anchor.startPara))}
+                    date={shareDayOf(sharing.createdAt)}
+                    notify={notify}
+                    onClose={() => setSharing(null)}
+                />
+            )}
 
             {/* ── 编辑资料 ── */}
             {sheet === 'edit' && (

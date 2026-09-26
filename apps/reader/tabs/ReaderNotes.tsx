@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-    CaretDown, FunnelSimple, MagnifyingGlass, NoteBlank, PaperPlaneRight, X,
+    CaretDown, FunnelSimple, ImageSquare, MagnifyingGlass, NoteBlank, PaperPlaneRight, X,
 } from '@phosphor-icons/react';
 import { useOS } from '../../../context/OSContext';
 import {
@@ -17,8 +17,10 @@ import {
     type RdAnnotation, type RdBook, type RdThread,
 } from '../../../utils/reader/readerDb';
 import { threadKeyOf } from '../../../utils/reader/readerParticipants';
+import { shareDayOf } from '../../../utils/reader/shareCardDraw';
 import ReaderCover from '../ReaderCover';
 import NoteForwardSheet from '../NoteForwardSheet';
+import ShareCardSheet from '../ShareCardSheet';
 import type { NoteForwardCard } from '../readerForward';
 import { highlightColorOf, useReaderPrefs } from '../readerPrefs';
 
@@ -57,8 +59,15 @@ export function chapterOf(book: RdBook, ann: RdAnnotation): number {
     return idx;
 }
 
+/** 第几章的标题（章号是**章内序号**；章节目录里没收录的章节退回「第 N 章」） */
+export function chapterTitleOf(book: RdBook, chapterIdx: number): string {
+    return book.toc.find((t) => t.chapterIdx === chapterIdx)?.title ?? `第 ${chapterIdx + 1} 章`;
+}
+
 const fmtDate = (iso: string) => (iso || '').slice(0, 10);
 const fmtTime = (iso: string) => (iso || '').slice(5, 16).replace('T', ' ');
+/** 笔记形成的时间（连年份一起写；转出去的卡上显示的和给 AI 读的是同一份） */
+export const fmtStamp = (iso: string) => (iso || '').slice(0, 16).replace('T', ' ');
 const later = (a: string, b: string) => (a > b ? a : b);
 
 type Sort = 'time' | 'chapter';
@@ -68,6 +77,8 @@ export default function ReaderNotes({ onOpenAt, notify }: Props) {
     const prefs = useReaderPrefs();
     /** 正在转发的那条笔记（选人弹卡；笔记行里不带书，所以连书一起记下来） */
     const [forwarding, setForwarding] = useState<{ book: RdBook; row: NoteRow } | null>(null);
+    /** 正在做分享卡的那条笔记（存成图片；同上，连书一起记下来） */
+    const [sharing, setSharing] = useState<{ book: RdBook; row: NoteRow } | null>(null);
     const [groups, setGroups] = useState<BookGroup[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -173,12 +184,17 @@ export default function ReaderNotes({ onOpenAt, notify }: Props) {
     const forwardOf = (book: RdBook, n: NoteRow): NoteForwardCard => ({
         kind: '笔记',
         title: book.title,
-        subtitle: `${nameOf(n.ann.ownerId)} · 第 ${n.chapterIdx + 1} 章`,
+        author: book.customAuthor || book.author,
+        chapter: `第 ${n.chapterIdx + 1} 章`,
         quote: n.ann.anchor.text,
         note: n.ann.note,
-        thread: (n.thread?.messages ?? []).map((m) => (
-            `${m.role === 'user' ? nameOf('user') : (m.charId ? nameOf(m.charId) : '旁白')}：${m.content}`
-        )),
+        by: nameOf(n.ann.ownerId),
+        at: fmtStamp(n.ann.createdAt),
+        thread: (n.thread?.messages ?? []).map((m) => ({
+            who: m.role === 'user' ? nameOf('user') : (m.charId ? nameOf(m.charId) : '旁白'),
+            text: m.content,
+            at: fmtStamp(m.createdAt),
+        })),
         color: highlightColorOf(prefs, n.ann.ownerId),
     });
 
@@ -359,6 +375,12 @@ export default function ReaderNotes({ onOpenAt, notify }: Props) {
                                                     <div className="rd-nb-src">
                                                         <button
                                                             className="rd-nb-goto"
+                                                            onClick={() => setSharing({ book: g.book, row: n })}
+                                                        >
+                                                            <ImageSquare size={13} /> 存成图片
+                                                        </button>
+                                                        <button
+                                                            className="rd-nb-goto"
                                                             onClick={() => setForwarding({ book: g.book, row: n })}
                                                         >
                                                             <PaperPlaneRight size={13} /> 转发
@@ -472,6 +494,19 @@ export default function ReaderNotes({ onOpenAt, notify }: Props) {
                     card={forwardOf(forwarding.book, forwarding.row)}
                     onClose={() => setForwarding(null)}
                     notify={notify ?? (() => {})}
+                />
+            )}
+
+            {/* 把这条笔记做成分享卡存成图片（和阅读页工具条上那颗是同一张卡） */}
+            {sharing && (
+                <ShareCardSheet
+                    book={sharing.book}
+                    quote={sharing.row.ann.anchor.text}
+                    note={sharing.row.ann.note}
+                    chapterTitle={chapterTitleOf(sharing.book, sharing.row.chapterIdx)}
+                    date={shareDayOf(sharing.row.ann.createdAt)}
+                    notify={notify ?? (() => {})}
+                    onClose={() => setSharing(null)}
                 />
             )}
         </div>

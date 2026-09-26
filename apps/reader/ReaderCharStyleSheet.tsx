@@ -15,13 +15,16 @@
 //      开关下面那两行小字，全搬进标题旁边那枚问号。界面上只剩标题、正文、开关、按钮。
 
 import { useState } from 'react';
-import { ArrowsClockwise } from '@phosphor-icons/react';
+import { ArrowsClockwise, PencilSimple } from '@phosphor-icons/react';
 import { useOS } from '../../context/OSContext';
 import { charStyleOf, setCharStyle, useReaderCharStyle } from './readerCharStyle';
 import { resolveReadApi } from '../../utils/reader/readerChat';
 import { analyzeCharStyle } from '../../utils/reader/readerStyle';
 import { getCoReadStore, readApiSlots } from './coreadStore';
 import { charPrefsOf, useReaderCharPrefs } from './readerCharPrefs';
+import { getPromptEntries } from '../../utils/promptRegistry';
+import { presetNameOf, usePromptPresets } from './readerPromptPresets';
+import { PromptFold } from './tabs/ReaderSetPrompts';
 import RdHelp from './RdHelp';
 
 interface Props {
@@ -38,8 +41,20 @@ export default function ReaderCharStyleSheet({ charId, name, onClose, notify }: 
     const styleStore = useReaderCharStyle();
     const charPrefs = useReaderCharPrefs();
     const style = charStyleOf(styleStore, charId);
+    const preset = charPrefsOf(charPrefs, charId).promptPreset;
     const pen = charPrefsOf(charPrefs, charId).penColor;
+    const presetStore = usePromptPresets();
     const [busy, setBusy] = useState<null | 'both' | 'pref' | 'vibe'>(null);
+    /** 正在改哪条生成提示词（她 09-26：这块的提示词要能就地从这儿改） */
+    const [editing, setEditing] = useState<string | null>(null);
+    const [, setBump] = useState(0);
+
+    /** 改生成提示词的入口（跟设置页「读书提示词」是同一张折叠卡） */
+    const promptEditBtn = (label: string) => (
+        <button className="rd-btn rd-btn-soft rd-btn-block" onClick={() => setEditing(label)}>
+            <PencilSimple size={15} /> 改生成提示词
+        </button>
+    );
 
     const run = async (which: 'both' | 'pref' | 'vibe') => {
         if (!userProfile || !full) { notify('读不到角色设定'); return; }
@@ -66,6 +81,7 @@ export default function ReaderCharStyleSheet({ charId, name, onClose, notify }: 
     );
 
     return (
+        <>
         <div className="rd-sheet-mask" onClick={onClose}>
             <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
                 <div className="rd-sheet-grip" onClick={onClose} />
@@ -104,6 +120,7 @@ export default function ReaderCharStyleSheet({ charId, name, onClose, notify }: 
                         onClick={() => void run('vibe')}>
                         <ArrowsClockwise size={15} /> {busy === 'vibe' ? '正在重取…' : '重新分析气质'}
                     </button>
+                    {promptEditBtn('阅读风格·气质')}
                 </div>
 
                 {/* 阅读偏好（读书时不带的那一块） */}
@@ -119,6 +136,7 @@ export default function ReaderCharStyleSheet({ charId, name, onClose, notify }: 
                         onClick={() => void run('pref')}>
                         <ArrowsClockwise size={15} /> {busy === 'pref' ? '正在重跑…' : '重新分析偏好'}
                     </button>
+                    {promptEditBtn('阅读风格·偏好')}
                 </div>
 
                 <div className="rd-actions" style={{ marginTop: 'var(--rd-space-4)' }}>
@@ -129,5 +147,34 @@ export default function ReaderCharStyleSheet({ charId, name, onClose, notify }: 
                 </div>
             </div>
         </div>
+
+        {/* ── 改生成提示词（她 09-26：就在这一页给个入口）——跟设置页「读书提示词」
+               用的是同一张折叠卡，存到的是**这套提示词**里，用这一套的角色都跟着变 ── */}
+        {editing && (
+            <div className="rd-sheet-mask" style={{ zIndex: 70 }} onClick={() => setEditing(null)}>
+                <div className="rd-sheet" onClick={(e) => e.stopPropagation()}>
+                    <div className="rd-sheet-grip" onClick={() => setEditing(null)} />
+                    <div className="rd-sheet-title">改生成提示词</div>
+                    <div className="rd-muted" style={{ marginBottom: 'var(--rd-space-4)' }}>
+                        改的是「{presetNameOf(preset, presetStore)}」里的这一条，<br />
+                        用这一套的角色都会跟着变。
+                    </div>
+                    <PromptFold
+                        label={editing}
+                        desc={getPromptEntries().find((e) => e.label === editing)?.description ?? ''}
+                        users={characters
+                            .filter((c) => charPrefsOf(charPrefs, c.id).promptPreset === preset)
+                            .map((c) => c.name).join('、')}
+                        preset={preset}
+                        defaultOpen
+                        onSaved={() => setBump((n) => n + 1)}
+                    />
+                    <div className="rd-actions" style={{ marginTop: 'var(--rd-space-4)' }}>
+                        <button className="rd-btn rd-btn-primary rd-btn-block" onClick={() => setEditing(null)}>好了</button>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
     );
 }

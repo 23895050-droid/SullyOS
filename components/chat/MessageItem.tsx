@@ -1520,6 +1520,8 @@ const MessageItem = React.memo(({
     const [replyOffset, setReplyOffset] = useState(0);
     const [isReplyGestureActive, setIsReplyGestureActive] = useState(false);
     const [isReplyReady, setIsReplyReady] = useState(false);
+    /** 书房笔记转发卡：表面只放书名/作者/一句原文，点开才铺开批注和讨论（她 09-26） */
+    const [rdCardOpen, setRdCardOpen] = useState(false);
 
     const clearLongPressTimer = () => {
         if (!longPressTimer.current) return;
@@ -2169,11 +2171,26 @@ const MessageItem = React.memo(({
             );
         }
 
-        // 书房笔记转发卡片（reader_forward：原文那句 + 批注 + 讨论；纸色卡 + 留笔记那个人的笔色左缘条）
+        // 书房笔记转发卡片（reader_forward：纸色卡 + 留笔记那个人的笔色左缘条）
+        // 表面只放**书名 / 作者 / 一句原文 / 时间**，点开卡片才铺开批注和讨论——
+        // 给 AI 读的那份 content 是全量（书名/作者/正文/谁的批注/谁的回复/笔记形成的时间），
+        // 两条口径分开：**表面轻，读的深**（她 09-26）
         if (m.metadata?.source === 'reader_forward') {
-            const card = (m.metadata.forwardCard || {}) as { kind?: string; title?: string; subtitle?: string; quote?: string; note?: string; thread?: string[]; color?: string };
+            const card = (m.metadata.forwardCard || {}) as {
+                kind?: string; title?: string; author?: string; subtitle?: string; chapter?: string;
+                quote?: string; note?: string; by?: string; at?: string;
+                thread?: Array<string | { who?: string; text?: string; at?: string }>;
+                color?: string;
+            };
             const SERIF = "Georgia, 'Times New Roman', 'Songti SC', 'STKaiti', 'KaiTi', serif";
             const accent = card.color || '#a9946f';
+            // 讨论：新卡是「谁 / 什么时候 / 说了什么」，09-26 之前转出去的老卡是一行纯文字
+            const lines = (card.thread || []).map((l) => (
+                typeof l === 'string'
+                    ? { who: '', text: l, at: '' }
+                    : { who: l.who || '', text: l.text || '', at: l.at || '' }
+            ));
+            const when = card.at || card.subtitle || '';
             return (
                 <div className={`flex items-center w-full ${selectionMode ? 'pl-8' : ''} animate-fade-in relative transition-[padding] duration-300`}>
                     {selectionMode && (
@@ -2184,37 +2201,59 @@ const MessageItem = React.memo(({
                         </div>
                     )}
                     <div className="w-full px-4 my-3" {...interactionProps}>
-                        <div
-                            className="mx-auto w-72 rounded-2xl overflow-hidden shadow-md relative"
+                        <button
+                            type="button"
+                            onClick={() => setRdCardOpen((v) => !v)}
+                            className="mx-auto block w-72 text-left rounded-2xl overflow-hidden shadow-md relative"
                             style={{ border: '1.5px solid #e6dfd0', background: 'linear-gradient(180deg, #fdfcf8 0%, #f7f2e8 100%)' }}
                         >
                             <div className="absolute left-0 top-0 bottom-0 pointer-events-none" style={{ width: 3, background: accent }} />
-                            <div className="relative pl-4 pr-3 pt-2.5 pb-2 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(139,120,90,0.14)' }}>
-                                <span className="text-base">📖</span>
-                                <div className="flex-1 min-w-0">
-                                    <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: '#8a7a5e' }}>笔记 · {card.kind || '批注'}</div>
-                                    <div className="text-[11px] font-semibold truncate" style={{ color: '#4a4436', fontFamily: SERIF }}>{card.title || ''}</div>
+                            {/* 表面：书名 · 作者 · 时间 / 一句原文 */}
+                            <div className="relative pl-4 pr-3 pt-2.5 pb-2.5">
+                                <div className="flex items-baseline gap-1.5">
+                                    <span className="text-base leading-none">📖</span>
+                                    <span className="text-[11px] font-semibold truncate" style={{ color: '#4a4436', fontFamily: SERIF }}>{card.title || ''}</span>
+                                    {card.author ? <span className="text-[9px] shrink-0 truncate max-w-[30%]" style={{ color: '#b3a68f' }}>{card.author}</span> : null}
+                                    {when && <span className="ml-auto text-[9px] shrink-0" style={{ color: '#b3a68f' }}>{when}</span>}
                                 </div>
-                                {card.subtitle && <div className="text-[9px] shrink-0 max-w-[45%] truncate" style={{ color: '#b3a68f' }}>{card.subtitle}</div>}
-                            </div>
-                            <div className="relative pl-4 pr-3 py-2.5">
                                 {card.quote ? (
-                                    <div className="text-[11px] leading-relaxed" style={{ color: '#5c5648', fontFamily: SERIF }}>
+                                    <div className={`text-[11px] leading-relaxed mt-1.5 ${rdCardOpen ? '' : 'line-clamp-3'}`} style={{ color: '#5c5648', fontFamily: SERIF }}>
                                         <span style={{ color: accent }}>“</span>{card.quote}<span style={{ color: accent }}>”</span>
                                     </div>
                                 ) : null}
-                                {card.note ? (
-                                    <div className="text-[11px] leading-relaxed mt-2" style={{ color: '#3f3a30' }}>{card.note}</div>
-                                ) : null}
-                                {card.thread && card.thread.length > 0 ? (
-                                    <div className="mt-2 pt-2 flex flex-col gap-1" style={{ borderTop: '1px dashed rgba(139,120,90,0.28)' }}>
-                                        {card.thread.map((line, i) => (
-                                            <div key={i} className="text-[10px] leading-relaxed" style={{ color: '#7d7360' }}>{line}</div>
-                                        ))}
+                                {!rdCardOpen && (card.note || lines.length > 0) ? (
+                                    <div className="text-[9px] mt-1.5" style={{ color: '#b3a68f' }}>
+                                        点开看批注和讨论{lines.length > 0 ? `（${lines.length} 条）` : ''}
                                     </div>
                                 ) : null}
                             </div>
-                        </div>
+                            {/* 点开之后：批注（谁 · 什么时候）+ 全部讨论 */}
+                            {rdCardOpen && (card.note || lines.length > 0) ? (
+                                <div className="relative pl-4 pr-3 pb-2.5">
+                                    {card.note ? (
+                                        <div className="pt-2" style={{ borderTop: '1px dashed rgba(139,120,90,0.28)' }}>
+                                            {/* 时间已经在卡头那行了（那行就是笔记形成的时间），这儿只说谁写的 */}
+                                            <div className="text-[9px]" style={{ color: '#b3a68f' }}>
+                                                {card.by ? `${card.by} 的批注` : '批注'}
+                                            </div>
+                                            <div className="text-[11px] leading-relaxed mt-0.5" style={{ color: '#3f3a30' }}>{card.note}</div>
+                                        </div>
+                                    ) : null}
+                                    {lines.length > 0 ? (
+                                        <div className="mt-2 pt-2 flex flex-col gap-1.5" style={{ borderTop: '1px dashed rgba(139,120,90,0.28)' }}>
+                                            {lines.map((l, i) => (
+                                                <div key={i}>
+                                                    {[l.who, l.at].filter(Boolean).length > 0 ? (
+                                                        <div className="text-[9px]" style={{ color: '#b3a68f' }}>{[l.who, l.at].filter(Boolean).join(' · ')}</div>
+                                                    ) : null}
+                                                    <div className="text-[10px] leading-relaxed" style={{ color: '#7d7360' }}>{l.text}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
+                        </button>
                     </div>
                 </div>
             );

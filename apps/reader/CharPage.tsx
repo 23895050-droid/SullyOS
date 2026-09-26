@@ -46,8 +46,10 @@ import ImportMapSheet from './ImportMapSheet';
 import { canRetrySummary, retrySummaryFor } from './coreadRetry';
 import NoteForwardSheet from './NoteForwardSheet';
 import NoteFold from './NoteFold';
-import { chapterOf } from './tabs/ReaderNotes';
+import ShareCardSheet from './ShareCardSheet';
+import { chapterOf, chapterTitleOf, fmtStamp } from './tabs/ReaderNotes';
 import type { NoteForwardCard } from './readerForward';
+import { shareDayOf } from '../../utils/reader/shareCardDraw';
 import { charPrefsOf, setCharReadPrefs, setReadEnabled, useReaderCharPrefs } from './readerCharPrefs';
 import RdNumField from './RdNumField';
 import { presetNameOf, usePromptPresets } from './readerPromptPresets';
@@ -248,6 +250,8 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
     const [retrying, setRetrying] = useState(false);
     const [retryNote, setRetryNote] = useState('');
     const [forwarding, setForwarding] = useState<NoteRow | null>(null);
+    /** 正在做分享卡的那条笔记（存成图片） */
+    const [sharing, setSharing] = useState<NoteRow | null>(null);
     /** 书架那一栏：书架 / 读完 / 一起读的 */
     const [shelfTab, setShelfTab] = useState<ShelfTab>('all');
     /** 他自己的数据（导出/导入） */
@@ -440,6 +444,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                     </div>
                 ) : undefined}
                 dotColor={withDot ? highlightColorOf(prefs, n.ann.ownerId) : undefined}
+                onShare={() => setSharing(n)}
                 onForward={() => setForwarding(n)}
                 onOpenAt={onOpenAt ? () => onOpenAt(n.book.id, n.chapterIdx, n.ann.anchor.startPara) : undefined}
             />
@@ -462,12 +467,17 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
     const forwardOf = (n: NoteRow): NoteForwardCard => ({
         kind: '笔记',
         title: n.book.title,
-        subtitle: `${nameOf(n.ann.ownerId)} · 第 ${n.chapterIdx + 1} 章`,
+        author: n.book.customAuthor || n.book.author,
+        chapter: `第 ${n.chapterIdx + 1} 章`,
         quote: n.ann.anchor.text,
         note: n.ann.note,
-        thread: (n.thread?.messages ?? []).map((m) => (
-            `${m.role === 'user' ? nameOf('user') : (m.charId ? nameOf(m.charId) : '旁白')}：${m.content}`
-        )),
+        by: nameOf(n.ann.ownerId),
+        at: fmtStamp(n.ann.createdAt),
+        thread: (n.thread?.messages ?? []).map((m) => ({
+            who: m.role === 'user' ? nameOf('user') : (m.charId ? nameOf(m.charId) : '旁白'),
+            text: m.content,
+            at: fmtStamp(m.createdAt),
+        })),
         color: highlightColorOf(prefs, n.ann.ownerId),
     });
 
@@ -1051,6 +1061,19 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                     card={forwardOf(forwarding)}
                     onClose={() => setForwarding(null)}
                     notify={notify}
+                />
+            )}
+
+            {/* 把这条笔记做成分享卡存成图片 */}
+            {sharing && (
+                <ShareCardSheet
+                    book={sharing.book}
+                    quote={sharing.ann.anchor.text}
+                    note={sharing.ann.note}
+                    chapterTitle={chapterTitleOf(sharing.book, sharing.chapterIdx)}
+                    date={shareDayOf(sharing.ann.createdAt)}
+                    notify={notify}
+                    onClose={() => setSharing(null)}
                 />
             )}
 

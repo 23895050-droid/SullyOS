@@ -29,7 +29,12 @@ import type { RdBook } from '../../utils/reader/readerDb';
 
 interface Props {
     book: RdBook;
-    /** 要分享的那条划线 */
+    /**
+     * 'quote'（默认）= 分享一条书摘；'book' = **分享这本书本身**——
+     * 同一个壳子同一套模板，只是正文不套引号（那张卡上的话是书的简介，不是摘出来的句子）
+     */
+    variant?: 'quote' | 'book';
+    /** 要分享的那条划线（书卡上是简介那类正文） */
     quote: string;
     /** 挂在它上面的想法（有就画，画不画由「带想法」那个开关管） */
     note?: string;
@@ -41,7 +46,7 @@ interface Props {
 
 /** 落款默认用「书房」；她改过就一直用她改的（存在 store 里） */
 
-export default function ShareCardSheet({ book, quote, note, chapterTitle, date, notify, onClose }: Props) {
+export default function ShareCardSheet({ book, variant = 'quote', quote, note, chapterTitle, date, notify, onClose }: Props) {
     const store = useReaderShareStore();
     const [panel, setPanel] = useState(false);
     const [chrome, setChrome] = useState(true);
@@ -70,7 +75,9 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
         chapterTitle,
         note,
         date,
-    }), [quote, book.title, book.author, book.customAuthor, chapterTitle, note, date]);
+        // 书卡（分享这本书本身）的正文是简介，不套引号；书摘卡照旧套（见 ShareCardData.marks）
+        marks: variant !== 'book',
+    }), [quote, book.title, book.author, book.customAuthor, chapterTitle, note, date, variant]);
 
     // 底图：从 blobref 解出来的 URL 再包成 Image（canvas 只认这个）
     useEffect(() => {

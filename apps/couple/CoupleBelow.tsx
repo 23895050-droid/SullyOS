@@ -21,6 +21,7 @@ import { useBlobRefUrl } from '../../utils/blobRef';
 import { cityKey, currentCity, useWeatherStore } from './weatherStore';
 import { ensureFreshWeather } from './weatherApi';
 import { wmoIcon, wmoText, type WeatherIconKind } from '../../utils/weatherMath';
+import { listBooks, listProgressByBook, type RdBook, type RdProgress } from '../../utils/reader/readerDb';
 
 const DESIGN_W = 1290;
 const wPct = (n: number) => `${((n / DESIGN_W) * 100).toFixed(3)}%`;
@@ -124,22 +125,36 @@ const WeatherCard: React.FC<{ hp: Pct; onOpen: () => void }> = ({ hp, onOpen }) 
 };
 
 // ── 阅读区：左书卡 + 右侧深色双入口 ──
-const ReadingRow: React.FC<{ hp: Pct; onOpen: (r: string) => void }> = ({ hp, onOpen }) => (
+/** 书卡上那几样（她 09-26：这张卡换成真数据——原来写死《小王子》62%） */
+interface BookCardData {
+  title: string;
+  author: string;
+  intro: string;
+  percent: number;
+  coverRef?: string;
+}
+
+const ReadingRow: React.FC<{ hp: Pct; onOpen: (r: string) => void; data: BookCardData | null }> = ({ hp, onOpen, data }) => {
+  const coverUrl = useBlobRefUrl(data?.coverRef);
+  const pct = data ? Math.round(data.percent) : 0;
+  return (
   <>
     {/* 左：正在读的书 */}
     <div className="absolute" style={{ left: wPct(100), top: hp(500), width: wPct(560), height: hp(440), zIndex: 10, background: 'var(--cp-card, #fff)', borderRadius: cqw(36, 12), boxShadow: CARD_SHADOW }} />
     {/* 左栏：封面（固定尺寸，垂直居中） */}
     <div className="absolute overflow-hidden flex items-center justify-center pointer-events-none" style={{ left: wPct(136), top: hp(578), width: wPct(150), height: hp(220), zIndex: 11, background: 'linear-gradient(165deg, #b9c7e8 0%, #7e93c9 100%)', borderRadius: cqw(14, 7) }}>
-      <MoonStars weight="fill" style={{ width: '58%', height: '58%', color: 'rgba(255,255,255,0.9)' }} />
+      {coverUrl
+        ? <img src={coverUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : <MoonStars weight="fill" style={{ width: '58%', height: '58%', color: 'rgba(255,255,255,0.9)' }} />}
     </div>
     {/* 右栏：书名 / 作者 / 简介（与封面垂直居中对齐，字号递减；简介限制范围，手机端不溢出到进度行） */}
-    <Text hp={hp} x={320} y={600} w={304} h={48} size={22} min={12} color="var(--cp-text, #3a2a33)" weight={700}>《小王子》</Text>
-    <Text hp={hp} x={320} y={660} w={304} h={28} size={13} min={9} color="var(--cp-muted, #9a7a8a)">[法] 圣-埃克苏佩里</Text>
-    <Text hp={hp} x={320} y={698} w={304} h={96} size={12} min={8} color="var(--cp-muted, #8a6a7a)" lineHeight={1.6} style={{ alignItems: 'flex-start', overflow: 'hidden' }}>离开 B-612 星球去旅行，遇见狐狸的故事。</Text>
+    <Text hp={hp} x={320} y={600} w={304} h={48} size={22} min={12} color="var(--cp-text, #3a2a33)" weight={700}>{data ? `《${data.title}》` : '还没开始读'}</Text>
+    <Text hp={hp} x={320} y={660} w={304} h={28} size={13} min={9} color="var(--cp-muted, #9a7a8a)">{data ? data.author : ''}</Text>
+    <Text hp={hp} x={320} y={698} w={304} h={96} size={12} min={8} color="var(--cp-muted, #8a6a7a)" lineHeight={1.6} style={{ alignItems: 'flex-start', overflow: 'hidden' }}>{data ? (data.intro || '这本书还没写简介。') : '去书房挑一本，这里就显示你读到哪了。'}</Text>
     {/* 底部全宽进度行：阅读进度 | 进度条 | 百分比 */}
     <Text hp={hp} x={136} y={848} w={96} h={24} size={12} min={8} color="var(--cp-muted, #9a7a8a)">阅读进度</Text>
-    <Bar hp={hp} x={244} y={856} w={256} pct={62} h={8} />
-    <Text hp={hp} x={520} y={848} w={104} h={24} size={12} min={8} color="var(--cp-muted, #9a7a8a)" style={{ justifyContent: 'flex-end' }}>62%</Text>
+    <Bar hp={hp} x={244} y={856} w={256} pct={pct} h={8} />
+    <Text hp={hp} x={520} y={848} w={104} h={24} size={12} min={8} color="var(--cp-muted, #9a7a8a)" style={{ justifyContent: 'flex-end' }}>{data ? `${pct}%` : '—'}</Text>
     <Hotspot hp={hp} x={100} y={500} w={560} h={440} z={12} onTap={() => onOpen('c71')} />
     {/* 右：深色双入口卡（一张卡上下分区，下区略深形成堆叠感） */}
     <div className="absolute overflow-hidden" style={{ left: wPct(690), top: hp(500), width: wPct(500), height: hp(440), zIndex: 10, background: DARK_READING, borderRadius: cqw(36, 12), boxShadow: CARD_SHADOW }} />
@@ -160,7 +175,8 @@ const ReadingRow: React.FC<{ hp: Pct; onOpen: (r: string) => void }> = ({ hp, on
     <Hotspot hp={hp} x={690} y={500} w={500} h={220} z={13} onTap={() => onOpen('c7')} />
     <Hotspot hp={hp} x={690} y={720} w={500} h={220} z={13} onTap={() => onOpen('c72')} />
   </>
-);
+  );
+};
 
 // ── 饮食 + 经期组合卡（一张卡左右 2:1，细分隔线不割裂） ──
 // 2026-08-23 接真数据：摄入/还可以吃/三大宏量/四餐小计全部从 diet store 当天数据算，替换原 mock
@@ -405,6 +421,35 @@ const CoupleBelow: React.FC<{ onOpen: (route: string) => void }> = ({ onOpen }) 
   const [beauty] = React.useState(loadCoupleBeauty);
   const diaryStore = useDiaryStore();
   const togetherStore = useTogetherStore();
+  /** 书卡的真数据：她正在读的那本（书房的书和进度就在同一个库里） */
+  const [readingBook, setReadingBook] = useState<BookCardData | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const books = await listBooks();
+        const rows: Array<{ book: RdBook; prog: RdProgress }> = [];
+        for (const b of books) {
+          const mine = (await listProgressByBook(b.id))
+            .filter((p) => p.ownerId === 'user')
+            .sort((a, c) => c.updatedAt.localeCompare(a.updatedAt));
+          if (mine[0]) rows.push({ book: b, prog: mine[0] });
+        }
+        const recent = [...rows].sort((a, b) => b.prog.updatedAt.localeCompare(a.prog.updatedAt));
+        // 在读的优先（翻开过、还没读完）；都读完了或都没翻开过就退到最近动过的那本
+        const pick = recent.find((r) => r.prog.percent > 0 && r.prog.percent < 100) ?? recent[0];
+        if (!alive) return;
+        setReadingBook(pick ? {
+          title: pick.book.title,
+          author: pick.book.customAuthor || pick.book.author || '',
+          intro: (pick.book.intro || '').trim(),
+          percent: pick.prog.percent,
+          coverRef: pick.book.coverRef,
+        } : null);
+      } catch { /* 书房那边还没数据，就当书卡空着 */ }
+    })();
+    return () => { alive = false; };
+  }, []);
   const theme = buildTheme(beauty.accent);
   const themeVars = {
     ['--cs-accent' as string]: theme.accent,
@@ -461,7 +506,7 @@ const CoupleBelow: React.FC<{ onOpen: (route: string) => void }> = ({ onOpen }) 
       {/* 二屏：四行功能卡 */}
       <div className="relative" style={{ containerType: 'inline-size', aspectRatio: '1290 / 2220', ...CAP, ...themeVars }}>
         <WeatherCard hp={hp2} onOpen={() => onOpen('c6')} />
-        <ReadingRow hp={hp2} onOpen={onOpen} />
+        <ReadingRow hp={hp2} onOpen={onOpen} data={readingBook} />
         <DietPeriodCard hp={hp2} onOpen={onOpen} />
         <MoneyCard hp={hp2} onOpen={() => onOpen('c3')} />
         <DiaryCard hp={hp2} i={0} {...hisCard} onOpen={() => onOpen('c4')} />

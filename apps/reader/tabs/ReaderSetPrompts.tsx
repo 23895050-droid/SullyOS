@@ -26,15 +26,18 @@ interface Props {
     notify?: (msg: string) => void;
 }
 
-/** 一条提示词：收着是「名字 + 说明 + 谁在用」，点开才能改（改的是当前选中的那一套） */
-function PromptFold({ label, desc, users, preset, onSaved }: {
+/** 一条提示词：收着是「名字 + 说明 + 谁在用」，点开才能改（改的是当前选中的那一套）
+ *  ——**阅读风格那张弹卡也开它**（她 09-26：那页要有个改生成提示词的入口） */
+export function PromptFold({ label, desc, users, preset, onSaved, defaultOpen = false }: {
     label: string;
     desc: string;
     users: string;
     preset: string;
     onSaved: () => void;
+    /** 从「阅读风格」那张卡点进来时是奔着改来的，直接展开 */
+    defaultOpen?: boolean;
 }) {
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(defaultOpen);
     const [text, setText] = useState(() => promptForPreset(preset, label));
     const [saved, setSaved] = useState(false);
     const overridden = isPresetPromptOverridden(preset, label);

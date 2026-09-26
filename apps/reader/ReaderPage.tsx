@@ -310,6 +310,8 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const [discuss, setDiscuss] = useState<RdAnnotation | null>(null);
     /** 书摘分享卡（她 09-26）：工具条上点「分享书摘」时抓下来的那一条 */
     const [sharing, setSharing] = useState<{ quote: string; note?: string; at?: string } | null>(null);
+    /** 书卡（09-26 深夜二）：「更多」里那颗「分享」 = 分享这本书本身 */
+    const [bookShare, setBookShare] = useState(false);
 
     const disarmLongPress = useCallback(() => {
         if (longPressRef.current) window.clearTimeout(longPressRef.current.timer);
@@ -787,6 +789,16 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const percent = book ? bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount) : 0;
 
     /**
+     * 书卡上那两行（她 09-26 深夜二：分享这本书本身）。
+     * 正文优先用简介；没写简介的书就写读到哪了——总比一张只有书名的空卡强。
+     */
+    const cardProgressLine = book
+        ? (percent >= 99 ? '已读完' : percent > 0 ? `已读 ${Math.round(percent)}%` : '还没开始读')
+        : '';
+    const bookCardBody = (book?.intro || '').trim() || cardProgressLine;
+    const bookCardLine = (book?.intro || '').trim() ? cardProgressLine : '';
+
+    /**
      * 段落色条：这一段里有人标注/讨论过，左侧就挂一条色柱。
      * 颜色按参与时间从上往下排；**≥3 人整条墨色**（她 09-15 定的）。
      * 一个 gradient 硬分段搞定——不在 `.rd-para` 里加任何节点（加了分页就炸）。
@@ -1151,7 +1163,7 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         { key: 'read', label: '听书', on: false, run: () => notify('听书还没做，先欠着') },
         { key: 'auto', label: '自动翻页', on: false, run: () => notify('自动翻页还没做，先欠着') },
         { key: 'stat', label: '统计', on: true, run: () => { setSheet(null); onOpenStats(); } },
-        { key: 'share', label: '分享', on: false, run: () => notify('转发卡片在第三批，先欠着') },
+        { key: 'share', label: '分享', on: true, run: () => { setSheet(null); setBookShare(true); } },
         { key: 'detail', label: '书本详情', on: true, run: () => { setSheet(null); onOpenDetails(bookId); } },
         { key: 'hl', label: '划线设置', on: true, run: () => setSheet('hl') },
         { key: 'style', label: '排版设置', on: true, run: () => { setSheet(null); setPanel('style'); } },
@@ -1741,6 +1753,20 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                     date={shareDayOf(sharing.at)}
                     notify={notify}
                     onClose={() => setSharing(null)}
+                />
+            )}
+
+            {/* ── 书卡（「更多」里的「分享」= 分享这本书本身）：正文放简介，
+                   没有简介就放读到哪了；同一个壳子同一套模板，只是不套引号 ── */}
+            {bookShare && book && (
+                <ShareCardSheet
+                    variant="book"
+                    book={book}
+                    quote={bookCardBody}
+                    chapterTitle=""
+                    date={bookCardLine}
+                    notify={notify}
+                    onClose={() => setBookShare(false)}
                 />
             )}
 
