@@ -98,8 +98,12 @@ export const RD_SHARE_BGS: RdShareBg[] = [
     { id: 'ink', label: '墨', fill: 'rgb(22, 24, 28)' },
 ];
 
-export const shareBgById = (id: string): RdShareBg =>
-    RD_SHARE_BGS.find((b) => b.id === id) ?? RD_SHARE_BGS[0];
+export const shareBgById = (id: string): RdShareBg => {
+    // 内置底图会盖满整张画布，这个 fill 只是个「图还没到时」的兜底
+    const b = builtinBgOf(id);
+    if (b) return { id: b.id, label: b.label, fill: 'rgb(255, 255, 255)' };
+    return RD_SHARE_BGS.find((x) => x.id === id) ?? RD_SHARE_BGS[0];
+};
 
 /** 纸卡顶上那颗圆的颜色（她给的五张：粉 / 紫 / 草绿 / 蓝 + 一个中性灰） */
 export const RD_SHARE_DOTS: string[] = [
@@ -132,5 +136,66 @@ export const RD_SHARE_FONTS: RdShareFont[] = [
     { id: 'custom', label: '我传的', stack: RD_SHARE_CUSTOM_FONT },
 ];
 
-export const shareFontById = (id: string): RdShareFont =>
-    RD_SHARE_FONTS.find((f) => f.id === id) ?? RD_SHARE_FONTS[0];
+// ── 她 2026-09-26 给的素材（打包在 public/ 里，选到哪个才下哪个）────────────
+//
+// 字体：6 个 ttf 转成 woff2（23MB → 9.9MB），**按需加载**——不选它就不会下载。
+// 底图：15 张（压到 1200px / q80，共 3.8MB）；面板里只加载缩略图（24KB 一共），
+// 真正选中了才下大图。所以「打开面板」这件事本身只花 24KB。
+
+const BASE = (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL || '/';
+
+export interface RdBuiltinFont { id: string; label: string; file: string }
+export interface RdBuiltinBg { id: string; label: string; file: string }
+
+/** 内置字体的 id 前缀（自定义上传的那个走 'custom'，不在这儿） */
+export const BUILTIN_FONT_PREFIX = 'bf:';
+export const BUILTIN_BG_PREFIX = 'bi:';
+
+export const RD_SHARE_BUILTIN_FONTS: RdBuiltinFont[] = [
+    { id: 'bf:hug', label: '人类需要拥抱', file: 'hug' },
+    { id: 'bf:kitten', label: '奶萌小小喵', file: 'kitten' },
+    { id: 'bf:maiden', label: '忧郁少女理论文学', file: 'maiden' },
+    { id: 'bf:cheese', label: '日系可爱奶酪体', file: 'cheese' },
+    { id: 'bf:drown', label: '溺水痕迹', file: 'drown' },
+    { id: 'bf:letter', label: '见字如面', file: 'letter' },
+];
+
+export const RD_SHARE_BUILTIN_BGS: RdBuiltinBg[] = [
+    { id: 'bi:paper', label: '纸张', file: 'paper' },
+    { id: 'bi:paper2', label: '纸张2', file: 'paper2' },
+    { id: 'bi:pink', label: '浅粉纹理', file: 'pink' },
+    { id: 'bi:bluetex', label: '浅蓝纹理', file: 'bluetex' },
+    { id: 'bi:bluewash', label: '浅蓝水彩', file: 'bluewash' },
+    { id: 'bi:water', label: '水', file: 'water' },
+    { id: 'bi:lemon', label: '柠檬水', file: 'lemon' },
+    { id: 'bi:green', label: '草绿', file: 'green' },
+    { id: 'bi:monet', label: '莫奈', file: 'monet' },
+    { id: 'bi:orange', label: '橘色水彩', file: 'orange' },
+    { id: 'bi:oil', label: '油画', file: 'oil' },
+    { id: 'bi:mono', label: '黑白渐变', file: 'mono' },
+    { id: 'bi:butterfly', label: '蝴蝶', file: 'butterfly' },
+    { id: 'bi:bear', label: '熊', file: 'bear' },
+    { id: 'bi:hand', label: '手', file: 'hand' },
+];
+
+/** canvas 里用的族名（内置字体各自一个，注册时机见 ShareCardSheet） */
+export const builtinFontFamily = (file: string): string => `RDShareF_${file}`;
+
+export const builtinFontOf = (id: string): RdBuiltinFont | undefined =>
+    RD_SHARE_BUILTIN_FONTS.find((f) => f.id === id);
+
+export const builtinBgOf = (id: string): RdBuiltinBg | undefined =>
+    RD_SHARE_BUILTIN_BGS.find((b) => b.id === id);
+
+/** 内置字体的 woff2 地址（`new FontFace` 时才真正去下） */
+export const builtinFontUrl = (file: string): string => `${BASE}sharefonts/${file}.woff2`;
+
+/** 内置底图：面板里的小图 / 选中后用的大图 */
+export const builtinBgThumbUrl = (file: string): string => `${BASE}sharebg/t/${file}.jpg`;
+export const builtinBgUrl = (file: string): string => `${BASE}sharebg/${file}.jpg`;
+
+export const shareFontById = (id: string): RdShareFont => {
+    const b = builtinFontOf(id);
+    if (b) return { id: b.id, label: b.label, stack: `"${builtinFontFamily(b.file)}", "Songti SC", serif` };
+    return RD_SHARE_FONTS.find((f) => f.id === id) ?? RD_SHARE_FONTS[0];
+};

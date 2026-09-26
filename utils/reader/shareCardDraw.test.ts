@@ -9,7 +9,10 @@ import {
     DEFAULT_SHARE_STYLE, SHARE_W, layoutShareCard, shareDayOf, wrapText,
     type ShareCardData, type ShareMetrics,
 } from './shareCardDraw';
-import { RD_SHARE_THEMES } from '../../apps/reader/readerShareThemes';
+import {
+    RD_SHARE_BUILTIN_BGS, RD_SHARE_BUILTIN_FONTS, RD_SHARE_BGS, RD_SHARE_FONTS, RD_SHARE_THEMES,
+    builtinBgOf, builtinFontFamily, shareBgById, shareFontById,
+} from '../../apps/reader/readerShareThemes';
 
 /** 假装每个汉字都占一个字号那么宽（和真实中文排版很接近，够验折行了） */
 const metrics: ShareMetrics = {
@@ -62,6 +65,32 @@ describe('wrapText · 折行', () => {
     it('宽度给 0 / 空文本 → 空数组（不炸）', () => {
         expect(wrapText('随便', 0, (s) => [...s].length)).toEqual([]);
         expect(wrapText('', 100, (s) => [...s].length)).toEqual(['']);
+    });
+});
+
+describe('内置素材（她 09-26 给的那批）', () => {
+    it('内置字体认得出，族名对得上注册时那个', () => {
+        expect(shareFontById('bf:hug').stack).toContain(builtinFontFamily('hug'));
+        expect(shareFontById('bf:letter').label).toBe('见字如面');
+    });
+
+    it('不认识的 id 老老实实回落，不炸', () => {
+        expect(shareFontById('bf:nope').id).toBe(RD_SHARE_FONTS[0].id);
+        expect(builtinBgOf('bi:nope')).toBeUndefined();
+        expect(shareBgById('bi:nope').id).toBe(RD_SHARE_BGS[0].id);
+    });
+
+    it('内置底图铺满整张画布 → 底色退回主题自己的（图没到的时候才看得见）', () => {
+        const lay = layoutShareCard(data, { ...DEFAULT_SHARE_STYLE, themeId: 'plain', bgId: 'bi:paper' }, metrics);
+        expect(lay.canvasFill).toBe(RD_SHARE_THEMES.find((t) => t.id === 'plain')!.canvas);
+    });
+
+    it('每个内置素材的 id 和文件名都不重样（重了就会串图）', () => {
+        const files = RD_SHARE_BUILTIN_BGS.map((b) => b.file);
+        const ids = RD_SHARE_BUILTIN_BGS.map((b) => b.id);
+        expect(new Set(files).size).toBe(files.length);
+        expect(new Set(ids).size).toBe(ids.length);
+        expect(new Set(RD_SHARE_BUILTIN_FONTS.map((f) => f.id)).size).toBe(RD_SHARE_BUILTIN_FONTS.length);
     });
 });
 

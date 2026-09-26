@@ -18,7 +18,10 @@ import {
     drawShareCard, layoutShareCard, type ShareCardData, type ShareMetrics,
 } from '../../utils/reader/shareCardDraw';
 import {
-    RD_SHARE_BGS, RD_SHARE_CUSTOM_FONT, RD_SHARE_DOTS, RD_SHARE_FONTS, RD_SHARE_THEMES, shareFontById,
+    RD_SHARE_BGS, RD_SHARE_BUILTIN_BGS, RD_SHARE_BUILTIN_FONTS, RD_SHARE_CUSTOM_FONT, RD_SHARE_DOTS,
+    RD_SHARE_FONTS, RD_SHARE_THEMES,
+    builtinBgOf, builtinBgThumbUrl, builtinBgUrl, builtinFontFamily, builtinFontOf, builtinFontUrl,
+    shareFontById,
 } from './readerShareThemes';
 import { setShareBgRef, setShareFontRef, setShareStyle, useReaderShareStore } from './readerShareStore';
 import type { RdBook } from '../../utils/reader/readerDb';
@@ -44,15 +47,18 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
     const [busy, setBusy] = useState(false);
     const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
     const [fontsReady, setFontsReady] = useState(false);
-    /** 自己传的那套 ttf 装好了没（装好之前量出来的字宽是错的，得等它） */
-    const [customReady, setCustomReady] = useState(false);
+    /** 选中的那套字体装好了没（装好之前量出来的字宽是错的，得等它） */
+    const [fontReady, setFontReady] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const faceRef = useRef<FontFace | null>(null);
-    const bgUrl = useBlobRefUrl(store.bgRef || undefined);
+    /** 已经注册进 document 的字体（族名 → FontFace）：同一个不用重复下、重复注册 */
+    const facesRef = useRef<Map<string, FontFace>>(new Map());
     // 传过字体才摆「我传的」那一档；没传的时候选了它等于没字体，回落宋体
     const style = store.fontRef || store.style.fontId !== 'custom'
         ? store.style
         : { ...store.style, fontId: 'song' };
+    const builtinBg = builtinBgOf(style.bgId);
+    const uploadedUrl = useBlobRefUrl(store.bgRef || undefined);
+    const bgUrl = builtinBg ? builtinBgUrl(builtinBg.file) : uploadedUrl;
 
     const data: ShareCardData = useMemo(() => ({
         quote,
@@ -74,31 +80,52 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
         return () => { alive = false; };
     }, [bgUrl]);
 
-    // 她自己传的 ttf：读出来注册成字体（和日记那个自定义字体一个套路）
+    /**
+     * 把选中的那套字体装进文档——**只装选中的这一套**。
+     * 内置的 6 个是 woff2 打包在 `public/sharefonts/`，这一行才真正去下（不选不下）；
+     * 自己传的从 blob 池读。装好之前量出来的字宽是错的，折行会跑，所以要等它。
+     */
     useEffect(() => {
         let alive = true;
-        const ref = store.fontRef;
-        const drop = () => {
-            if (faceRef.current) { try { document.fonts.delete(faceRef.current); } catch { /* 已经没了 */ } faceRef.current = null; }
-        };
-        if (!ref) { drop(); setCustomReady(false); return drop; }
+        setFontReady(false);
+        const builtin = builtinFontOf(style.fontId);
+        const family = builtin
+            ? builtinFontFamily(builtin.file)
+            : (style.fontId === 'custom' ? RD_SHARE_CUSTOM_FONT : '');
+        if (!family) { setFontReady(true); return; }              // 系统字体，本来就绪
+        if (facesRef.current.has(family)) { setFontReady(true); return; }
         void (async () => {
             try {
-                const blob = await getBlobForRef(ref);
-                if (!blob || !alive) return;
-                const face = new FontFace(RD_SHARE_CUSTOM_FONT, await blob.arrayBuffer());
+                let buf: ArrayBuffer | null = null;
+                if (builtin) {
+                    const res = await fetch(builtinFontUrl(builtin.file));
+                    buf = res.ok ? await res.arrayBuffer() : null;
+                } else if (store.fontRef) {
+                    const blob = await getBlobForRef(store.fontRef);
+                    buf = blob ? await blob.arrayBuffer() : null;
+                }
+                if (!buf) throw new Error('拿不到这个字体');
+                const face = new FontFace(family, buf);
                 await face.load();
                 if (!alive) return;
-                drop();
                 document.fonts.add(face);
-                faceRef.current = face;
-                setCustomReady(true);
+                facesRef.current.set(family, face);
+                setFontReady(true);
             } catch {
-                if (alive) setCustomReady(false);   // 这个文件当字体用不了
+                // 下不动就当没有：按兜底字体画，别把整张卡卡死
+                if (alive) setFontReady(true);
             }
         })();
-        return () => { alive = false; drop(); };
-    }, [store.fontRef]);
+        return () => { alive = false; };
+    }, [style.fontId, store.fontRef]);
+
+    // 走的时候把注册过的字体摘掉（不然它们会一直挂在 document.fonts 上）
+    useEffect(() => () => {
+        for (const face of facesRef.current.values()) {
+            try { document.fonts.delete(face); } catch { /* 已经没了 */ }
+        }
+        facesRef.current.clear();
+    }, []);
 
     // 字体要先落地再量字宽，不然第一帧量的是兜底字体、折行位置是错的
     useEffect(() => {
@@ -108,7 +135,7 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
             (size) => document.fonts.load(`${size}px ${stack}`).catch(() => undefined),
         )).catch(() => undefined).finally(() => { if (alive) setFontsReady(true); });
         return () => { alive = false; };
-    }, [style.fontId, customReady]);
+    }, [style.fontId, fontReady]);
 
     /** 画一版；返回排好的版面（保存时不用重算） */
     const paint = useCallback((): void => {
@@ -126,8 +153,8 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
         drawShareCard(ctx, lay, bgImg);
     }, [data, style, bgImg]);
 
-    // 系统字体和「自己传的那套」都就位了才画（不然量出来的字宽是错的，折行会跑）
-    const ready = fontsReady && (style.fontId !== 'custom' || customReady);
+    // 系统字体和选中的那套都就位了才画（不然量出来的字宽是错的，折行会跑）
+    const ready = fontsReady && fontReady;
     useEffect(() => { if (ready) paint(); }, [ready, paint]);
 
     const save = async () => {
@@ -186,6 +213,13 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
         try {
             setShareFontRef(await putImageBlob(file));
             setShareStyle({ fontId: 'custom' });
+            // 上一份自己传的已经换了，把注册过的那个摘掉，不然新字体会被老的压住
+            const old = facesRef.current.get(RD_SHARE_CUSTOM_FONT);
+            if (old) {
+                try { document.fonts.delete(old); } catch { /* 已经没了 */ }
+                facesRef.current.delete(RD_SHARE_CUSTOM_FONT);
+            }
+            setFontReady(false);
             notify('字体换好了');
         } catch {
             notify('这个字体文件用不了');
@@ -194,7 +228,12 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
 
     const theme = RD_SHARE_THEMES.find((t) => t.id === style.themeId) ?? RD_SHARE_THEMES[0];
     const dotty = theme.layout === 'circle';
-    const fontChoices = RD_SHARE_FONTS.filter((f) => f.id !== 'custom' || !!store.fontRef);
+    // 系统三档 → 她给的六个 → 自己传的（没传过就不摆这一档）
+    const fontChoices = [
+        ...RD_SHARE_FONTS.filter((f) => f.id !== 'custom'),
+        ...RD_SHARE_BUILTIN_FONTS,
+        ...RD_SHARE_FONTS.filter((f) => f.id === 'custom' && !!store.fontRef),
+    ];
 
     // 点卡片外面关掉它——**要拦住冒泡**：这张卡是从讨论面板里拉起来的，
     // 不拦的话关卡片会顺手把底下那张讨论面板也关掉
@@ -254,7 +293,7 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
                             </div>
                         </div>
                         <div className="rd-share-row">
-                            <div className="rd-share-label">背景</div>
+                            <div className="rd-share-label">背景色</div>
                             <div className="rd-share-dots">
                                 {/* 「底色」= 不铺色，用这张主题自己的底色（每个主题都配好了） */}
                                 <button
@@ -271,7 +310,31 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
                                         onClick={() => setShareStyle({ bgId: b.id })}
                                     />
                                 ))}
-                                <label className="rd-share-dot rd-share-dot-up" aria-label="上传底图">
+                            </div>
+                        </div>
+                        {/* 底图（她 09-26 给的那批）：垫在卡片下面，字在卡上还是清楚的。
+                            这儿只加载缩略图（一共 24KB），真正选中了才去下大图。 */}
+                        <div className="rd-share-row">
+                            <div className="rd-share-label">底图</div>
+                            <div className="rd-share-dots">
+                                {RD_SHARE_BUILTIN_BGS.map((b) => (
+                                    <button
+                                        key={b.id}
+                                        className={`rd-share-dot${b.id === style.bgId ? ' rd-share-dot-on' : ''}`}
+                                        style={{ backgroundImage: `url(${builtinBgThumbUrl(b.file)})` }}
+                                        aria-label={b.label}
+                                        onClick={() => setShareStyle({ bgId: b.id })}
+                                    />
+                                ))}
+                                {store.bgRef ? (
+                                    <button
+                                        className={`rd-share-dot${style.bgId === 'image' ? ' rd-share-dot-on' : ''}`}
+                                        style={uploadedUrl ? { backgroundImage: `url(${uploadedUrl})` } : undefined}
+                                        aria-label="用自己传的底图"
+                                        onClick={() => setShareStyle({ bgId: 'image' })}
+                                    />
+                                ) : null}
+                                <label className="rd-share-dot rd-share-dot-up" aria-label="传自己的底图">
                                     <UploadSimple size={16} />
                                     <input
                                         type="file"
@@ -280,14 +343,6 @@ export default function ShareCardSheet({ book, quote, note, chapterTitle, date, 
                                         onChange={(e) => { void pickBg(e.target.files?.[0]); e.target.value = ''; }}
                                     />
                                 </label>
-                                {store.bgRef ? (
-                                    <button
-                                        className={`rd-share-dot rd-share-dot-img${style.bgId === 'image' ? ' rd-share-dot-on' : ''}`}
-                                        style={bgUrl ? { backgroundImage: `url(${bgUrl})` } : undefined}
-                                        aria-label="用上传的底图"
-                                        onClick={() => setShareStyle({ bgId: 'image' })}
-                                    />
-                                ) : null}
                             </div>
                         </div>
                         {dotty && (

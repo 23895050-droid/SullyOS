@@ -205,10 +205,11 @@ const originOf = (d: ShareCardData): string =>
 export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: ShareMetrics): ShareLayout {
     const theme: RdShareTheme = shareThemeById(style.themeId);
     const stack = shareFontById(style.fontId).stack;
-    // 'none' = 用这张主题自己的底色；'image' = 用上传的底图（它不在色板里，shareBgById 会
-    // 回落成白——反正图盖满整张画布，那是兜底）。
+    // 'none' = 用这张主题自己的底色；'image' = 上传的那张；'bi:xxx' = 打包进来的那张。
+    // 后两种都会盖满整张画布，底色只是「图还没到时」的兜底。
     const bg = shareBgById(style.bgId);
-    const themeFill = style.bgId === 'none' || style.bgId === 'image' ? theme.canvas : bg.fill;
+    const useThemeCanvas = style.bgId === 'none' || style.bgId === 'image' || style.bgId.startsWith('bi:');
+    const themeFill = useThemeCanvas ? theme.canvas : bg.fill;
     const note = style.withNote ? String(data.note ?? '').trim() : '';
     const sign = String(style.sign ?? '').trim();
     const common = { blocks: [] as ShareTextBlock[], x: 0, w: 0, y: 0 };
@@ -293,8 +294,10 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
             height: outPen.y + 104,
             card: {
                 x: CX, y: TOP, w: cardW, h: cardH, radius: 10,
-                fill: 'rgba(255, 255, 255, 0.62)',
-                tint: withAlpha(style.dot || theme.accent, 0.16),
+                // 0.78 而不是更透：底图可能是花里胡哨的，卡太透字就糊了
+                // （她 09-26：「花里胡哨的垫在下面，不然会看不清字」）
+                fill: 'rgba(255, 255, 255, 0.78)',
+                tint: withAlpha(style.dot || theme.accent, 0.14),
                 stroke: theme.border,
             },
             circle: { cx: SHARE_W / 2, cy: TOP, r: R, fill: style.dot || theme.accent },
