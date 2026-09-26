@@ -27,12 +27,6 @@ export interface ShareCardData {
     noteWho?: string;
     /** '2026.09.26' */
     date: string;
-    /**
-     * 正文要不要套引号（默认套，就是「书摘」那张卡）。
-     * **书卡（分享这本书本身）传 false**：那张卡上的正文是书的简介，不是摘出来的句子，
-     * 套上引号就成了「这本书引用了一句话」，意思变了。
-     */
-    marks?: boolean;
 }
 
 export interface ShareCardStyle {
@@ -271,8 +265,6 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
         if (style.cardAlpha !== undefined) return withAlpha(base, style.cardAlpha / 100);
         return base;
     };
-    /** 正文那一块要不要套引号（书卡不套，见 ShareCardData.marks） */
-    const quoted = (t: string) => (data.marks === false ? t : `“${t}”`);
     const note = style.withNote ? String(data.note ?? '').trim() : '';
     const sign = String(style.sign ?? '').trim();
     const common = { blocks: [] as ShareTextBlock[], x: 0, w: 0, y: 0 };
@@ -291,16 +283,7 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
             w: SHARE_W - 2 * M - PAD * 2 - BAR - BAR_GAP,
             y: M + PAD,
         };
-        // 书卡（marks === false）讲的**是书本身**，书名得写在正文上面
-        // （另外两种版式本来就带书名：circle 有《书名》小标题、sheet 有大字书名）
-        if (data.marks === false) {
-            put(pen, { text: `《${data.bookTitle}》`, size: 38, lineHeight: 56, stack, color: ink }, m);
-            if (data.author) {
-                put(pen, { text: data.author, size: 28, lineHeight: 44, stack, color: inkSoft, gapBefore: 12 }, m);
-            }
-            pen.y += 28;
-        }
-        const quote = put(pen, { text: quoted(data.quote), size: 46, lineHeight: 78, stack, color: ink }, m);
+        const quote = put(pen, { text: `“${data.quote}”`, size: 46, lineHeight: 78, stack, color: ink }, m);
         const noteBlock = put(pen, {
             text: note, size: 34, lineHeight: 58, stack, color: inkSoft, gapBefore: note ? 56 : 0,
         }, m);
@@ -417,7 +400,7 @@ export function layoutShareCard(data: ShareCardData, style: ShareCardStyle, m: S
     // ── 夜读：满版深色卡 + 原文 + 出处 ──
     const M = 100;
     const pen: Pen = { blocks: common.blocks, x: M, w: SHARE_W - M * 2, y: 0 };
-    put(pen, { text: quoted(data.quote), size: 50, lineHeight: 86, stack, color: ink, gapBefore: 108 }, m);
+    put(pen, { text: `“${data.quote}”`, size: 50, lineHeight: 86, stack, color: ink, gapBefore: 108 }, m);
     if (note) put(pen, { text: `◇ ${note}`, size: 34, lineHeight: 58, stack, color: inkSoft, gapBefore: 56 }, m);
     put(pen, {
         text: `/ ${originOf(data)}`, size: 30, lineHeight: 44, stack, color: inkSoft, gapBefore: 64,

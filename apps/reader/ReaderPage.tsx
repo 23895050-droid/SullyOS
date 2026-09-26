@@ -47,7 +47,8 @@ import { useCoReadStore } from './coreadStore';
 import { useOS } from '../../context/OSContext';
 import TokenImg from '../../components/os/TokenImg';
 import { hexTriple, READER_SKINS } from './readerSkinPresets';
-import { useBlobRefUrl } from '../../utils/blobRef';
+import { getBlobForRef, useBlobRefUrl } from '../../utils/blobRef';
+import { shareOrDownloadBlob } from '../../utils/shareExport';
 import { recordReading } from '../../utils/reader/readerStats';
 import { copyToClipboard } from '../../utils/clipboard';
 
@@ -310,8 +311,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const [discuss, setDiscuss] = useState<RdAnnotation | null>(null);
     /** 书摘分享卡（她 09-26）：工具条上点「分享书摘」时抓下来的那一条 */
     const [sharing, setSharing] = useState<{ quote: string; note?: string; at?: string } | null>(null);
-    /** 书卡（09-26 深夜二）：「更多」里那颗「分享」 = 分享这本书本身 */
-    const [bookShare, setBookShare] = useState(false);
 
     const disarmLongPress = useCallback(() => {
         if (longPressRef.current) window.clearTimeout(longPressRef.current.timer);
@@ -789,16 +788,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
     const percent = book ? bookPercent(chapterIdx, pageIdx, pageCount, book.chapterCount) : 0;
 
     /**
-     * 书卡上那两行（她 09-26 深夜二：分享这本书本身）。
-     * 正文优先用简介；没写简介的书就写读到哪了——总比一张只有书名的空卡强。
-     */
-    const cardProgressLine = book
-        ? (percent >= 99 ? '已读完' : percent > 0 ? `已读 ${Math.round(percent)}%` : '还没开始读')
-        : '';
-    const bookCardBody = (book?.intro || '').trim() || cardProgressLine;
-    const bookCardLine = (book?.intro || '').trim() ? cardProgressLine : '';
-
-    /**
      * 段落色条：这一段里有人标注/讨论过，左侧就挂一条色柱。
      * 颜色按参与时间从上往下排；**≥3 人整条墨色**（她 09-15 定的）。
      * 一个 gradient 硬分段搞定——不在 `.rd-para` 里加任何节点（加了分页就炸）。
@@ -1159,16 +1148,37 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
         .filter((a) => a.kind === 'bookmark')
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [anns]);
 
+    /**
+     * 「更多 → 分享」= 把这本书的**原文件**分享出去（她 09-26 深夜三：分享的是书的文件）。
+     * 导入时那个 epub / txt 一直躺在本地库里（书行上的 fileRef），原封不动递出去，
+     * 手机上是系统分享面板（能发给别人、也能存到文件），桌面是下载。
+     */
+    const shareBookFile = async () => {
+        setSheet(null);
+        if (!book) return;
+        try {
+            const blob = await getBlobForRef(book.fileRef);
+            if (!blob) { notify('这本书的原文件找不到了'); return; }
+            const name = book.sourceFileName?.trim()
+                || `${book.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)}.${book.format === 'epub' ? 'epub' : 'txt'}`;
+            const r = await shareOrDownloadBlob({ blob, fileName: name, shareTitle: book.title });
+            notify(r === 'shared' ? '分享出去了' : r === 'downloaded' ? '存到本地了' : '先不分享了');
+        } catch (err) {
+            notify(`没分享成：${err instanceof Error ? err.message : '未知错误'}`);
+        }
+    };
+
     const moreItems: Array<{ key: string; label: string; on: boolean; run: () => void }> = useMemo(() => [
         { key: 'read', label: '听书', on: false, run: () => notify('听书还没做，先欠着') },
         { key: 'auto', label: '自动翻页', on: false, run: () => notify('自动翻页还没做，先欠着') },
         { key: 'stat', label: '统计', on: true, run: () => { setSheet(null); onOpenStats(); } },
-        { key: 'share', label: '分享', on: true, run: () => { setSheet(null); setBookShare(true); } },
+        { key: 'share', label: '分享', on: true, run: () => void shareBookFile() },
         { key: 'detail', label: '书本详情', on: true, run: () => { setSheet(null); onOpenDetails(bookId); } },
         { key: 'hl', label: '划线设置', on: true, run: () => setSheet('hl') },
         { key: 'style', label: '排版设置', on: true, run: () => { setSheet(null); setPanel('style'); } },
         { key: 'theme', label: '背景主题', on: true, run: () => { setSheet(null); setPanel('theme'); } },
-    ], [notify, onOpenDetails, onOpenStats, bookId]);
+        // book 进依赖：分享那颗要拿它的 fileRef，书是后加载进来的，不进依赖会一直拿到 null
+    ], [notify, onOpenDetails, onOpenStats, bookId, book]);
 
     if (error) {
         return (
@@ -1756,19 +1766,6 @@ export default function ReaderPage({ bookId, notify, onOpenDetails, onOpenStats,
                 />
             )}
 
-            {/* ── 书卡（「更多」里的「分享」= 分享这本书本身）：正文放简介，
-                   没有简介就放读到哪了；同一个壳子同一套模板，只是不套引号 ── */}
-            {bookShare && book && (
-                <ShareCardSheet
-                    variant="book"
-                    book={book}
-                    quote={bookCardBody}
-                    chapterTitle=""
-                    date={bookCardLine}
-                    notify={notify}
-                    onClose={() => setBookShare(false)}
-                />
-            )}
 
             {/* ── 一起读书（共读会话；右上角那枚图标拉起来的） ── */}
             {sheet === 'coread' && book && chapter && pageRange && (
