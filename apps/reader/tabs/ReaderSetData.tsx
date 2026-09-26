@@ -59,7 +59,7 @@ export default function ReaderSetData({ onBack, notify }: Props) {
         try {
             const bundle = await buildReaderExport({ scope, owners, ownerNames: nameMap });
             const who = owners.length === 0 ? '' : characters.filter((c) => owners.includes(c.id)).map((c) => c.name).join('+');
-            const name = downloadReaderBundle(bundle, who || undefined);
+            const name = await downloadReaderBundle(bundle, who || undefined);
             notify(`导出好了：${name}`);
         } catch (e) {
             notify(`导出没成：${e instanceof Error ? e.message : '未知错误'}`);

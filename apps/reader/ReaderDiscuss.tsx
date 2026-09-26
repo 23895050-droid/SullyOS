@@ -7,11 +7,13 @@
 //
 // ⚡ 触发**只在共读态**有（她 09-15 定的）：先发言、话先落库，点 ⚡ 才叫他回——
 // 一句话想拆开发也来得及。非共读没有即时触发，要在聊天里跟他说。
+// **多人共读**时一下把在场的人按加入顺序挨个叫一遍（她 09-26：照群聊轮询那套——
+// 一人一次调用、各走各的 api、后一位看得见前一位刚说的话、谁没回上不拖累别人）。
 //
 // 旧工具条上的「写想法」「讨论」两个按钮已经删了，功能全并到这张卡里。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CaretLeft, CaretRight, Lightning, PaperPlaneRight } from '@phosphor-icons/react';
+import { CaretLeft, CaretRight, Lightning, PaperPlaneRight, ShareNetwork } from '@phosphor-icons/react';
 import { useOS } from '../../context/OSContext';
 import type { CharacterProfile } from '../../types';
 import {
@@ -29,6 +31,7 @@ import { runArchive } from './coreadArchive';
 import { beginJob, endJob } from './readerJobs';
 import { highlightColorOf, useReaderPrefs } from './readerPrefs';
 import { getCharReadPrefs } from './readerCharPrefs';
+import ShareCardSheet from './ShareCardSheet';
 
 interface Props {
     book: RdBook;
@@ -51,6 +54,14 @@ const fmtTime = (iso: string): string => {
         : d.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+/** 分享卡上那个日期戳：2026.09.26 */
+const fmtDay = (iso?: string): string => {
+    const d = iso ? new Date(iso) : new Date();
+    if (Number.isNaN(d.getTime())) return '';
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+};
+
 const actorOf = (msg: RdThreadMsg): string | null =>
     msg.role === 'user' ? 'user' : (msg.role === 'char' ? (msg.charId ?? null) : null);
 
@@ -69,6 +80,8 @@ export default function ReaderDiscuss({
     /** 正在改自己的批注（旧的「写想法/改想法」按钮并入这里：点自己那条批注就改它） */
     const [editing, setEditing] = useState(false);
     const [busy, setBusy] = useState(false);
+    /** 书摘分享卡开着没（她 09-26） */
+    const [sharing, setSharing] = useState(false);
     const listRef = useRef<HTMLDivElement | null>(null);
 
     const nameOf = useCallback((ownerId: string): string => (
@@ -122,9 +135,6 @@ export default function ReaderDiscuss({
         () => threads.find((t) => t.anchorKey === key && isSameSentence(t.anchor, currentAnchor)) ?? null,
         [threads, key, currentAnchor],
     );
-
-    /** 他回讨论时用哪个角色：当前看的是谁就用谁；看的是 Angel 自己那条就落回共读角色。 */
-    const replyCharId = current && current.ownerId !== 'user' ? current.ownerId : session?.charIds[0];
 
     // 打开时停在**长按的那条批注**上（他划的线就看他那条，别默认跳到别人头上）。
     // 只在「换了一条划线」时定位一次——之后箭头翻到谁、回过谁，都要留在那儿
@@ -199,90 +209,114 @@ export default function ReaderDiscuss({
         }
     };
 
-    /** ⚡ 叫他回（共读态专属） */
+    /**
+     * ⚡ 叫他们回（共读态专属）。
+     *
+     * **几个人一起读，就按加入的先后挨个叫一遍**——一人一次调用、各走各的 api、
+     * 各落各的活动记录，这就是群聊「轮询模式」那套（她 09-26 点名照它来）。
+     * 两处照搬群聊的做法：
+     *   · **后一位看得见前一位本轮刚说的话**（每落一句就追加进名单，下一位读的是最新的）
+     *   · **一个人失败只跳过他自己**，不打断整轮（收尾把没回上的名字报一次）
+     */
     const trigger = async () => {
         if (busy) return;
-        if (!replyCharId) { notify('先开共读才能叫他回'); return; }
-        const char = characters.find((c) => c.id === replyCharId);
-        if (!char || !userProfile) { notify('读不到角色设定'); return; }
-        const api = resolveReadApi('reply', replyCharId, readApiSlots(getCoReadStore()), apiConfig);
-        if (!api) { notify('还没配置共读模型（共读面板或主 API）'); return; }
         if (!session) { notify('非共读状态没有即时触发——在聊天里跟他说一声'); return; }
+        if (!userProfile) { notify('读不到你的设定'); return; }
+        const chars = session.charIds
+            .map((id) => characters.find((c) => c.id === id))
+            .filter((c): c is CharacterProfile => !!c);
+        if (chars.length === 0) { notify('读不到角色设定'); return; }
 
         setBusy(true);
-        const job = beginJob({
-            kind: 'reply', charName: char.name, bookTitle: book.title,
-            message: `${char.name}正在想怎么回这条…`,
-        });
         try {
             const a = ann.anchor;
             const from = Math.max(0, a.startPara - 2);
             const to = Math.min(chapterParas.length - 1, a.endPara + 2);
             const context = chapterParas.slice(from, to + 1).join('\n');
-            const lines = (thread?.messages ?? []).map((m) => {
+            const mine = anns.find((x) => x.ownerId === 'user' && isSameSentence(x.anchor, a));
+            // 这一轮里说过的话：起手是库里已有的，谁落了新的一句就往后接一句
+            const roundLines = (thread?.messages ?? []).map((m) => {
                 const who = actorOf(m);
                 return `${who ? nameOf(who) : '（旁白）'}：${m.content}`;
             });
-            const mine = anns.find((x) => x.ownerId === 'user' && isSameSentence(x.anchor, a));
-
-            // 手动叫他回也走同一套阅读上下文（她 09-26 的整改：原来这条路聊天记录是空写死的）：
-            // 材料里带聊天 N 条 + 历史摘要 + 最近讨论，末尾贴实时状态；回完推他的未读水位线。
-            const chatMsgs = session.contextMode === 'immersive'
-                ? await recentChatMessages(char, chatLimitOf(session))
-                : [];
-            const [win, liveState] = await Promise.all([
-                gatherReaderWindow({ charId: char.id, bookId: book.id, chapterIdx, nameOf })
-                    .catch(() => ({ summaries: [] as string[], discussion: [] as string[] })),
-                session.contextMode === 'immersive'
-                    ? buildReaderLiveState(char).catch(() => '')
-                    : Promise.resolve(''),
-            ]);
             const lookedAt = new Date().toISOString();
+            const failed: string[] = [];
+            let replied = 0;
 
-            const res = await generateThreadReply({
-                char, user: userProfile, book, chapterIdx, chapterTitle,
-                quote: a.text, context, threadLines: lines,
-                herNote: mine?.note ?? '',
-                contextMode: session.contextMode,
-                preset: getCharReadPrefs(char.id).promptPreset,
-                chatLines: chatMsgs.length > 0 ? formatChatLines(chatMsgs, char, userProfile) : '',
-                summaries: win.summaries,
-                discussion: win.discussion,
-                liveState,
-                scanMsgs: chatMsgs,
-                api,
-            });
-            markSeen(book.id, char.id, lookedAt);
-
-            // 他回的是**当前这条批注**的讨论（他划的那条就落回他自己那条里）。
-            // **分气泡**（她 09-20：回复像聊天那样连着发几条短话）：一句一个气泡，一条一条落。
-            const bubbles = res.bubbles.length > 0 ? res.bubbles : [res.text].filter(Boolean);
-            for (let i = 0; i < bubbles.length; i += 1) {
-                await post(currentOwner, {
-                    role: 'char', charId: char.id, content: bubbles[i], kind: 'chat',
-                    createdAt: new Date(Date.now() + i).toISOString(),
+            for (const char of chars) {
+                // 手动叫他回也走同一套阅读上下文（她 09-26 的整改：原来这条路聊天记录是空写死的）：
+                // 材料里带聊天 N 条 + 历史摘要 + 最近讨论，末尾贴实时状态；回完推他的未读水位线。
+                const api = resolveReadApi('reply', char.id, readApiSlots(getCoReadStore()), apiConfig);
+                if (!api) { failed.push(`${char.name}（没配模型）`); continue; }
+                const job = beginJob({
+                    kind: 'reply', charName: char.name, bookTitle: book.title,
+                    message: `${char.name}正在想怎么回这条…`,
                 });
+                try {
+                    const chatMsgs = session.contextMode === 'immersive'
+                        ? await recentChatMessages(char, chatLimitOf(session))
+                        : [];
+                    const [win, liveState] = await Promise.all([
+                        gatherReaderWindow({ charId: char.id, bookId: book.id, chapterIdx, nameOf })
+                            .catch(() => ({ summaries: [] as string[], discussion: [] as string[] })),
+                        session.contextMode === 'immersive'
+                            ? buildReaderLiveState(char).catch(() => '')
+                            : Promise.resolve(''),
+                    ]);
+
+                    const res = await generateThreadReply({
+                        char, user: userProfile, book, chapterIdx, chapterTitle,
+                        quote: a.text, context,
+                        // 传副本：这一位只该看见「他开口之前」说过的话
+                        threadLines: roundLines.slice(),
+                        herNote: mine?.note ?? '',
+                        contextMode: session.contextMode,
+                        preset: getCharReadPrefs(char.id).promptPreset,
+                        chatLines: chatMsgs.length > 0 ? formatChatLines(chatMsgs, char, userProfile) : '',
+                        summaries: win.summaries,
+                        discussion: win.discussion,
+                        liveState,
+                        scanMsgs: chatMsgs,
+                        api,
+                    });
+                    markSeen(book.id, char.id, lookedAt);
+
+                    // 他回的是**当前这条批注**的讨论（他划的那条就落回他自己那条里）。
+                    // **分气泡**（她 09-20：回复像聊天那样连着发几条短话）：一句一个气泡，一条一条落。
+                    const bubbles = res.bubbles.length > 0 ? res.bubbles : [res.text].filter(Boolean);
+                    for (let i = 0; i < bubbles.length; i += 1) {
+                        await post(currentOwner, {
+                            role: 'char', charId: char.id, content: bubbles[i], kind: 'chat',
+                            createdAt: new Date(Date.now() + i).toISOString(),
+                        });
+                        roundLines.push(`${char.name}：${bubbles[i]}`);
+                    }
+                    await appendRoamActivity({
+                        id: rdId('rr'), charId: char.id, bookId: book.id, kind: 'discuss',
+                        group: newRoamGroup(), seq: 0, replyCount: bubbles.length,
+                        fromPara: a.startPara, toPara: a.endPara,
+                        summary: `${char.name} 在《${book.title}》里回了一条讨论`,
+                        // 时间线上要看得见他回了什么（她 09-20：回复记录要显示在上面）
+                        replies: bubbles,
+                        feeling: res.feeling || undefined,
+                        tokens: res.tokens || undefined,
+                        tokensIn: res.tokensIn || undefined,
+                        tokensOut: res.tokensOut || undefined,
+                        tokensCached: res.cached || undefined,
+                        mode: 'coread',
+                        createdAt: new Date().toISOString(),
+                    });
+                    replied += 1;
+                    endJob(job, 'ok', `${char.name}回了一条`);
+                } catch (err) {
+                    failed.push(char.name);
+                    endJob(job, 'error', `${char.name}没能回：${err instanceof Error ? err.message : '未知错误'}`);
+                }
             }
-            await appendRoamActivity({
-                id: rdId('rr'), charId: char.id, bookId: book.id, kind: 'discuss',
-                group: newRoamGroup(), seq: 0, replyCount: bubbles.length,
-                fromPara: a.startPara, toPara: a.endPara,
-                summary: `${char.name} 在《${book.title}》里回了一条讨论`,
-                // 时间线上要看得见他回了什么（她 09-20：回复记录要显示在上面）
-                replies: bubbles,
-                feeling: res.feeling || undefined,
-                tokens: res.tokens || undefined,
-                tokensIn: res.tokensIn || undefined,
-                tokensOut: res.tokensOut || undefined,
-                mode: 'coread',
-                createdAt: new Date().toISOString(),
-            });
-            await reload();
-            onChanged();
-            endJob(job, 'ok', `${char.name}回了一条`);
-            checkArchive();
-        } catch (err) {
-            endJob(job, 'error', `他没能回：${err instanceof Error ? err.message : '未知错误'}`);
+
+            if (replied > 0) { await reload(); onChanged(); }
+            if (failed.length > 0) notify(`${failed.join('、')} 没回上`);
+            if (session) checkArchive();
         } finally {
             setBusy(false);
         }
@@ -338,6 +372,10 @@ export default function ReaderDiscuss({
                         <CaretRight size={18} />
                     </button>
                 )}
+                {/* 分享书摘（她 09-26）：拿眼下这条划线做一张能存成图片的卡片 */}
+                <button className="rd-discuss-arrow" aria-label="分享书摘" onClick={() => setSharing(true)}>
+                    <ShareNetwork size={17} />
+                </button>
             </div>
             {speakers.length > 1 && (
                 <div className="rd-discuss-count">{at + 1} / {speakers.length} 个人的批注</div>
@@ -421,10 +459,21 @@ export default function ReaderDiscuss({
             </div>
             <div className="rd-discuss-foot">
                 {session
-                    ? `共读中 · 点 ⚡ 才叫他回（话先落库，可以连发几句）`
+                    ? `${session.charIds.length > 1 ? '共读中 · 点 ⚡ 他们按顺序各回一次' : '共读中 · 点 ⚡ 才叫他回'}（话先落库，可以连发几句）`
                     : '非共读：想让他回，去聊天里跟他说一声'}
             </div>
         </div>
+        {sharing && (
+            <ShareCardSheet
+                book={book}
+                quote={currentAnchor.text}
+                note={currentAnn?.note}
+                chapterTitle={chapterTitle}
+                date={fmtDay(currentAnn?.createdAt ?? ann.createdAt)}
+                notify={notify}
+                onClose={() => setSharing(false)}
+            />
+        )}
         </div>
     );
 }

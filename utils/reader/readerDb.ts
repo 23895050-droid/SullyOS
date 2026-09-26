@@ -283,6 +283,11 @@ export interface RdRoamActivity {
     tokensIn?: number;
     /** 回复吐出来的（「输出了多少」） */
     tokensOut?: number;
+    /**
+     * 这次提示词里**命中前缀缓存**的那部分（她 09-26：缓存优化得看得见才算数）。
+     * 中转报了就记，没报就是 undefined——不是失败，只是这一家不报这个数。
+     */
+    tokensCached?: number;
     /** coread = 共读会话里发生的；roam = 角色自主互动；user = 你自己读书 */
     mode: 'coread' | 'roam' | 'user';
     createdAt: string;

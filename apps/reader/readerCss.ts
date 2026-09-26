@@ -1930,6 +1930,70 @@ body.ios-keyboard-open .rd-discuss { padding-bottom: var(--rd-space-4); }
 }
 .rd-hit-on { background: var(--rd-accent-soft); color: var(--rd-accent); }
 
+/* ── 书摘分享卡（她 09-26）──────────────────────────────────────────
+   卡片是一张 canvas（预览和存下来的图同一个东西），浮在暗底上；
+   底下那条操作栏点卡片能收起来、再点回来。 */
+.rd-share-mask {
+  position: fixed; inset: 0; z-index: 96;
+  background: var(--rd-scrim);
+  display: flex; flex-direction: column;
+  animation: rd-fade 160ms ease;
+}
+/* 卡片区：自己滚——长书摘的卡会比屏幕高，上下划着看。
+   居中用**卡自己的 margin:auto**，不用 align-items:center——
+   后者在「内容比容器高」的时候会把顶上那截顶出可视区、还滚不回去（老毛病）。 */
+.rd-share-stage {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column;
+  padding: calc(var(--chrome-top, 0px) + var(--rd-space-6)) var(--rd-space-5) var(--rd-space-6);
+}
+/* 操作栏收起来时给它让出全部地方（真正的「整张卡安安静静」） */
+.rd-share-stage-full { padding-bottom: calc(var(--rd-space-6) + var(--safe-bottom, 0px)); }
+.rd-share-canvas {
+  display: block; width: 100%; max-width: 420px; height: auto; margin: auto;
+  border-radius: var(--rd-r-sm); box-shadow: var(--rd-shadow);
+}
+.rd-share-bottombar { flex: 0 0 auto; background: var(--rd-sheet-bg); }
+/* 栏收起来之后这条就不该再挡光——留透明，暗底透上来，把手才看得见 */
+.rd-share-bottombar-bare { background: transparent; }
+/* 栏收起来之后留的那一小条把手（点它把栏唤回来，跟面板顶上那根一个意思） */
+.rd-share-grip { display: flex; align-items: center; justify-content: center; padding: var(--rd-space-4) 0 max(var(--rd-space-4), var(--safe-bottom, 0px)); background: transparent; }
+.rd-share-grip > span { width: 44px; height: 4px; border-radius: var(--rd-r-pill); background: var(--rd-on-scrim); opacity: 0.5; }
+/* 底栏那三颗：图标在上、字在下 */
+.rd-share-bar { display: flex; align-items: stretch; justify-content: space-around; padding: var(--rd-space-3) var(--rd-space-2) max(var(--rd-space-4), var(--safe-bottom, 0px)); }
+.rd-share-act {
+  flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: var(--rd-space-1);
+  border: 0; background: transparent; color: var(--rd-ink);
+  font-family: var(--rd-font-body); font-size: var(--rd-fs-caption);
+  padding: var(--rd-space-2); border-radius: var(--rd-r-md);
+}
+.rd-share-act:active { background: var(--rd-bg-2); }
+.rd-share-act:disabled { opacity: 0.45; }
+/* 换模板的抽屉：主题 / 字体 / 背景 / 圆点 / 落款 / 想法 */
+.rd-share-panel {
+  display: flex; flex-direction: column; gap: var(--rd-space-4);
+  padding: var(--rd-space-5) var(--rd-space-5) max(var(--rd-space-5), var(--safe-bottom, 0px));
+  max-height: 62dvh; overflow-y: auto;
+  animation: rd-rise 200ms cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+.rd-share-panel::-webkit-scrollbar { width: 0; }
+.rd-share-row { display: flex; flex-direction: column; gap: var(--rd-space-2); }
+.rd-share-label { color: var(--rd-ink-soft); font-size: var(--rd-fs-caption); }
+.rd-share-chips { display: flex; gap: var(--rd-space-2); flex-wrap: wrap; }
+.rd-share-dots { display: flex; align-items: center; gap: var(--rd-space-2); flex-wrap: wrap; }
+.rd-share-dot {
+  width: 34px; height: 34px; flex: 0 0 auto; padding: 0;
+  border: 1px solid var(--rd-rule); border-radius: var(--rd-r-pill);
+  background: var(--rd-card); color: var(--rd-ink-soft);
+  display: flex; align-items: center; justify-content: center;
+  background-size: cover; background-position: center;
+}
+.rd-share-dot-on { border-color: var(--rd-accent); box-shadow: 0 0 0 2px var(--rd-accent); }
+/* 写字的那个圆点（「底色」这种不是颜色的选项） */
+.rd-share-dot-word { width: auto; padding: 0 var(--rd-space-3); font-size: var(--rd-fs-caption); }
+.rd-share-sign { flex: 1 1 auto; }
+.rd-share-toggle { display: flex; align-items: center; gap: var(--rd-space-2); color: var(--rd-ink); font-size: var(--rd-fs-sm); }
+
 @keyframes rd-fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rd-rise { from { transform: translateY(14px) } to { transform: translateY(0) } }
 `;

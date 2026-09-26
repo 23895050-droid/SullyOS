@@ -34,6 +34,7 @@ import { getReaderCharPrefsStore, setCharReadPrefs, type CharReadPrefs } from '.
 import { getReaderCharStyleStore, setCharStyle, type CharStyle } from '../../apps/reader/readerCharStyle';
 import { getPromptPresetStore, mergePromptPresetStore, type PromptPresetStore } from '../../apps/reader/readerPromptPresets';
 import { getReaderMountConfig, mergeReaderMountConfig, type ReaderMountConfig } from './readerMount';
+import { shareOrDownloadFile } from '../shareExport';
 
 export interface ReaderExportScope {
     /** 书内容：书目 + 正文 */
@@ -340,15 +341,20 @@ export function readerExportFileName(ownerLabel?: string): string {
     return `书房${who}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.json`;
 }
 
-/** 存成文件（浏览器下载）。返回文件名 */
-export function downloadReaderBundle(bundle: ReaderExportBundle, ownerLabel?: string): string {
+/**
+ * 存成文件。返回文件名。
+ *
+ * **必须走统一出口**（`shareOrDownloadFile`）：原生壳和手机浏览器上是系统面板里的「存储」，
+ * 只有桌面浏览器才真的下载。自己造 `a.download` 在 iOS 的独立模式（她把 SullyOS 加到主屏）
+ * 里点了没反应——`utils/exportShareAudit.test.ts` 就是钉这条的。
+ */
+export async function downloadReaderBundle(bundle: ReaderExportBundle, ownerLabel?: string): Promise<string> {
     const name = readerExportFileName(ownerLabel);
-    const text = JSON.stringify(bundle);
-    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    a.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    await shareOrDownloadFile({
+        content: JSON.stringify(bundle),
+        fileName: name,
+        mimeType: 'application/json',
+        shareTitle: '书房备份',
+    });
     return name;
 }

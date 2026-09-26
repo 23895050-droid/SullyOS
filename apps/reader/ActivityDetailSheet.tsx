@@ -26,6 +26,17 @@ const KIND_LABEL: Record<string, string> = {
     read: '读书',
 };
 
+/**
+ * 「这次提示词有多少是白赚的」——她 09-26 的缓存那趟要看得见的那个数。
+ * 中转不报这个数时**不写**（写了会让「没报」看起来像「没命中」，反而误导）。
+ */
+export const cacheNote = (cached?: number, tokensIn?: number): string => {
+    const c = Number(cached ?? 0) || 0;
+    if (c <= 0) return '';
+    const total = Number(tokensIn ?? 0) || 0;
+    return total > 0 ? ` · 缓存命中 ${Math.min(100, Math.round((c / total) * 100))}%` : ' · 命中缓存';
+};
+
 export const fmtFull = (iso?: string): string => {
     if (!iso) return '';
     const d = new Date(iso);
@@ -92,7 +103,7 @@ export function RoamCalls({ calls }: { calls: RdRoamActivity[] }) {
                                         a.replyCount ? `回了 ${a.replyCount} 条讨论` : '',
                                     ].filter(Boolean).join(' · ') || '读了一段',
                                 (a.tokensIn || a.tokensOut || a.tokens)
-                                    ? `${fmtTok(a.tokens)} token（读进去 ${fmtTok(a.tokensIn)} / 吐出来 ${fmtTok(a.tokensOut)}）`
+                                    ? `${fmtTok(a.tokens)} token（读进去 ${fmtTok(a.tokensIn)} / 吐出来 ${fmtTok(a.tokensOut)}${cacheNote(a.tokensCached, a.tokensIn)}）`
                                     : '',
                             ].filter(Boolean).join(' · ')}
                         </div>

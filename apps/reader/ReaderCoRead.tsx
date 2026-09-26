@@ -526,6 +526,7 @@ export default function ReaderCoRead({
                         tokens: res.tokens || undefined,
                         tokensIn: res.tokensIn || undefined,
                         tokensOut: res.tokensOut || undefined,
+                        tokensCached: res.cached || undefined,
                         mode: 'coread',
                         createdAt: new Date().toISOString(),
                     });

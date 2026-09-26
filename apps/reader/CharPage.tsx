@@ -178,7 +178,7 @@ export default function CharPage({ charId, onBack, notify, onOpenAt, initialView
                     ...Object.fromEntries(characters.map((c) => [c.id, c.name])),
                 },
             });
-            notify(`导出好了：${downloadReaderBundle(bundle, name)}`);
+            notify(`导出好了：${await downloadReaderBundle(bundle, name)}`);
         } catch (e) {
             notify(`导出没成：${e instanceof Error ? e.message : '未知错误'}`);
         }

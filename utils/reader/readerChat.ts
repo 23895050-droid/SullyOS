@@ -91,12 +91,33 @@ export function toBubbles(v: unknown): string[] {
 
 /** 一次调用的回执：正文 + 这次花掉的 token。
  *  她 09-16 要活动记录看得出「读进去多少 / 吐出来多少」，所以三个数都留：
- *  tokensIn = 提示词，tokensOut = 回复，tokens = 合计（书库页的排行用它）。 */
+ *  tokensIn = 提示词，tokensOut = 回复，tokens = 合计（书库页的排行用它）。
+ *  她 09-26 又加一个 cached：**这次有多少提示词是命中前缀缓存的**——书房这轮的缓存优化
+ *  到底有没有用，全看这个数（读一页和回讨论拼的是同一套前缀）。 */
 export interface ReaderChatReply {
     text: string;
     tokens: number;
     tokensIn: number;
     tokensOut: number;
+    /** 命中前缀缓存的提示词 token 数；中转没报就是 0（不是没命中，是没这个数） */
+    cached: number;
+}
+
+/**
+ * 从 usage 里抠「命中缓存的提示词 token」。
+ * 每家中转的口径不一样，能认几个认几个（认不出来返回 0，不影响别的）：
+ *   · OpenAI / 通义 / 月之暗面 / 智谱：`usage.prompt_tokens_details.cached_tokens`
+ *   · DeepSeek 老口径：`usage.prompt_cache_hit_tokens`
+ *   · 少数直接给 `usage.cached_tokens`
+ */
+export function readCachedTokens(usage: unknown): number {
+    const u = (usage ?? {}) as Record<string, unknown>;
+    const details = (u.prompt_tokens_details ?? {}) as Record<string, unknown>;
+    for (const raw of [details.cached_tokens, u.prompt_cache_hit_tokens, u.cached_tokens]) {
+        const n = Number(raw);
+        if (Number.isFinite(n) && n > 0) return Math.floor(n);
+    }
+    return 0;
 }
 
 export const postReaderChat = async (api: ReaderCallRuntime, body: Record<string, unknown>): Promise<ReaderChatReply> => {
@@ -107,7 +128,7 @@ export const postReaderChat = async (api: ReaderCallRuntime, body: Record<string
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await safeResponseJson(res);
-    const usage = data?.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
+    const usage = data?.usage as Record<string, unknown> | undefined;
     const tokensIn = Number(usage?.prompt_tokens ?? 0) || 0;
     const tokensOut = Number(usage?.completion_tokens ?? 0) || 0;
     return {
@@ -115,6 +136,7 @@ export const postReaderChat = async (api: ReaderCallRuntime, body: Record<string
         tokens: Number(usage?.total_tokens ?? 0) || tokensIn + tokensOut || 0,
         tokensIn,
         tokensOut,
+        cached: readCachedTokens(usage),
     };
 };
 
@@ -298,6 +320,8 @@ export interface CoReadPageRead {
     tokens: number;
     tokensIn: number;
     tokensOut: number;
+    /** 提示词里命中前缀缓存的那部分（0 = 中转没报这个数） */
+    cached: number;
     raw: string;
 }
 
@@ -383,16 +407,18 @@ export async function readCoReadPage(input: ReadPageInput): Promise<CoReadPageRe
         vibe ? `\n### 你的阅读气质（只是气质基调参考，不是要求，也不要把它写进批注）\n${vibe}\n\n` : '',
     ].join('');
 
-    // ── 材料（user）= 在读什么 · 双方进度 · 聊天 N 条 · 十条摘要 · 15 条讨论 · 当前原文 · 已有批注 ──
-    // 顺序她 09-26 定；越靠后越新鲜，眼前这几页压在最下面。
+    // ── 材料（user）= 在读什么 · 聊天 N 条 · 十条摘要 · 双方进度 · 15 条讨论 · 当前原文 · 已有批注 ──
+    // 顺序她 09-26 定内容、09-26 缓存这趟定先后：**越靠前越稳定**（前缀缓存按最长公共前缀算，
+    // 前面一样就白赚，一变整条尾巴都重算）。所以一本书、一场共读里不变的在最上（书名章节），
+    // 偶尔才变的居中（聊天 / 摘要），**每次读页都在变的放到最后**（讨论 / 进度 / 原文 / 批注）。
     const material = [
         `《${book.title}》· ${chapterTitle}`,
-        input.readState ? `\n${input.readState}` : '',
         session.contextMode === 'immersive' && chatLines ? `\n你们最近在聊天里说的话：\n${chatLines}` : '',
         input.summaries && input.summaries.length > 0
             ? `\n你之前读过的部分，当时记下来的（时间从早到晚）：\n${input.summaries.join('\n')}` : '',
         input.discussion && input.discussion.length > 0
             ? `\n书房里最近的讨论（按发生的先后）：\n${input.discussion.join('\n')}` : '',
+        input.readState ? `\n${input.readState}` : '',
         `\n你正在读的这几页（段号是它在章节里的位置）：\n\n${pageText}`,
         // 他读的这几页上原本就有的批注（她 09-21：读哪页就看到哪页，当风景看也行）
         replyFeed && replyFeed.notes.length > 0
@@ -430,7 +456,8 @@ export async function readCoReadPage(input: ReadPageInput): Promise<CoReadPageRe
     if (!parsed) {
         return {
             marks: [], replies: [], feeling: '', excerpt: '', summary: '',
-            tokens: reply.tokens, tokensIn: reply.tokensIn, tokensOut: reply.tokensOut, raw: reply.text,
+            tokens: reply.tokens, tokensIn: reply.tokensIn, tokensOut: reply.tokensOut,
+            cached: reply.cached, raw: reply.text,
         };
     }
     return {
@@ -444,6 +471,7 @@ export async function readCoReadPage(input: ReadPageInput): Promise<CoReadPageRe
         tokens: reply.tokens,
         tokensIn: reply.tokensIn,
         tokensOut: reply.tokensOut,
+        cached: reply.cached,
         raw: reply.text,
     };
 }
@@ -564,6 +592,8 @@ export interface ThreadReply {
     tokens: number;
     tokensIn: number;
     tokensOut: number;
+    /** 提示词里命中前缀缓存的那部分（0 = 中转没报这个数） */
+    cached: number;
 }
 
 export interface ThreadReplyInput {
@@ -608,6 +638,7 @@ export async function generateThreadReply(input: ThreadReplyInput): Promise<Thre
         expand('共读·回讨论', char, user, book, input.preset ?? ''),
         `\n${coReadProtocol(book, chapterTitle, char.name, user.name)}`,
     ].join('');
+    // 顺序同「读一页」：稳定的在最前、每次都在变的压到最后（缓存按最长公共前缀算）
     const material = [
         `你们在读《${book.title}》· ${chapterTitle}。`,
         contextMode === 'immersive' && chatLines ? `\n你们最近在聊天里说的话：\n${chatLines}` : '',
@@ -646,6 +677,7 @@ export async function generateThreadReply(input: ThreadReplyInput): Promise<Thre
         return {
             bubbles, text: bubbles.join('\n'), feeling: '',
             tokens: reply.tokens, tokensIn: reply.tokensIn, tokensOut: reply.tokensOut,
+            cached: reply.cached,
         };
     }
     const bubbles = toBubbles(parsed.reply);
@@ -656,6 +688,7 @@ export async function generateThreadReply(input: ThreadReplyInput): Promise<Thre
         tokens: reply.tokens,
         tokensIn: reply.tokensIn,
         tokensOut: reply.tokensOut,
+        cached: reply.cached,
     };
 }
 
