@@ -11,7 +11,25 @@
 import type { CharacterProfile, ImageGenerationSettings } from '../types';
 import { generateImage } from './imageGenService';
 import { loadImageGenSettings } from './imageGenStorage';
+import { migrateDataUrlToRef } from './blobRef';
 import { DB } from './db';
+
+/**
+ * 图落进消息的时候**存短令牌，不存 base64**——和用户自己发图那条路同一个口径
+ * （`apps/Chat.tsx:1549` 早就这么干了，生图这条路一直漏着）。
+ *
+ * 她 2026-09-26 描述的「生图之后整个 App 半天加载不出来、把图压成二进制就不卡了」
+ * 就是这个：一条消息的 content 里塞着几百 KB 到几 MB 的 base64，谁读这一批消息
+ * （聊天列表、任何读消息的 App、备份、存储用量扫描）谁就得扛着它走。
+ *
+ * 拿不到令牌时退回原来的 data URL——图不会丢，只是那一条会重一点。
+ */
+export async function storeImageContent(result: { dataUrl?: string; blobRef?: string }): Promise<string> {
+  if (result.blobRef) return result.blobRef;
+  const url = String(result.dataUrl ?? '');
+  if (!url.startsWith('data:')) return url;
+  try { return await migrateDataUrlToRef(url); } catch { return url; }
+}
 
 export interface PhotoRequest {
   /** 生图描述（不含前缀，纯场景） */
@@ -129,7 +147,7 @@ export async function processPhotoTags(
 
       // 3) 更新 pending 消息 → 成功
       if (pendingMsgId != null) {
-        await DB.updateMessage(pendingMsgId, result.dataUrl);
+        await DB.updateMessage(pendingMsgId, await storeImageContent(result));
         await DB.updateMessageMetadata(pendingMsgId, () => ({
           imageGenStatus: 'generated',
           imageGenPrompt: result.prompt,
@@ -162,7 +180,7 @@ export async function processPhotoTags(
           charId,
           role: 'assistant',
           type: 'image',
-          content: result.dataUrl,
+          content: await storeImageContent(result),
           metadata: {
             imageGenStatus: 'generated',
             imageGenDescription: photo.description,

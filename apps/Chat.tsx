@@ -1850,6 +1850,7 @@ const Chat: React.FC = () => {
             await new Promise(r => requestAnimationFrame(r));
             const { generateImage } = await import('../utils/imageGenService');
             const { loadImageGenSettings } = await import('../utils/imageGenStorage');
+            const { storeImageContent } = await import('../utils/photoTagHandler');
             const genSettings = loadImageGenSettings();
             const presetId = isSelfie
                 ? (genSettings.defaultSelfiePresetId || genSettings.defaultPresetId)
@@ -1866,7 +1867,9 @@ const Chat: React.FC = () => {
                 presetPrompt,
                 settings: sizeOverride ? { ...genSettings, size: sizeOverride } : genSettings,
             });
-            await DB.updateMessage(selectedMessage.id, result.dataUrl);
+            // 重roll 也存短令牌（同 photoTagHandler 那条路）：content 里塞 base64 会让
+            // 每次读消息都扛着几 MB 走，就是「生图之后 App 半天加载不出来」那个毛病
+            await DB.updateMessage(selectedMessage.id, await storeImageContent(result));
             await DB.updateMessageMetadata(selectedMessage.id, (prev: any) => ({
                 ...prev,
                 imageGenStatus: 'generated',
